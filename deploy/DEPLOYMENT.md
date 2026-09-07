@@ -66,6 +66,41 @@ merkle tree hook  0x4917a9746A7B6E0A57159cCb7F5a6744247f2d0d   (branch at slot 1
 SP1 verifier      0x50ACFBEdecf4cbe350E1a86fC6f03a821772f1e5   (v5.0.0 groth16)
 ```
 
+## Arbitrum and Base Sepolia
+
+Both are Celestia-origin destinations only, and cost no new enclave and no new circuits —
+just an ISM, a router, and a config block.
+
+```
+Arbitrum Sepolia   TeeIsm   0xf48fefa3848f1F25093D3e7937BdD4b80B421D64
+                   TIA      0xFeA14C1444A7a8beAb7122fdE5A168212D7185bE
+                   USDC     0xb9E5E3eb926EA22B951d2fb7392F9F3D6c704054
+                   mailbox  0x598facE78a4302f11E3de0bee1894Da0b2Cb71F8
+
+Base Sepolia       TeeIsm   0xFeA14C1444A7a8beAb7122fdE5A168212D7185bE
+                   TIA      0xf4197C55C944987E9b10e09C0A47915211769B78
+                   USDC     0x0ee6374a92ba4E11F920A23c6dd271b594D69A9B
+                   mailbox  0x6966b0E55883d49BFB24539356a2f8A673E02039
+```
+
+The SP1 v5 verifier is at the same address on all three EVM chains, with byte-identical
+code — checked, not assumed.
+
+## Gas
+
+An IGP on each side, kept current by `gas-oracle` once an hour.
+
+```
+Celestia IGP       0x726f757465725f706f73745f6469737061746368000000040000000000000002
+Sepolia   IGP      0x48b1BF6CC2e45Ca52947E95Bb216C2eBdCB19c49   oracle 0x225B8488242c90085B7A8Ea33Ce8e39Ae9f79722
+Arbitrum  IGP      0x0ee6374a92ba4E11F920A23c6dd271b594D69A9B   oracle 0xfA8036Cb092079B095ed60750d7b39c3C220F288
+Base      IGP      0x5591613C85E9bC95104980d4485c958ee80f6F76   oracle 0x7A7042C8784700618be87Aac7F9336620e216Bb9
+```
+
+Every warp router's hook points at its chain's IGP. Without that they fall back to the
+mailbox default, which is Hyperlane's own paymaster — the fee is still charged, it just
+leaves. Deployment and the arithmetic are in [server/README.md](server/README.md).
+
 ## Operational notes
 
 **`eth_getProof` needs an archive endpoint.** The coprocessor proves the origin tree twice:
@@ -80,6 +115,11 @@ everyone, so the merkle tree contains other people's messages. The attested batc
 contain *every* leaf in the range or the replay cannot reproduce the branch — so the ISM
 authorises those ids too. They are never delivered here, because their destination domain is
 not ours. It costs a little state and nothing else.
+
+**Arbitrum Sepolia is BoLD, and the obvious rollup address is the wrong one.** The canonical
+`0xd808…81C8` is the deprecated pre-BoLD contract and has created no node in over eleven days;
+building against its `getNode`/`confirmData` layout produces a root that never advances. The
+live rollup is `inbox.bridge().rollup()` = `0x042B2E6C…0Cf4`, which stores an assertion hash.
 
 **Ethereum finality gates the Sepolia -> Celestia direction.** The enclave attests the
 *finalized* head, not the head, so a message waits roughly two epochs (~13 minutes) before it

@@ -181,10 +181,10 @@ export async function isDelivered(destination: ChainId, messageId: string): Prom
     const result = await ethCall(chain, chain.mailbox, data);
     return BigInt(result) === 1n;
   }
-  // hyperlane-cosmos removes an id from the ISM's authorised set once it is processed, so a
-  // delivered message is one the chain knows and no longer holds.
+  // The gateway path is /hyperlane/v1/..., not /hyperlane/core/v1/... - the latter answers
+  // 501, which would leave every Celestia-bound transfer stuck showing "not delivered".
   const response = await fetch(
-    `${chain.rest}/hyperlane/core/v1/delivered/${chain.mailboxId}/${messageId}`,
+    `${chain.rest}/hyperlane/v1/mailboxes/${chain.mailboxId}/delivered/${messageId}`,
   );
   if (!response.ok) return false;
   const body = await response.json();
