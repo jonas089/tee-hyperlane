@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use tracing::info;
 
 use crate::chains::read_ism_state;
-use crate::config::RouteConfig;
+use crate::config::{ChainConfig, RouteConfig};
 use tee_attestation::decode_ism_state;
 
 /// One attested batch, as the prover recorded it.
@@ -57,6 +57,10 @@ pub struct RouteStatus {
     /// The batch currently being proved, if any. Proving is minutes of CPU, so a route
     /// spends most of its time here rather than idle.
     pub proving: Option<Batch>,
+    /// The origin's own head. Without it an idle route is indistinguishable from a stuck
+    /// one - "trusted 571870, head 573707" says which.
+    #[serde(rename = "originHead")]
+    pub origin_head: Option<u64>,
     /// Set when the destination chain could not be reached this request.
     pub error: Option<String>,
 }
@@ -187,6 +191,7 @@ async fn status(State(api): State<Api>) -> Json<Vec<RouteStatus>> {
                     state_root: None,
                     batches,
                     proving,
+                    origin_head: read_origin_head(&route.origin),
                     error: None,
                 };
                 match read_trusted_state(route) {
@@ -204,6 +209,31 @@ async fn status(State(api): State<Api>) -> Json<Vec<RouteStatus>> {
     .await
     .unwrap_or_default();
     Json(statuses)
+}
+
+/// The origin's current head, best effort. A route that cannot reach its origin still shows
+/// everything else.
+fn read_origin_head(origin: &ChainConfig) -> Option<u64> {
+    match origin {
+        ChainConfig::Celestia { rpc, .. } => {
+            let output = std::process::Command::new("celestia-appd")
+                .args(["status", "--node", rpc, "-o", "json"])
+                .output()
+                .ok()?;
+            let status: serde_json::Value = serde_json::from_slice(&output.stdout).ok()?;
+            status["sync_info"]["latest_block_height"].as_str()?.parse().ok()
+        }
+        // For an Ethereum origin the relevant head is the *finalized* one, because that is
+        // all the enclave will attest.
+        ChainConfig::Ethereum { execution_rpc, .. }
+        | ChainConfig::EthereumL2 { l2_rpc: execution_rpc, .. } => {
+            let output = std::process::Command::new("cast")
+                .args(["block", "finalized", "--field", "number", "--rpc-url", execution_rpc])
+                .output()
+                .ok()?;
+            String::from_utf8(output.stdout).ok()?.trim().parse().ok()
+        }
+    }
 }
 
 fn read_trusted_state(route: &RouteConfig) -> Result<(String, u64, u64)> {

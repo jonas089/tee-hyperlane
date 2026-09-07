@@ -189,7 +189,7 @@ impl ExecutionReader {
         Self { rpc: rpc.to_string(), http: reqwest::Client::new() }
     }
 
-    async fn call(&self, method: &str, params: serde_json::Value) -> Result<serde_json::Value> {
+    pub async fn call(&self, method: &str, params: serde_json::Value) -> Result<serde_json::Value> {
         let body = serde_json::json!({
             "jsonrpc": "2.0", "id": 1, "method": method, "params": params
         });

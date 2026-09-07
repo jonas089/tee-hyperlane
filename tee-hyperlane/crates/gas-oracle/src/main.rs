@@ -16,7 +16,7 @@ use axum::{Json, Router};
 use clap::Parser;
 use tracing::{info, warn};
 
-use oracle::{read_celestia_configs, read_evm_configs, run_once, Config, Reading};
+use oracle::{read_celestia_configs, read_evm_configs, read_funds, run_once, Config, Reading};
 
 #[derive(Parser)]
 #[command(about = "Keeps the Celestia IGP's destination gas configs current")]
@@ -113,10 +113,10 @@ async fn readings(
 ) -> Json<serde_json::Value> {
     // Chain reads shell out, so they run off the async pool.
     let for_chain = api.clone();
-    let onchain = tokio::task::spawn_blocking(move || {
+    let (onchain, funds) = tokio::task::spawn_blocking(move || {
         let mut all = read_celestia_configs(&for_chain.config);
         all.extend(read_evm_configs(&for_chain.config));
-        all
+        (all, read_funds(&for_chain.config))
     })
     .await
     .unwrap_or_default();
@@ -133,6 +133,7 @@ async fn readings(
     Json(serde_json::json!({
         "readings": readings,
         "onchain": onchain,
+        "funds": funds,
         "lastRound": last,
         "nextRound": next,
         "intervalSecs": api.config.interval_secs,

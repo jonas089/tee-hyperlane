@@ -60,6 +60,13 @@
     </div>
     <span class="when" id="when"></span>
   </header>
+  <h2 class="section">Funding</h2>
+  <p class="lede">The accounts that pay for pushes and relaying. A perfect quote is worth
+    nothing from an account that has run dry.</p>
+  <table id="funds"><thead><tr>
+    <th>Chain</th><th>Account</th><th>Balance</th>
+  </tr></thead><tbody></tbody></table>
+
   <h2 class="section">Live on chain</h2>
   <p class="lede">
     What each paymaster currently holds, read back from the chain rather than remembered.
@@ -91,6 +98,15 @@
 
   async function draw() {
     const d = await (await fetch("/api/readings")).json();
+
+    document.querySelector("#funds tbody").innerHTML = (d.funds || []).map((f) => `
+      <tr>
+        <td>${f.chain}</td>
+        <td class="num">${f.address ? f.address.slice(0, 10) + "…" + f.address.slice(-8) : "—"}</td>
+        <td class="num">${f.error ? "—" : `${f.balance} ${f.symbol}`}</td>
+      </tr>
+      ${f.error ? `<tr><td colspan="3" class="err">${f.error}</td></tr>` : ""}`).join("")
+      || `<tr><td colspan="3">No accounts configured.</td></tr>`;
 
     document.querySelector("#onchain tbody").innerHTML = (d.onchain || []).map((c) => `
       <tr>

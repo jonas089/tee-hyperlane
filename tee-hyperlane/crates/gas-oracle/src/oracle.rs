@@ -547,6 +547,115 @@ fn text(value: &serde_json::Value) -> String {
     value.as_str().map(str::to_string).unwrap_or_else(|| value.to_string())
 }
 
+/// What the accounts that pay for all this are holding. A quote that is perfectly accurate is
+/// worth nothing if the account pushing it has run dry, so the page shows both.
+#[derive(Debug, Clone, Serialize)]
+pub struct Funds {
+    pub chain: String,
+    pub address: String,
+    pub balance: String,
+    pub symbol: String,
+    pub error: Option<String>,
+}
+
+pub fn read_funds(config: &Config) -> Vec<Funds> {
+    let mut all = vec![read_celestia_funds(config)];
+    if let Some(address) = evm_address(config) {
+        for origin in &config.evm_origins {
+            all.push(read_evm_funds(origin, &address));
+        }
+    }
+    all
+}
+
+fn read_celestia_funds(config: &Config) -> Funds {
+    let mut funds = Funds {
+        chain: "Celestia mocha-5".into(),
+        address: String::new(),
+        balance: "—".into(),
+        symbol: "TIA".into(),
+        error: None,
+    };
+    match celestia_balance(config) {
+        Ok((address, utia)) => {
+            funds.address = address;
+            // Six decimals, shown as TIA because that is how a human decides "low".
+            funds.balance = format!("{:.4}", utia as f64 / 1e6);
+        }
+        Err(e) => funds.error = Some(e.to_string()),
+    }
+    funds
+}
+
+fn celestia_balance(config: &Config) -> Result<(String, u128)> {
+    let home = std::env::var("CELHOME").unwrap_or_else(|_| "/tmp/celhome".into());
+    let show = std::process::Command::new("celestia-appd")
+        .args(["keys", "show", "bridge", "-a", "--home", &home, "--keyring-backend", "test"])
+        .output()
+        .context("celestia-appd keys show")?;
+    anyhow::ensure!(show.status.success(), "no `bridge` key in {home}");
+    let address = String::from_utf8(show.stdout)?.trim().to_string();
+
+    let query = std::process::Command::new("celestia-appd")
+        .args([
+            "query", "bank", "balances", &address,
+            "--node", &config.celestia_rpc, "-o", "json",
+        ])
+        .output()
+        .context("celestia-appd query bank balances")?;
+    anyhow::ensure!(query.status.success(), "querying the balance failed");
+
+    let parsed: serde_json::Value = serde_json::from_slice(&query.stdout)?;
+    let utia = parsed["balances"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|c| c["denom"] == "utia")
+        .and_then(|c| c["amount"].as_str())
+        .unwrap_or("0")
+        .parse()
+        .unwrap_or(0);
+    Ok((address, utia))
+}
+
+fn evm_address(config: &Config) -> Option<String> {
+    let key_file = config.evm_key_file.as_ref()?;
+    let key = std::fs::read_to_string(key_file).ok()?.trim().to_string();
+    let key = if key.starts_with("0x") { key } else { format!("0x{key}") };
+    let output = std::process::Command::new("cast")
+        .args(["wallet", "address", "--private-key", &key])
+        .output()
+        .ok()?;
+    output
+        .status
+        .success()
+        .then(|| String::from_utf8(output.stdout).ok())
+        .flatten()
+        .map(|address| address.trim().to_string())
+}
+
+fn read_evm_funds(origin: &EvmOrigin, address: &str) -> Funds {
+    let mut funds = Funds {
+        chain: origin.name.clone(),
+        address: address.to_string(),
+        balance: "—".into(),
+        symbol: "ETH".into(),
+        error: None,
+    };
+    let output = std::process::Command::new("cast")
+        .args(["balance", address, "--ether", "--rpc-url", &origin.rpc])
+        .output();
+    match output {
+        Ok(output) if output.status.success() => {
+            let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            funds.balance = text.parse::<f64>().map(|v| format!("{v:.5}")).unwrap_or(text);
+        }
+        Ok(output) => funds.error = Some(String::from_utf8_lossy(&output.stderr).trim().into()),
+        Err(e) => funds.error = Some(e.to_string()),
+    }
+    funds
+}
+
 pub fn now() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

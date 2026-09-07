@@ -56,6 +56,19 @@
     return `block ${b.height}, ${b.messages.length} message${plural(b.messages.length)}`;
   }
 
+  function head(r) {
+    if (r.originHead == null) return "—";
+    const behind = r.height == null ? null : r.originHead - r.height;
+    return behind == null ? `${r.originHead}` : `${r.originHead} (${behind} ahead)`;
+  }
+
+  // A route with nothing staged is not stalled - it has attested everything dispatched so
+  // far. Saying so is the difference between "working" and "broken" at a glance.
+  function proving(r) {
+    if (r.proving) return batch(r.proving);
+    return "nothing new to attest";
+  }
+
   async function draw() {
     const routes = await (await fetch("/api/status")).json();
     document.getElementById("routes").innerHTML = routes.map((r) => `
@@ -64,8 +77,9 @@
         <div class="domains">domain ${r.origin} &rarr; ${r.destination}</div>
         <div class="grid">
           <div class="cell"><span>Trusted origin block</span><strong>${r.height ?? "—"}</strong></div>
+          <div class="cell"><span>Origin head</span><strong>${head(r)}</strong></div>
           <div class="cell"><span>Last proven</span><strong>${batch(r.batches[0])}</strong></div>
-          <div class="cell"><span>Proving now</span><strong>${r.proving ? batch(r.proving) : "idle"}</strong></div>
+          <div class="cell"><span>Proving now</span><strong>${proving(r)}</strong></div>
           <div class="cell"><span>State root</span><strong><code>${short(r.stateRoot)}</code></strong></div>
         </div>
         ${r.proving && r.proving.messages.length

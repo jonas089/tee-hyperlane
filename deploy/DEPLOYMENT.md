@@ -97,9 +97,27 @@ Arbitrum  IGP      0x0ee6374a92ba4E11F920A23c6dd271b594D69A9B   oracle 0xfA8036C
 Base      IGP      0x5591613C85E9bC95104980d4485c958ee80f6F76   oracle 0x7A7042C8784700618be87Aac7F9336620e216Bb9
 ```
 
-Every warp router's hook points at its chain's IGP. Without that they fall back to the
-mailbox default, which is Hyperlane's own paymaster — the fee is still charged, it just
-leaves. Deployment and the arithmetic are in [server/README.md](server/README.md).
+Each EVM router's hook is a `TreeAndPaymasterHook`, not the IGP directly:
+
+```
+Sepolia   0x0315dd118C2ba17aC74E708C051041fDC8920697
+Arbitrum  0x545ACFF483381f89123c2F520D1B4f7d0DCe60A1
+Base      0x225B8488242c90085B7A8Ea33Ce8e39Ae9f79722
+```
+
+A router picks exactly *one* post-dispatch hook, and this bridge needs two: the merkle tree
+hook, or the message is never inserted and can never be attested, and the paymaster. Pointing
+a router straight at the IGP costs it the first, silently — the transfer succeeds and the
+message is unprovable forever. Verified by dispatching and watching the hook's `count()`
+advance.
+
+On Celestia no aggregation is needed: `required_hook` is already the merkle tree hook, so
+`default_hook` is set to the IGP and both run.
+
+Falling back to the mailbox default is not an option either — Hyperlane's Sepolia default
+quotes **0.009 ETH** for Celestia's domain, about $22 a transfer, because the domain is not
+in its oracle. Ours quotes $0.0014. Deployment and the arithmetic are in
+[server/README.md](server/README.md).
 
 ## Operational notes
 
