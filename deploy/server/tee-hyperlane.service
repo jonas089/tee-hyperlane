@@ -14,11 +14,10 @@ Environment=TEE_HYPERLANE_DEPLOY_DIR=/opt/tee-hyperlane/deploy
 Environment=TEE_HYPERLANE_ELF_DIR=/opt/tee-hyperlane/elf
 Environment=CELHOME=/var/lib/tee-hyperlane/celhome
 Environment=SP1_PROVER=cpu
-# Shard size is the memory lever. The default (2^22) needs more RAM than a small VPS has and
-# ends up in swap, which costs far more time than the extra shards do. 2^20 keeps the core
-# prover resident; raise it on a machine with more memory.
-Environment=SHARD_SIZE=1048576
-Environment=SHARD_BATCH_SIZE=1
+# SHARD_SIZE and SHARD_BATCH_SIZE are deliberately not set. SP1 already picks them from the
+# machine's total memory - 2^19 with batch 1 below 33 GB - and overriding them upward is how
+# a small box ends up in swap. They only affect core proving anyway; the recursion prover
+# hardcodes 2^22, which is what actually sets the peak.
 # ProtectHome hides /home, and SP1 caches its groth16 artifacts under $HOME.
 Environment=HOME=/var/lib/tee-hyperlane
 ExecStart=/opt/tee-hyperlane/bin/tee-hyperlane --config /opt/tee-hyperlane/coprocessor.toml run
