@@ -75,7 +75,9 @@ export const CHAINS: Record<ChainId, Chain> = {
     domain: 1297040200,
     chainId: "mocha-5",
     rpc: "https://rpc-mocha.pops.one",
-    rest: "https://api-mocha.pops.one",
+    // Same-origin by default: Mocha's public REST sends no CORS header, so the browser
+    // cannot read it directly. nginx proxies /celestia to it.
+    rest: import.meta.env.VITE_CELESTIA_REST ?? "/celestia",
     explorer: "https://mocha.celenium.io",
     bech32Prefix: "celestia",
     denom: "utia",

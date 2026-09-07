@@ -29,7 +29,7 @@ enum Command {
     Build,
     /// Print the vkeys an ISM is created with.
     Vkeys,
-    /// Turn a live enclave's /identity response into policy/identity.toml.
+    /// Turn a live enclave's /identity response into the pinned enclave-identity.toml.
     Identity {
         /// The enclave to read measurements from.
         #[arg(long)]
@@ -57,7 +57,7 @@ fn elf(name: &str) -> Result<Vec<u8>> {
             return Ok(bytes);
         }
     }
-    anyhow::bail!("{name} not built; run `cargo run -p xtask -- build`")
+    anyhow::bail!("{name} not built; run `cargo run -p circuit-tool -- build`")
 }
 
 fn main() -> Result<()> {
@@ -248,10 +248,14 @@ fn identity(url: &str, write: bool) -> Result<()> {
     );
 
     if write {
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../policy/identity.toml");
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../crates/tee-attestation/enclave-identity.toml");
         std::fs::write(&path, &toml)?;
         println!("wrote {}", path.display());
-        println!("rebuild the circuits: cargo run -p xtask -- build && cargo run -p xtask -- vkeys");
+        println!(
+            "rebuild the circuits: cargo run -p circuit-tool -- build && \
+             cargo run -p circuit-tool -- vkeys"
+        );
     } else {
         print!("{toml}");
     }

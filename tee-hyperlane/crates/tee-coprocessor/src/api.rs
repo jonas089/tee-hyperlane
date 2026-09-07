@@ -84,8 +84,8 @@ impl Api {
 
     pub fn router(self) -> Router {
         Router::new()
-            // The root is the status too, so opening the port in a browser shows something.
-            .route("/", get(status))
+            // Opening this port in a browser should show the routes, not raw JSON.
+            .route("/", get(dashboard))
             .route("/api/status", get(status))
             .route("/api/attestation/{message_id}", get(attestation))
             .route("/api/health", get(|| async { "ok" }))
@@ -162,6 +162,11 @@ fn read_dir(path: &std::path::Path) -> Result<Vec<PathBuf>> {
         return Ok(Vec::new());
     }
     Ok(std::fs::read_dir(path)?.filter_map(|e| e.ok().map(|e| e.path())).collect())
+}
+
+/// The page this port serves. Small enough to embed, so the API ships as one binary.
+async fn dashboard() -> axum::response::Html<&'static str> {
+    axum::response::Html(include_str!("dashboard.html"))
 }
 
 /// Read every route's trusted state. Chain reads shell out, so they run off the async pool.

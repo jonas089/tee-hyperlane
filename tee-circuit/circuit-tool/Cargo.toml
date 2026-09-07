@@ -1,5 +1,5 @@
 [package]
-name = "xtask"
+name = "circuit-tool"
 version.workspace = true
 edition.workspace = true
 publish = false

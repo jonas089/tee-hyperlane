@@ -21,7 +21,7 @@ case "$CHAIN" in
   *) echo "unknown chain $CHAIN" >&2; exit 1 ;;
 esac
 
-: "${IDENTITY_DIGEST:?set IDENTITY_DIGEST (xtask vkeys)}"
+: "${IDENTITY_DIGEST:?set IDENTITY_DIGEST (circuit-tool vkeys)}"
 : "${STATE_TRANSITION_VKEY:?}" "${STATE_MEMBERSHIP_VKEY:?}"
 PK=0x$(tr -d ' \n\r' < "$ROOT/keys/SEPOLIA_PRIVATE_KEY.md")
 

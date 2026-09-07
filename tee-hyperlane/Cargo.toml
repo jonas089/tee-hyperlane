@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/hyperlane-types", "crates/tee-node", "crates/tee-coprocessor"]
+members = ["crates/hyperlane-types", "crates/tee-node", "crates/tee-coprocessor", "crates/gas-oracle"]
 
 [workspace.package]
 version = "0.1.0"

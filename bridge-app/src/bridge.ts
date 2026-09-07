@@ -9,8 +9,8 @@
 // "Attested" is the step that distinguishes this bridge, so it carries the quote.
 
 import { encodeFunctionData, parseAbi, toHex } from "viem";
-import { CHAINS, DECIMALS, RELAYER_API, routerFor } from "./config";
-import type { ChainId, EvmChain, TokenId } from "./config";
+import { CELESTIA_DENOM, CHAINS, DECIMALS, RELAYER_API, routerFor } from "./config";
+import type { Chain, ChainId, EvmChain, TokenId } from "./config";
 
 export type Step = "dispatched" | "attested" | "authorised" | "delivered";
 export const STEPS: Step[] = ["dispatched", "attested", "authorised", "delivered"];
@@ -24,6 +24,9 @@ export interface Transfer {
   originTx: string;
   /** How far it has got. */
   reached: Step;
+  /** When the origin accepted it, and when the destination was first seen to have it. */
+  sentAt: number;
+  deliveredAt?: number;
   /** Present once an enclave has attested the batch this message is in. */
   attestation?: Attestation;
   deliveryTx?: string;
@@ -188,6 +191,51 @@ export async function isDelivered(destination: ChainId, messageId: string): Prom
   return Boolean(body.delivered);
 }
 
+/** One route as the coprocessor currently sees it. */
+export interface RouteStatus {
+  name: string;
+  origin: number;
+  destination: number;
+  ism: string;
+  height: number | null;
+  timestamp: number | null;
+  stateRoot: string | null;
+  batches: { height: number; messages: string[] }[];
+  proving: { height: number; messages: string[] } | null;
+  error: string | null;
+}
+
+export async function fetchRouteStatus(): Promise<RouteStatus[]> {
+  const response = await fetch(`${RELAYER_API}/status`);
+  if (!response.ok) throw new Error(`relayer returned ${response.status}`);
+  return (await response.json()) as RouteStatus[];
+}
+
+/** What this account holds of one token on one chain. */
+export async function fetchBalance(
+  chain: Chain,
+  token: TokenId,
+  address: string,
+): Promise<bigint> {
+  if (chain.kind === "evm") {
+    const router = routerFor(token, chain.id);
+    if (!router) return 0n;
+    const data = encodeFunctionData({
+      abi: ROUTER_ABI,
+      functionName: "balanceOf",
+      args: [address as `0x${string}`],
+    });
+    return BigInt(await ethCall(chain, router, data));
+  }
+  const denom = CELESTIA_DENOM[token];
+  const response = await fetch(
+    `${chain.rest}/cosmos/bank/v1beta1/balances/${address}/by_denom?denom=${encodeURIComponent(denom)}`,
+  );
+  if (!response.ok) return 0n;
+  const body = await response.json();
+  return BigInt(body?.balance?.amount ?? "0");
+}
+
 /** Ask the coprocessor which batch a message landed in, and what the enclave signed for it. */
 export async function fetchAttestation(messageId: string): Promise<Attestation | null> {
   const response = await fetch(`${RELAYER_API}/attestation/${messageId}`);
@@ -201,6 +249,7 @@ export async function refresh(transfer: Transfer): Promise<Transfer> {
   try {
     if (await isDelivered(transfer.to, transfer.messageId)) {
       next.reached = "delivered";
+      next.deliveredAt = next.deliveredAt ?? Date.now();
     }
     const attestation = await fetchAttestation(transfer.messageId);
     if (attestation) {

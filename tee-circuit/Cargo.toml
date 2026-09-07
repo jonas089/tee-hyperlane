@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/tee-attestation", "xtask"]
+members = ["crates/tee-attestation", "circuit-tool"]
 
 [workspace.package]
 version = "0.1.0"

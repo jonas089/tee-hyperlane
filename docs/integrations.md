@@ -34,13 +34,28 @@ commits to. Note the off-by-one: `header[H].app_hash` commits to the state after
 **Arbitrum and Base** — no light client of their own. Both publish a commitment to their L2
 state into Ethereum L1 storage, so once the Ethereum light client has a verified L1 root,
 each L2 root costs a storage proof plus a keccak preimage check (`origins/ethereum_l2.rs`).
-Mainnet differences: Arbitrum One is BoLD, so `latestConfirmed()` returns an assertion hash
-rather than a node number and the preimage is an `AssertionState`, not
-`keccak(blockHash ‖ sendRoot)`. Base mainnet uses the same output-root formula as Sepolia.
+
+Arbitrum Sepolia is **BoLD**, and finding that out is a cautionary tale: the rollup the
+canonical addresses lead to, `0xd808…81C8`, is the *deprecated* pre-BoLD one, and it still
+answers `latestConfirmed()` with a node number. It has created no node in over eleven days.
+The live rollup is reached through the inbox's bridge — `inbox.bridge().rollup()` gives
+`0x042B2E6C5E99d4c521bd49beeD5E99651D9B0Cf4` — and there `latestConfirmed()` returns an
+assertion hash. **Verify a rollup is live before building against its layout**, by checking
+that it has confirmed something recently.
+
+Under BoLD the chain stores only hashes, so the preimage is supplied and checked:
+
+```
+assertionHash = keccak(prevAssertionHash ‖ keccak(abi.encode(afterState)) ‖ inboxAcc)
+afterState    = (blockHash, sendRoot, inboxPosition, positionInMessage, machineStatus, endHistoryRoot)
+```
+
+`_latestConfirmed` is slot 116 and `_assertions` is the mapping at slot 117, whose packed
+first word carries `status` at byte offset 25; only `Confirmed` (2) counts.
 
 Both inherit their rollup's challenge window: only *confirmed* commitments are trustless, so
-a message waits that window. On Base Sepolia the newest resolved dispute game trails the head
-by roughly six days.
+a message waits that window. Arbitrum Sepolia confirms roughly every 31 minutes. Base Sepolia
+is slower — its newest resolved dispute game trails the head by days.
 
 ---
 
@@ -52,13 +67,15 @@ chain's storage, it needs one function and no light client.
 1. Find where the L2 commitment lives in L1 storage. Two shapes cover most rollups:
    - **OP Stack** — an output root, `keccak(version ‖ stateRoot ‖ messagePasserStorageRoot ‖
      blockHash)`. The preimage contains the state root directly.
-   - **Arbitrum Nitro** — `confirmData = keccak(blockHash ‖ sendRoot)`. `sendRoot` is the
-     outbox root, *not* the state root, so you also supply the L2 block header RLP and take
-     `header.stateRoot` (item 3).
+   - **Arbitrum BoLD** — an assertion hash. Its preimage carries the L2 block hash, which is
+     *not* the state root, so you also supply the L2 block header RLP and take
+     `header.stateRoot`. Pre-BoLD Nitro instead stores
+     `confirmData = keccak(blockHash ‖ sendRoot)` per node.
 2. Derive the slot from L1 rather than accepting it. Read `latestConfirmed` (or the anchor)
    out of storage and compute the mapping slot from it, so a relayer cannot point the enclave
-   at a stale commitment. Watch for packed slots — Arbitrum Sepolia packs four `uint64`s into
-   slot 117, and reading it whole gives a nonsense node number.
+   at a stale commitment. Watch for packed slots — BoLD packs three `uint64`s and a `bool`
+   below the status byte, so reading the word whole proves nothing. Check the status, too: a
+   pending assertion is still inside its challenge window.
 3. Add the arm to `OriginInput` and the config block. Everything downstream is unchanged.
 
 Its Hyperlane tree is read exactly like Ethereum's, against the L2 state root you just

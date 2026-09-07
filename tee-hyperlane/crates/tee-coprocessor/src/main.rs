@@ -54,7 +54,7 @@ enum Command {
         /// origin tree and the ISM must start from before them.
         #[arg(long)]
         height: Option<u64>,
-        /// Enclave identity digest from `xtask vkeys`.
+        /// Enclave identity digest from `circuit-tool vkeys`.
         #[arg(long)]
         identity_digest: String,
     },

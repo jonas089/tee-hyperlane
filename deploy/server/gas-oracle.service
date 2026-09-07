@@ -1,0 +1,26 @@
+# Keeps the Celestia IGP's destination gas configs current, and serves a page showing what it
+# pushed. Independent of the relayer: if this stops, quotes go stale but nothing breaks.
+[Unit]
+Description=Hyperlane gas oracle
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=bridge
+WorkingDirectory=/opt/tee-hyperlane
+Environment=CELHOME=/var/lib/tee-hyperlane/celhome
+ExecStart=/opt/tee-hyperlane/bin/gas-oracle \
+  --config /opt/tee-hyperlane/gas-oracle.toml \
+  --listen 0.0.0.0:3002
+Restart=always
+RestartSec=60
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/tee-hyperlane
+
+[Install]
+WantedBy=multi-user.target

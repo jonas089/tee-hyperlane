@@ -104,6 +104,6 @@ async fn identity(State(dstack): State<Arc<DstackClient>>) -> ApiResult<serde_js
         "quote": quote.quote,
         "event_log": quote.event_log,
         "info": info,
-        "note": "feed this to `xtask identity` to produce policy/identity.toml",
+        "note": "feed this to `circuit-tool identity` to pin enclave-identity.toml",
     })))
 }

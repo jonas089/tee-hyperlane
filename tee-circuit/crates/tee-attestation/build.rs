@@ -1,4 +1,7 @@
-//! Turns policy/identity.toml into the identity policy this build is compiled against.
+//! Compiles enclave-identity.toml into the identity this circuit will accept.
+//!
+//! It lives beside this build script rather than in a directory of its own because it is an
+//! input to this crate and to nothing else: change it and the vkeys change with it.
 //!
 //! Development builds leave it unpinned, which still requires a genuine non-debug TDX quote
 //! on an acceptable TCB level but stops asking *which* enclave. Production builds capture
@@ -10,7 +13,7 @@ use std::{env, fs};
 
 fn main() {
     let path =
-        PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap()).join("../../policy/identity.toml");
+        PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap()).join("enclave-identity.toml");
     println!("cargo:rerun-if-changed={}", path.display());
     println!("cargo:rerun-if-changed=build.rs");
 
@@ -49,7 +52,7 @@ fn main() {
     } else {
         println!(
             "cargo:warning=building with require_enclave = false: any genuine TDX enclave \
-             will be accepted. Development only - see policy/identity.toml"
+             will be accepted. Development only - see enclave-identity.toml"
         );
         "IdentityPolicy::Any".to_string()
     };

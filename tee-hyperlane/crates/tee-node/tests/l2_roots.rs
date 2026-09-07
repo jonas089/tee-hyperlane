@@ -6,12 +6,56 @@
 
 use alloy_primitives::{keccak256, B256};
 use tee_node::origins::ethereum_l2::*;
+use tee_node::state_proofs::ClaimedAccount;
 
 fn h(s: &str) -> B256 {
     s.parse().unwrap()
 }
 
 // ---- Arbitrum ----
+
+/// Arbitrum Sepolia assertion `0x21b8…e543` and its parent, both confirmed on L1 Sepolia.
+/// The preimage below is the `AssertionCreated` payload for that assertion.
+const CONFIRMED_ASSERTION: &str =
+    "0x21b8c3b857fa797973b6693befba28f6e61aed1b35fe2a6d7ecce238a646e543";
+const PARENT_ASSERTION: &str =
+    "0x1d3df2803af5505c47893636c2b17a8ff955ff5336755aa990caf3baf9603b37";
+
+fn confirmed_assertion_proof() -> ArbitrumRootProof {
+    ArbitrumRootProof {
+        rollup: "0x042B2E6C5E99d4c521bd49beeD5E99651D9B0Cf4".parse().unwrap(),
+        layout: RollupLayout::ARBITRUM_SEPOLIA,
+        account: ClaimedAccount {
+            nonce: 0,
+            balance: Default::default(),
+            storage_root: B256::ZERO,
+            code_hash: B256::ZERO,
+        },
+        account_proof: Vec::new(),
+        latest_confirmed_proof: Vec::new(),
+        assertion_node_proof: Vec::new(),
+        assertion_node_slot_value: "0x00000000000002010000000000b1de2c00000000000000000000000000b1dec9"
+            .parse()
+            .unwrap(),
+        prev_assertion_hash: h(PARENT_ASSERTION),
+        after_state: AssertionState {
+            l2_block_hash: h(
+                "0x5cfbea5cf869e3cb10c27fdc898c48c9e03e035cf7ccc83cd654b6679fab88f9",
+            ),
+            send_root: h("0x6a72af1e7b61faf26be37e52b53622084b38ab56229903c5298a56cdbacc2298"),
+            inbox_position: 0xcaba1,
+            position_in_message: 0,
+            machine_status: 1,
+            end_history_root: h(
+                "0x972472422534efc53574219bf39d6c63f0887c07edba578a2ac38bea2d1cdebb",
+            ),
+        },
+        inbox_accumulator: h(
+            "0xcda07eb616939141ec565f6e837e62c723199d670402bb4791789e33149bfbb7",
+        ),
+        l2_header_rlp: Default::default(),
+    }
+}
 
 #[derive(serde::Deserialize)]
 struct ArbHeader {
@@ -50,31 +94,47 @@ fn a_truncated_header_is_rejected() {
     assert_eq!(decode_l2_header(b""), Err(ArbitrumError::MalformedHeader));
 }
 
-/// Which node is read must be derived from L1, not chosen by the relayer.
+/// Which assertion is read must be derived from L1, not chosen by the relayer.
 #[test]
-fn the_confirm_data_slot_is_derived_from_the_node_number() {
+fn the_assertion_node_slot_is_derived_from_the_assertion_hash() {
     let layout = RollupLayout::ARBITRUM_SEPOLIA;
-    let a = get_confirm_data_slot(10764, &layout);
-    let b = get_confirm_data_slot(10765, &layout);
-    assert_ne!(a, b, "different nodes must map to different slots");
+    let a = get_assertion_node_slot(h(CONFIRMED_ASSERTION), &layout);
+    let b = get_assertion_node_slot(h(PARENT_ASSERTION), &layout);
+    assert_ne!(a, b, "different assertions must map to different slots");
 
-    // keccak(pad32(node) || pad32(slot)) + 2
+    // keccak(hash || pad32(slot))
     let mut preimage = [0u8; 64];
-    preimage[24..32].copy_from_slice(&10764u64.to_be_bytes());
-    preimage[56..64].copy_from_slice(&118u64.to_be_bytes());
-    let expected = alloy_primitives::U256::from_be_bytes(keccak256(preimage).0)
-        + alloy_primitives::U256::from(2);
-    assert_eq!(a, B256::from(expected));
+    preimage[0..32].copy_from_slice(h(CONFIRMED_ASSERTION).as_slice());
+    preimage[56..64].copy_from_slice(&117u64.to_be_bytes());
+    assert_eq!(a, keccak256(preimage));
+}
+
+/// The assertion hash is built from the whole after-state, so a relayer cannot swap in a
+/// different L2 block and keep the hash L1 stores.
+///
+/// Values are Arbitrum Sepolia assertion
+/// `0x21b8c3b857fa797973b6693befba28f6e61aed1b35fe2a6d7ecce238a646e543`, confirmed on L1.
+#[test]
+fn the_assertion_hash_reproduces_what_l1_confirmed() {
+    let proof = confirmed_assertion_proof();
+    assert_eq!(get_assertion_hash(&proof), h(CONFIRMED_ASSERTION));
+
+    let mut tampered = proof.clone();
+    tampered.after_state.l2_block_hash = h(PARENT_ASSERTION);
+    assert_ne!(get_assertion_hash(&tampered), h(CONFIRMED_ASSERTION));
 }
 
 #[test]
-fn confirm_data_binds_both_the_block_hash_and_the_send_root() {
-    let block_hash = h("0x1111111111111111111111111111111111111111111111111111111111111111");
-    let send_root = h("0x2222222222222222222222222222222222222222222222222222222222222222");
-    let expect = keccak256([block_hash.as_slice(), send_root.as_slice()].concat());
+fn only_a_confirmed_assertion_is_accepted() {
+    use alloy_primitives::U256;
+    // firstChildBlock | secondChildBlock | createdAtBlock | isFirstChild | status
+    let confirmed: U256 =
+        "0x00000000000002010000000000b1de2c00000000000000000000000000b1dec9".parse().unwrap();
+    assert_eq!(read_assertion_status(confirmed), 2);
 
-    let other = keccak256([send_root.as_slice(), block_hash.as_slice()].concat());
-    assert_ne!(expect, other, "order must matter");
+    let pending: U256 =
+        "0x00000000000001010000000000b1de2c00000000000000000000000000b1dec9".parse().unwrap();
+    assert_eq!(read_assertion_status(pending), 1, "pending is still in its challenge window");
 }
 
 // ---- Base ----
@@ -154,34 +214,4 @@ fn block_metadata_is_not_part_of_the_output_root() {
     p.l2_block_number += 1;
     p.l2_timestamp += 12;
     assert_eq!(base, hash_output_root(&p));
-}
-
-/// The packed slot read out of Arbitrum Sepolia's live rollup at L1 block time.
-///
-/// `latestConfirmed()` returned 10764, and slot 117 holds
-/// `0x3f5a36 0000000000002a0c 0000000000002a0d 0000000000002a0c`. Solidity packs from the
-/// least significant byte, so the node number is the low 8 bytes - reading the slot as a
-/// whole uint256 would give a nonsensical node and prove nothing.
-#[test]
-fn the_arbitrum_node_number_is_unpacked_from_its_slot() {
-    use alloy_primitives::U256;
-    let slot_value: U256 =
-        "0x3f5a360000000000002a0c0000000000002a0d0000000000002a0c".parse().unwrap();
-    let layout = RollupLayout::ARBITRUM_SEPOLIA;
-    assert_eq!(layout.read_latest_confirmed(slot_value), 10764, "matches latestConfirmed()");
-    assert_ne!(
-        U256::from(layout.read_latest_confirmed(slot_value)),
-        slot_value,
-        "the raw slot is not the node number"
-    );
-}
-
-#[test]
-fn a_different_byte_offset_reads_a_different_packed_value() {
-    use alloy_primitives::U256;
-    let slot_value: U256 =
-        "0x3f5a360000000000002a0c0000000000002a0d0000000000002a0c".parse().unwrap();
-    let mut layout = RollupLayout::ARBITRUM_SEPOLIA;
-    layout.latest_confirmed_byte_offset = 8;
-    assert_eq!(layout.read_latest_confirmed(slot_value), 10765);
 }

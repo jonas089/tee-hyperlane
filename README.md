@@ -92,7 +92,34 @@ module, verifying against SP1's v5 Groth16 verifier `0x50ACFBEdecf4cbe350E1a86fC
 | route | Celestia mocha-5 | EVM side |
 |---|---|---|
 | TIA | collateral `0x726f757465725f61707000000000000000000000000000010000000000000000` | synthetic `0xFeA14C1444A7a8beAb7122fdE5A168212D7185bE` (Sepolia)<br>synthetic `0xFeA14C1444A7a8beAb7122fdE5A168212D7185bE` (Arbitrum Sepolia)<br>synthetic `0xf4197C55C944987E9b10e09C0A47915211769B78` (Base Sepolia) |
-| USDC | synthetic `0x726f757465725f61707000000000000000000000000000020000000000000001` | collateral `0xfb611B6f6CE92033960e99C2D65cee4237e64cDD` (Sepolia) |
+| USDC | synthetic `0x726f757465725f61707000000000000000000000000000020000000000000001` | collateral `0xfb611B6f6CE92033960e99C2D65cee4237e64cDD` (Sepolia)<br>synthetic `0xb9E5E3eb926EA22B951d2fb7392F9F3D6c704054` (Arbitrum Sepolia)<br>synthetic `0x0ee6374a92ba4E11F920A23c6dd271b594D69A9B` (Base Sepolia) |
+
+### Gas
+
+Fees are quoted by an IGP on each side and kept current by `crates/gas-oracle`, which reads
+gas and token prices hourly. On the EVM side the beneficiary is
+`0x318d22faa1e0f29eac7Ef644A8FaC676F6688d1e`; on Celestia they accrue in `utia` to the IGP
+owner, because an EVM address cannot hold `utia`.
+
+| chain | paymaster | gas oracle |
+|---|---|---|
+| Celestia mocha-5 | `0x726f757465725f706f73745f6469737061746368000000040000000000000002` | in-module |
+| Sepolia | `0x48b1BF6CC2e45Ca52947E95Bb216C2eBdCB19c49` | `0x225B8488242c90085B7A8Ea33Ce8e39Ae9f79722` |
+| Arbitrum Sepolia | `0x0ee6374a92ba4E11F920A23c6dd271b594D69A9B` | `0xfA8036Cb092079B095ed60750d7b39c3C220F288` |
+| Base Sepolia | `0x5591613C85E9bC95104980d4485c958ee80f6F76` | `0x7A7042C8784700618be87Aac7F9336620e216Bb9` |
+
+### Services
+
+One VPS runs everything that is not an enclave.
+
+```
+:3000  bridge UI
+:3001  relayer dashboard and API
+:3002  gas oracle dashboard and API
+```
+
+See [deploy/server/README.md](deploy/server/README.md) to stand it up, and
+[docs/redeploy.md](docs/redeploy.md) to replace an enclave without the system going stale.
 
 Celestia Hyperlane core, deployed by us because mocha-5 had none:
 
@@ -120,9 +147,9 @@ checked-in fixtures captured from those chains.
 
 ```sh
 cd tee-circuit
-cargo run -p xtask -- build     # compile both guests with SP1 v5 flags
-cargo run -p xtask -- vkeys     # the three values an ISM is created with
-cargo run -p xtask -- bench --prove   # measure real proving cost on this machine
+cargo run -p circuit-tool -- build   # compile both guests with SP1 v5 flags
+cargo run -p circuit-tool -- vkeys   # the three values an ISM is created with
+cargo run -p circuit-tool -- bench --prove   # measure real proving cost here
 ```
 
 ## Deploy
@@ -133,7 +160,8 @@ enclave exists.
 1. Build and publish the `tee-node` image; pin its digest in `docker-compose.yml`.
 2. Deploy two CVMs (`tdx.small` is enough - the enclave is a verifier, not a prover).
 3. `GET /policy` on one of them, write the measurements into
-   `tee-circuit/policy/identity.toml`, set `require_enclave = true`, rebuild the circuits.
+   `tee-circuit/crates/tee-attestation/enclave-identity.toml`, set
+   `require_enclave = true`, rebuild the circuits.
 4. Deploy Hyperlane core on Mocha, then the warp routes.
 5. Deploy `TeeIsm.sol` on Sepolia and point the warp routers at it.
 6. `tee-hyperlane run`.

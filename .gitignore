@@ -8,3 +8,4 @@ context/
 **/broadcast/
 tee-circuit/elf/
 bridge-app/dist/
+bridge-app/tsconfig.tsbuildinfo

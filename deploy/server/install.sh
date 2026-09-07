@@ -17,6 +17,7 @@ install -d -o bridge -g bridge /var/lib/tee-hyperlane/proofs /var/lib/tee-hyperl
 install -d /opt/tee-hyperlane/bin /opt/tee-hyperlane/deploy /opt/tee-hyperlane/keys /opt/tee-hyperlane/elf
 
 install -m755 "$SRC/tee-hyperlane/target/release/tee-hyperlane" /opt/tee-hyperlane/bin/
+install -m755 "$SRC/tee-hyperlane/target/release/gas-oracle" /opt/tee-hyperlane/bin/
 install -m755 "$SRC/deploy/submit-evm.sh" "$SRC/deploy/submit-celestia.sh" /opt/tee-hyperlane/deploy/
 install -m600 "$SRC/keys/SEPOLIA_PRIVATE_KEY.md" /opt/tee-hyperlane/keys/
 install -m644 "$SRC/tee-circuit/elf/tee-state-transition" "$SRC/tee-circuit/elf/tee-state-membership" /opt/tee-hyperlane/elf/
@@ -33,6 +34,7 @@ fi
 chown -R bridge:bridge /var/lib/tee-hyperlane
 
 install -m644 "$SRC/deploy/server/coprocessor.toml" /opt/tee-hyperlane/coprocessor.toml
+install -m644 "$SRC/deploy/server/gas-oracle.toml" /opt/tee-hyperlane/gas-oracle.toml
 
 rm -rf /opt/bridge-app
 install -d /opt/bridge-app
@@ -44,9 +46,12 @@ rm -f /etc/nginx/sites-enabled/default
 nginx -t
 systemctl reload nginx
 
-install -m644 "$SRC/deploy/server/tee-hyperlane.service" "$SRC/deploy/server/tee-hyperlane-api.service" /etc/systemd/system/
+install -m644 "$SRC/deploy/server/tee-hyperlane.service" \
+  "$SRC/deploy/server/tee-hyperlane-api.service" \
+  "$SRC/deploy/server/gas-oracle.service" /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable --now tee-hyperlane-api.service
 systemctl enable --now tee-hyperlane.service
+systemctl enable --now gas-oracle.service
 
-systemctl --no-pager --lines=0 status tee-hyperlane-api tee-hyperlane || true
+systemctl --no-pager --lines=0 status tee-hyperlane-api tee-hyperlane gas-oracle || true

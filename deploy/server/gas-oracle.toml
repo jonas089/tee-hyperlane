@@ -1,0 +1,68 @@
+# What a Celestia-origin transfer is charged for gas on the destination.
+#
+# Once an hour is enough. The quote only has to be close enough that the relayer is not
+# systematically underpaid; between rounds the IGP keeps the last values, which are stale but
+# never zero.
+interval_secs = 3600
+
+igp_id = "0x726f757465725f706f73745f6469737061746368000000040000000000000002"
+celestia_rpc = "https://rpc-mocha.pops.one"
+chain_id = "mocha-5"
+local_price_id = "celestia"
+
+# Signs the EVM-side oracle updates. A path, so the key is never in this file.
+evm_key_file = "/opt/tee-hyperlane/keys/SEPOLIA_PRIVATE_KEY.md"
+
+# The other direction is configured in [[evm_origins]] at the bottom: each EVM chain's own
+# StorageGasOracle, quoting Celestia gas for transfers leaving that chain. Without them the
+# routers quote from an empty oracle, which quotes zero.
+
+[[destinations]]
+name = "Ethereum Sepolia"
+domain = 11155111
+rpc = "https://ethereum-sepolia-rpc.publicnode.com"
+decimals = 18
+price_id = "ethereum"
+# Measured, not guessed: process() cost 93k-127k across the E2E runs.
+gas_overhead = 150000
+
+[[destinations]]
+name = "Arbitrum Sepolia"
+domain = 421614
+rpc = "https://arbitrum-sepolia-rpc.publicnode.com"
+decimals = 18
+price_id = "ethereum"
+gas_overhead = 150000
+
+[[destinations]]
+name = "Base Sepolia"
+domain = 84532
+rpc = "https://base-sepolia-rpc.publicnode.com"
+decimals = 18
+price_id = "ethereum"
+gas_overhead = 150000
+
+
+[[evm_origins]]
+name = "Ethereum Sepolia"
+rpc = "https://ethereum-sepolia-rpc.publicnode.com"
+storage_gas_oracle = "0x225B8488242c90085B7A8Ea33Ce8e39Ae9f79722"
+remote_domain = 1297040200
+decimals = 18
+price_id = "ethereum"
+
+[[evm_origins]]
+name = "Arbitrum Sepolia"
+rpc = "https://arbitrum-sepolia-rpc.publicnode.com"
+storage_gas_oracle = "0xfA8036Cb092079B095ed60750d7b39c3C220F288"
+remote_domain = 1297040200
+decimals = 18
+price_id = "ethereum"
+
+[[evm_origins]]
+name = "Base Sepolia"
+rpc = "https://base-sepolia-rpc.publicnode.com"
+storage_gas_oracle = "0x7A7042C8784700618be87Aac7F9336620e216Bb9"
+remote_domain = 1297040200
+decimals = 18
+price_id = "ethereum"

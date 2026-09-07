@@ -1,0 +1,128 @@
+<!doctype html>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Gas Oracle</title>
+<style>
+  :root {
+    --ink: #131313; --muted: #7d7d7d; --line: #e8e8e8;
+    --bg: #f4f4f5; --surface: #fff; --field: #f9f9f9;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ink: #f5f5f5; --muted: #9b9b9b; --line: #2a2a2e;
+      --bg: #0d0d0f; --surface: #18181b; --field: #202024;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 15px/1.5 "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  main { max-width: 760px; margin: 0 auto; padding: 1.25rem 1rem 4rem; }
+  header { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; }
+  h1 { font-size: 1.05rem; margin: 0 0 0.35rem; }
+  .lede { color: var(--muted); font-size: 0.85rem; margin: 0 0 1rem; }
+  .when { color: var(--muted); font-size: 0.8rem; white-space: nowrap; }
+  .dest {
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: 20px; padding: 1rem; margin-bottom: 0.85rem;
+  }
+  .dest h2 { font-size: 0.95rem; margin: 0; text-transform: capitalize; }
+  .domain { color: var(--muted); font-size: 0.8rem; }
+  .grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 0.75rem; margin-top: 0.85rem;
+  }
+  .cell { background: var(--field); border-radius: 14px; padding: 0.6rem 0.75rem; }
+  .cell span { display: block; color: var(--muted); font-size: 0.75rem; }
+  .cell strong { font-weight: 600; font-size: 0.95rem; overflow-wrap: anywhere; }
+  .err { color: #b42318; font-size: 0.85rem; margin-top: 0.5rem; }
+  .note { color: var(--muted); font-size: 0.8rem; }
+  .section { font-size: 0.95rem; margin: 1.5rem 0 0.25rem; }
+  table {
+    width: 100%; border-collapse: collapse; background: var(--surface);
+    border: 1px solid var(--line); border-radius: 20px; overflow: hidden;
+    font-size: 0.85rem; margin-bottom: 0.5rem;
+  }
+  th, td { text-align: left; padding: 0.6rem 0.85rem; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 500; }
+  tr:last-child td { border-bottom: none; }
+  td.num { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .wrap { overflow-x: auto; }
+</style>
+<main>
+  <header>
+    <div>
+      <h1>Gas Oracle</h1>
+      <p class="lede">
+        What a Celestia-origin transfer is charged for gas on the other side.
+      </p>
+    </div>
+    <span class="when" id="when"></span>
+  </header>
+  <h2 class="section">Live on chain</h2>
+  <p class="lede">
+    What each paymaster currently holds, read back from the chain rather than remembered.
+  </p>
+  <table id="onchain"><thead><tr>
+    <th>Paymaster</th><th>Quoting</th><th>Exchange rate</th><th>Gas price</th><th>Overhead</th>
+  </tr></thead><tbody></tbody></table>
+
+  <h2 class="section">Last round</h2>
+  <p class="lede">The prices and gas the values above were derived from.</p>
+  <div id="dests"></div>
+
+  <p class="note">
+    fee = gas &times; gas price &times; exchange rate / 10<sup>10</sup>, in the origin's own
+    token. The exchange rate folds in the decimal gap between the two chains' tokens.
+  </p>
+</main>
+<script>
+  const gwei = (wei) => (Number(wei) / 1e9).toFixed(3) + " gwei";
+  const usd = (n) => "$" + Number(n).toLocaleString(undefined, { maximumFractionDigits: 2 });
+  const at = (t) => (t ? new Date(t * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—");
+
+  const DOMAINS = {
+    1297040200: "Celestia mocha-5",
+    11155111: "Ethereum Sepolia",
+    421614: "Arbitrum Sepolia",
+    84532: "Base Sepolia",
+  };
+
+  async function draw() {
+    const d = await (await fetch("/api/readings")).json();
+
+    document.querySelector("#onchain tbody").innerHTML = (d.onchain || []).map((c) => `
+      <tr>
+        <td>${c.chain}</td>
+        <td>${DOMAINS[c.remote_domain] || c.remote_domain}</td>
+        <td class="num">${c.error ? "—" : c.token_exchange_rate}</td>
+        <td class="num">${c.error ? "—" : c.gas_price}</td>
+        <td class="num">${c.gas_overhead ?? "—"}</td>
+      </tr>
+      ${c.error ? `<tr><td colspan="5" class="err">${c.error}</td></tr>` : ""}`).join("")
+      || `<tr><td colspan="5">Nothing configured.</td></tr>`;
+    document.getElementById("dests").innerHTML = d.readings.length
+      ? d.readings.map((r) => `
+        <section class="dest">
+          <h2>${r.name}</h2>
+          <div class="domain">domain ${r.domain}</div>
+          <div class="grid">
+            <div class="cell"><span>Gas price</span><strong>${gwei(r.gas_price_wei)}</strong></div>
+            <div class="cell"><span>Exchange rate</span><strong>${r.token_exchange_rate}</strong></div>
+            <div class="cell"><span>TIA</span><strong>${usd(r.local_price_usd)}</strong></div>
+            <div class="cell"><span>Destination token</span><strong>${usd(r.remote_price_usd)}</strong></div>
+            <div class="cell"><span>Gas overhead</span><strong>${r.gas_overhead}</strong></div>
+            <div class="cell"><span>Pushed</span><strong>${at(r.updated_at)}</strong></div>
+          </div>
+          ${r.error ? `<p class="err">${r.error}</p>` : ""}
+        </section>`).join("")
+      : `<p class="note">No round has finished yet.</p>`;
+    document.getElementById("when").textContent = d.lastRound
+      ? `last ${at(d.lastRound)} · next ${at(d.nextRound)} · every ${Math.round(d.intervalSecs / 60)} min`
+      : "no round yet";
+  }
+
+  draw();
+  setInterval(draw, 30000);
+</script>

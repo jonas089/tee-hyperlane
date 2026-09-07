@@ -61,6 +61,24 @@ impl EthereumReader {
         Ok(v.data.root)
     }
 
+    /// Slot of the current finalized header.
+    pub async fn finalized_slot(&self) -> Result<u64> {
+        #[derive(Deserialize)]
+        struct Header {
+            header: Message,
+        }
+        #[derive(Deserialize)]
+        struct Message {
+            message: Slot,
+        }
+        #[derive(Deserialize)]
+        struct Slot {
+            slot: String,
+        }
+        let v: Versioned<Header> = self.get("/eth/v1/beacon/headers/finalized").await?;
+        Ok(v.data.header.message.slot.parse()?)
+    }
+
     pub async fn bootstrap(&self, checkpoint: &str) -> Result<Bootstrap<Spec>> {
         let v: Versioned<Bootstrap<Spec>> = self
             .get(&format!("/eth/v1/beacon/light_client/bootstrap/{checkpoint}"))

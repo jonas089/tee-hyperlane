@@ -10,6 +10,7 @@ use anyhow::{Context, Result};
 use tracing::info;
 
 use crate::config::Config;
+use crate::ethereum::SECONDS_PER_SLOT;
 use crate::tasks::{cpu_prover_permit, run_route, ProofStore};
 
 /// Anchor a Celestia-origin ISM to a live header.
@@ -58,6 +59,95 @@ pub async fn bootstrap_celestia(
 
 /// Gather one Ethereum step and hand it to the enclave.
 #[allow(clippy::too_many_arguments)]
+/// Rebuild the exact light-client store an ISM committed to.
+///
+/// The commitment covers the finalized header, which moves every epoch, so the checkpoint an
+/// ISM was bootstrapped from only reconstructs its genesis store. The checkpoint has to be
+/// recovered instead - and how depends on what the ISM's timestamp means.
+///
+/// For an Ethereum-origin ISM it is exact: post-merge, an execution payload's timestamp is
+/// `genesis_time + slot * 12`, so the trusted timestamp names the slot and the slot names the
+/// block root. For an L2-origin ISM the timestamp is the *L2's*, which says nothing about L1,
+/// so the finalized checkpoints are walked backwards until one reproduces the commitment.
+/// Either way the route needs no memory of its own, which is what makes it resumable.
+async fn rebuild_ethereum_store(
+    beacon: &crate::ethereum::EthereumReader,
+    config: &crate::ethereum::ChainConfig,
+    trusted: &tee_attestation::IsmState,
+    explicit: Option<&str>,
+) -> Result<(tee_node::origins::ethereum::EthereumStore, String)> {
+    use tee_node::origins::ethereum::commit_ethereum_store;
+
+    if let Some(checkpoint) = explicit {
+        let store = bootstrap_store(beacon, config, checkpoint).await?;
+        anyhow::ensure!(
+            commit_ethereum_store(&store) == trusted.lc_store_commit,
+            "store rebuilt from {checkpoint} does not match the ISM's commitment"
+        );
+        return Ok((store, checkpoint.to_string()));
+    }
+
+    if trusted.origin_domain == tee_node::origins::Origin::Ethereum.domain() {
+        let slot = trusted.timestamp.saturating_sub(config.genesis_time) / SECONDS_PER_SLOT;
+        let checkpoint = beacon
+            .block_root_at_slot(slot)
+            .await
+            .with_context(|| format!("no beacon block at slot {slot}"))?;
+        let store = bootstrap_store(beacon, config, &checkpoint).await?;
+        anyhow::ensure!(
+            commit_ethereum_store(&store) == trusted.lc_store_commit,
+            "store rebuilt from {checkpoint} does not match the ISM's commitment"
+        );
+        return Ok((store, checkpoint));
+    }
+
+    let head = beacon.finalized_slot().await?;
+    for epoch in 0..MAX_CHECKPOINT_SEARCH_EPOCHS {
+        let slot = head.saturating_sub(epoch * SLOTS_PER_EPOCH);
+        let Ok(checkpoint) = beacon.block_root_at_slot(slot).await else {
+            continue;
+        };
+        let Ok(store) = bootstrap_store(beacon, config, &checkpoint).await else {
+            continue;
+        };
+        if commit_ethereum_store(&store) == trusted.lc_store_commit {
+            return Ok((store, checkpoint));
+        }
+    }
+    anyhow::bail!(
+        "no finalized checkpoint in the last {MAX_CHECKPOINT_SEARCH_EPOCHS} epochs rebuilds \
+         this ISM's light-client store; pass `checkpoint` in the route config"
+    )
+}
+
+async fn bootstrap_store(
+    beacon: &crate::ethereum::EthereumReader,
+    config: &crate::ethereum::ChainConfig,
+    checkpoint: &str,
+) -> Result<tee_node::origins::ethereum::EthereumStore> {
+    use helios_consensus_core::{apply_bootstrap, verify_bootstrap};
+    use tee_node::origins::ethereum::EthereumStore;
+
+    let bootstrap = beacon.bootstrap(checkpoint).await?;
+    let root: alloy_primitives::B256 = checkpoint.parse()?;
+    verify_bootstrap::<crate::ethereum::Spec>(&bootstrap, root, &config.forks)
+        .map_err(|e| anyhow::anyhow!("bootstrap does not match checkpoint {checkpoint}: {e}"))?;
+
+    let mut inner = helios_consensus_core::types::LightClientStore::default();
+    apply_bootstrap::<crate::ethereum::Spec>(&mut inner, &bootstrap);
+    Ok(EthereumStore {
+        store: inner,
+        genesis_root: config.genesis_root,
+        genesis_time: config.genesis_time,
+        forks: config.forks.clone(),
+    })
+}
+
+/// How far back to look for the checkpoint an L2-origin ISM's store was built from. Eight
+/// epochs is about 51 minutes, far longer than a tick.
+const SLOTS_PER_EPOCH: u64 = 32;
+const MAX_CHECKPOINT_SEARCH_EPOCHS: u64 = 8;
+
 pub async fn attest_ethereum(
     beacon: &str,
     execution: &str,
@@ -70,55 +160,16 @@ pub async fn attest_ethereum(
     base_slot: u64,
     out: Option<String>,
 ) -> Result<()> {
-    use helios_consensus_core::{apply_bootstrap, verify_bootstrap};
     use crate::enclave::EnclaveClient;
-    use crate::ethereum::{
-        expected_current_slot, EthereumReader, ExecutionReader, Spec, SECONDS_PER_SLOT,
-    };
-    use tee_node::origins::ethereum::{commit_ethereum_store, EthereumStore};
+    use crate::ethereum::{expected_current_slot, EthereumReader, ExecutionReader};
 
     let trusted_raw = hex::decode(trusted_state_hex.trim_start_matches("0x"))?;
     let trusted = tee_attestation::decode_ism_state(&trusted_raw)?;
 
-    // Rebuild the exact store the ISM committed to. Same checkpoint in, same store out - the
-    // enclave checks that by hashing it against `lc_store_commit`.
-    //
-    // The checkpoint is not a fixed value: the store commitment covers the finalized header,
-    // which moves every epoch, so a checkpoint chosen at bootstrap only reconstructs the
-    // genesis store. It is instead derived from the ISM's own state, which makes the route
-    // resumable from nothing but what is on chain. Post-merge, an execution payload's
-    // timestamp is exactly `genesis_time + slot * 12`, so the trusted timestamp names the
-    // slot, and the slot names the block root.
     let beacon_reader = EthereumReader::new(beacon);
     let config = beacon_reader.chain_config().await?;
-    let checkpoint = match checkpoint {
-        Some(explicit) => explicit.to_string(),
-        None => {
-            let slot = trusted.timestamp.saturating_sub(config.genesis_time) / SECONDS_PER_SLOT;
-            beacon_reader
-                .block_root_at_slot(slot)
-                .await
-                .with_context(|| format!("no beacon block at slot {slot}"))?
-        }
-    };
-    let bootstrap = beacon_reader.bootstrap(&checkpoint).await?;
-    let root: alloy_primitives::B256 = checkpoint.parse()?;
-    verify_bootstrap::<Spec>(&bootstrap, root, &config.forks)
-        .map_err(|e| anyhow::anyhow!("bootstrap: {e}"))?;
-    let mut inner = helios_consensus_core::types::LightClientStore::default();
-    apply_bootstrap::<Spec>(&mut inner, &bootstrap);
-
-    let store = EthereumStore {
-        store: inner,
-        genesis_root: config.genesis_root,
-        genesis_time: config.genesis_time,
-        forks: config.forks,
-    };
-    anyhow::ensure!(
-        commit_ethereum_store(&store) == trusted.lc_store_commit,
-        "light-client store rebuilt from checkpoint {checkpoint} does not match the ISM's \
-         commitment"
-    );
+    let (store, _checkpoint) =
+        rebuild_ethereum_store(&beacon_reader, &config, &trusted, checkpoint).await?;
 
     let finality = beacon_reader.finality_update().await?;
     let slot = expected_current_slot(config.genesis_time);
@@ -419,7 +470,7 @@ pub async fn prove(attestation_path: &str, elf_dir: &str, out: &str) -> Result<(
         [("state_transition", "tee-state-transition"), ("state_membership", "tee-state-membership")]
     {
         let elf = std::fs::read(std::path::Path::new(elf_dir).join(elf_name))
-            .with_context(|| format!("{elf_name}: run `xtask build` in tee-circuit"))?;
+            .with_context(|| format!("{elf_name}: run `circuit-tool build` in tee-circuit"))?;
         let (pk, vk) = client.setup(&elf);
         println!("proving {name}...");
         let started = Instant::now();
