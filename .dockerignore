@@ -1,0 +1,6 @@
+context/
+**/target/
+**/out/
+**/lib/forge-std/
+keys/
+*.log

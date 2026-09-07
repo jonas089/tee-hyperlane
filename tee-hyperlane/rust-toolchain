@@ -1,0 +1,6 @@
+# Host-side only. The SP1 guests live in tee-circuit/programs and pin the succinct
+# toolchain separately; nothing here is compiled for the zkVM, so this is free to track
+# a modern compiler (alloy's ruint needs >= 1.90).
+[toolchain]
+channel = "1.98.0"
+components = ["rustfmt", "clippy"]

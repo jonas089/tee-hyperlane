@@ -1,0 +1,10 @@
+.env
+keys/
+context/
+**/target/
+**/node_modules/
+**/out/
+**/cache/
+**/broadcast/
+tee-circuit/elf/
+bridge-app/dist/

@@ -1,0 +1,20 @@
+# The measured configuration. This file's hash becomes `compose-hash` in RTMR3, and the
+# circuit pins that value - so this file, including the image digest below, is what an ISM
+# ultimately commits to.
+#
+# Pinned by digest: a tag can be repointed, and a repointed tag would mean a different
+# binary under the same measurement claim.
+#
+# Both nodes run this identical file. They differ only by which origin a request names,
+# which is why one identity policy and one pair of vkeys covers both.
+services:
+  tee-node:
+    image: ghcr.io/jonas089/tee-node@sha256:098cc06689b52b17334b8e302f41598065e9a25697ff6f34646605756d83da2e
+    ports:
+      - "8080:8080"
+    volumes:
+      # The only thing the enclave talks to, and it is local. No data volume: the enclave is
+      # stateless by design, so there is nothing to persist and nothing to seal.
+      - /var/run/dstack.sock:/var/run/dstack.sock
+    environment:
+      - RUST_LOG=info

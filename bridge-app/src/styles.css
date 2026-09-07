@@ -1,0 +1,188 @@
+/* Plain and typographic. The interesting thing here is the attestation, not the chrome. */
+
+:root {
+  --ink: #16181d;
+  --muted: #6b7280;
+  --line: #e2e4e9;
+  --bg: #ffffff;
+  --accent: #1c4ed8;
+  --error: #b42318;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ink: #e8eaed;
+    --muted: #9aa1ac;
+    --line: #2b2f36;
+    --bg: #101215;
+    --accent: #7ea2ff;
+    --error: #f0837c;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 15px/1.55 ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+main {
+  max-width: 44rem;
+  margin: 0 auto;
+  padding: 3rem 1.25rem 5rem;
+}
+
+h1 { font-size: 1.5rem; margin: 0 0 .35rem; letter-spacing: -0.01em; }
+h2 { font-size: .95rem; margin: 0 0 1rem; font-weight: 600; }
+
+.lede { color: var(--muted); margin: 0 0 1.25rem; max-width: 36rem; }
+
+.wallets { display: flex; gap: .75rem; align-items: center; flex-wrap: wrap; }
+.account { color: var(--muted); font-size: .875rem; }
+
+.panel {
+  border-top: 1px solid var(--line);
+  padding-top: 1.5rem;
+  margin-top: 2.5rem;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: .9rem;
+}
+.grid .wide { grid-column: 1 / -1; }
+
+label {
+  display: flex;
+  flex-direction: column;
+  gap: .35rem;
+  font-size: .8rem;
+  color: var(--muted);
+}
+
+input, select {
+  font: inherit;
+  color: var(--ink);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: .5rem .6rem;
+}
+input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+
+button {
+  font: inherit;
+  font-weight: 500;
+  color: #fff;
+  background: var(--accent);
+  border: 0;
+  border-radius: 6px;
+  padding: .55rem 1rem;
+  cursor: pointer;
+  margin-top: 1.1rem;
+}
+button:disabled { opacity: .45; cursor: not-allowed; }
+
+button.secondary {
+  color: var(--ink);
+  background: transparent;
+  border: 1px solid var(--line);
+  margin-top: 0;
+}
+
+button.link {
+  color: var(--accent);
+  background: none;
+  border: 0;
+  padding: 0;
+  margin: .5rem 0 0;
+  text-decoration: underline;
+}
+
+.note { color: var(--muted); font-size: .8rem; margin: .8rem 0 0; }
+.error { color: var(--error); font-size: .85rem; margin: .8rem 0 0; }
+
+.transfers { list-style: none; padding: 0; margin: 0; }
+.transfers > li {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 1rem;
+  margin-bottom: .85rem;
+}
+
+.row { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; }
+.route { display: block; color: var(--muted); font-size: .8rem; margin-top: .15rem; }
+
+/* Four steps, read left to right. Reached ones are simply not dimmed. */
+.steps {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: .4rem .9rem;
+  padding: 0;
+  margin: .9rem 0 .6rem;
+  font-size: .8rem;
+  color: var(--muted);
+}
+.steps li.done { color: var(--ink); }
+.steps li.done::before { content: "✓ "; }
+
+.detail {
+  display: grid;
+  grid-template-columns: 10rem 1fr;
+  gap: .25rem .75rem;
+  margin: .5rem 0 0;
+  font-size: .8rem;
+}
+.detail dt { color: var(--muted); }
+.detail dd { margin: 0; overflow-wrap: anywhere; }
+.detail .quote code { font-size: .72rem; }
+
+code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .8em; }
+a { color: var(--accent); }
+
+@media (max-width: 34rem) {
+  .grid { grid-template-columns: 1fr; }
+  .detail { grid-template-columns: 1fr; }
+  .detail dt { margin-top: .4rem; }
+}
+
+.route {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+}
+
+.endpoint {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.7rem 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.endpoint-role {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.endpoint-name {
+  font-weight: 600;
+}
+
+.swap {
+  flex: 0 0 auto;
+  width: auto;
+  padding: 0.55rem 0.9rem;
+  background: transparent;
+  color: var(--ink);
+  border: 1px solid var(--line);
+  font-size: 0.85rem;
+}

@@ -1,0 +1,9 @@
+[package]
+name = "tee-state-transition"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+sp1-zkvm.workspace = true
+tee-attestation.workspace = true
+getrandom.workspace = true

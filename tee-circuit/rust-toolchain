@@ -1,0 +1,6 @@
+# Host-side only: the crate library, its tests and xtask. The SP1 guests build under
+# programs/rust-toolchain (the `succinct` toolchain), so this is free to track a modern
+# compiler, which sp1-sdk's alloy dependencies require.
+[toolchain]
+channel = "1.98.0"
+components = ["rustfmt", "clippy"]

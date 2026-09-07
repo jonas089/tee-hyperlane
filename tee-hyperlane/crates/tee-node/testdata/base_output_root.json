@@ -1,0 +1,10 @@
+{
+ "_note": "Base Sepolia output-root preimage, all four components read at the same block. output_root here is left for the test to compute; the point of the fixture is that state_root, message_passer_storage_root and latest_block_hash are genuine live values from one block. The L1 half - that a root like this appears in a resolved dispute game - needs an archive RPC, since the fault-proof window puts resolved games outside public proof windows.",
+ "chain": "base-sepolia",
+ "l2_block_number": 46517986,
+ "l2_timestamp": 1788804260,
+ "version": "0x0000000000000000000000000000000000000000000000000000000000000000",
+ "state_root": "0x323f67eb95d9e714e11ae047c2768f4e65fd380163063cadac7eb5d0720c3d57",
+ "message_passer_storage_root": "0x8e2999a4cf58e362a73b9bd8aa6e1bb3a89b2fb9c41f8383d50d1bd602f0d1d6",
+ "latest_block_hash": "0xae1cdceaeb33343af2bf7b28cb47b825ea0da0c12e5e7006841a8b754e41ff72"
+}

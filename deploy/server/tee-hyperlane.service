@@ -1,0 +1,31 @@
+# The coprocessor: attests, proves, relays. Runs on one machine alongside the bridge UI.
+#
+# Proving is CPU-bound and local by policy, so this wants real cores, not a burstable VM.
+[Unit]
+Description=TEE Hyperlane coprocessor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=bridge
+WorkingDirectory=/opt/tee-hyperlane
+Environment=TEE_HYPERLANE_DEPLOY_DIR=/opt/tee-hyperlane/deploy
+Environment=TEE_HYPERLANE_ELF_DIR=/opt/tee-hyperlane/elf
+Environment=CELHOME=/var/lib/tee-hyperlane/celhome
+Environment=SP1_PROVER=cpu
+# ProtectHome hides /home, and SP1 caches its groth16 artifacts under $HOME.
+Environment=HOME=/var/lib/tee-hyperlane
+ExecStart=/opt/tee-hyperlane/bin/tee-hyperlane --config /opt/tee-hyperlane/coprocessor.toml run
+Restart=always
+RestartSec=30
+
+# The coprocessor is untrusted by design; give it nothing it does not need.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/tee-hyperlane
+
+[Install]
+WantedBy=multi-user.target

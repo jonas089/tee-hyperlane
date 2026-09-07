@@ -1,0 +1,22 @@
+{
+ "_note": "Live Celestia mocha-5 ABCI store proof, two-level ics23. The app hash committing to state at `height` is carried in the header of block height+1 - the header a light client verifies.",
+ "chain_id": "mocha-5",
+ "height": 567046,
+ "app_hash_height": 567047,
+ "app_hash": "95F89468E309BFCCE3594A320FB7872D6EE1F7AE1B7649B3A67AA9271ECD26C6",
+ "store": "bank",
+ "key_hex": "0075746961",
+ "value_b64": "MjExMzk2NTMxNTczODcyMA==",
+ "proof_ops": [
+  {
+   "type": "ics23:iavl",
+   "key_b64": "AHV0aWE=",
+   "data_b64": "CroHCgUAdXRpYRIQMjExMzk2NTMxNTczODcyMBoNCAEYASABKgUAAoycRSItCAESBgIEjJxFIBohIJ/YZRmteOWmFeume/45hwsI+okuZco33oamRkCmfLQkIi0IARIGBAiMnEUgGiEgxxRdBMcP5oLpdqi260nUAr3HPZ5noFpGUdkRd0kbkWkiLQgBEgYGEIycRSAaISA0Q6OlWd5hBh4gpDrfWBbW4+S/8qxXytKm46A8hzPkdSItCAESBgggjJxFIBohILqtmuh7qtjilSvqDLnt9SqPIoYHwsTuJYQaIES5YArEIi0IARIGCkCMnEUgGiEgE3hHmbOAX0wc0yajLH9Q48ZYHPB9SjU+55uJBM30XoIiLggBEgcMgAGMnEUgGiEgjtBJNN2rZoZft1f/tN9umu1MqLrZGsfRHf5g2aLAUh8iLggBEgcOgAKMnEUgGiEgNZErHFpK8w3gOfiVE/xGy/hWQNA3+9V6bhAKNbLJx/AiLggBEgcQgASMnEUgGiEgMLjbypcaHPUIzkZqdcxReauNNCScEAyiigdR3ckujuciLggBEgcSgAiMnEUgGiEgMNLWI///boLxULvGzwePEWw3SbQaNL+ld2EctYDD7s4iLggBEgcUgBCMnEUgGiEgg77TUNLYHoFVJ71YwxtUkgML6ncYfIwh4q89NfFy6BwiLggBEgcWgCCMnEUgGiEgGe2V92GcZujwsNjdxhRhnadMIX3OLMP1mk0GQqGGk3EiLggBEgcYgECMnEUgGiEgOrdQuJWxJ614j4rQZ9EsNtnZkLAWme7MqUMLWXWJqPYiLwgBEggagIABjJxFIBohIMUmeY7388fN3w36Qt76ZedSUaGkrU8KY81lnTfWq0i+Ii8IARIIHoSAAoycRSAaISCwhEmsiMEXHrcgCmXSBv/8aKn2XFXCqJHfEjbRMiMQ5SIvCAESCCCUgASMnEUgGiEghrKJbxuJjGo8mx1zxhXZLjnEnoY3+OKr2wAYrVXPUioiLwgBEggioIAIjJxFIBohIApSaB6LYLWSL+j6Mz9RWZubKPkSYQXj12DzH8OcLF9oIi8IARIIJNKAEIycRSAaISCwITrbj8o48cbfXlFbTULX71ybsAxSelHXEC8KokQ4LyIvCAESCCaYgSCMnEUgGiEgpFAL5iwLvfnXI8xMJYQVF5BRHzuQVx1hoMv3PtmOf3kiLwgBEggouvYyjJxFIBohIKajLgXLkxZf1OxCazlPncbcXEiiB3WP6BZexxqPuI4J"
+  },
+  {
+   "type": "ics23:simple",
+   "key_b64": "YmFuaw==",
+   "data_b64": "Cv4BCgRiYW5rEiBwuRrOu4yn3X/XFE7WH+2OM5pwk2a6slgKYLzp9bBukhoJCAEYASABKgEAIicIARIBARogfeAy6QRd7TpMAUcrwrsWQTqCfQjh4VDsM4axzL4q0iIiJQgBEiEBlv7y/pUHEVm7YwuH/inZWuB+kzt8Wet7UMeUbY87iEgiJwgBEgEBGiApu9b4wQ4rwz2wHRKSt/cDwIFZnsp0A2XDiadjpYISGiInCAESAQEaIOcgIcEHQUrcH+splUfF1l9KU9bHwbM+vsL/Blu8qv/EIicIARIBARog48esLrqAtPJwyjZBWvdZMvToE9Xqw9gZcd6hFa2M+Rw="
+  }
+ ]
+}

@@ -1,0 +1,15 @@
+[package]
+name = "xtask"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+tee-attestation = { path = "../crates/tee-attestation" }
+anyhow = "1.0"
+clap = { version = "4", features = ["derive"] }
+dcap-qvl.workspace = true
+hex.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+sp1-sdk = { version = "=5.2.2", features = ["native-gnark"] }

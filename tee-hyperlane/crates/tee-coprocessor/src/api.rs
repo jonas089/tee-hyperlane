@@ -1,0 +1,232 @@
+//! What the bridge UI reads.
+//!
+//! Two endpoints: where each route's trusted state stands right now, and — given a message
+//! id — which batch carried it and what the enclave signed for that batch. Everything served
+//! here is public: a quote, a set of message ids and a state root already on chain.
+
+use std::path::PathBuf;
+use std::sync::Arc;
+
+use anyhow::Result;
+use axum::extract::{Path, State};
+use axum::http::StatusCode;
+use axum::routing::get;
+use axum::{Json, Router};
+use serde::{Deserialize, Serialize};
+use tracing::info;
+
+use crate::chains::read_ism_state;
+use crate::config::RouteConfig;
+use tee_attestation::decode_ism_state;
+
+/// One attested batch, as the prover recorded it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AttestationRecord {
+    pub height: u64,
+    pub state_root: String,
+    pub quote: String,
+    pub measurements: Measurements,
+    /// Every message id authorised together with this one.
+    pub batch: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Measurements {
+    #[serde(rename = "mrTd")]
+    pub mr_td: String,
+    #[serde(rename = "osImageHash")]
+    pub os_image_hash: String,
+    #[serde(rename = "composeHash")]
+    pub compose_hash: String,
+}
+
+/// Where one route's trusted state stands, read live from the destination chain.
+#[derive(Debug, Clone, Serialize)]
+pub struct RouteStatus {
+    pub name: String,
+    pub origin: u32,
+    pub destination: u32,
+    pub ism: String,
+    /// Origin height the ISM currently trusts, and the origin head time it was taken at.
+    pub height: Option<u64>,
+    pub timestamp: Option<u64>,
+    #[serde(rename = "stateRoot")]
+    pub state_root: Option<String>,
+    /// Message ids in the most recent batches this route proved, newest first.
+    pub batches: Vec<Batch>,
+    /// The batch currently being proved, if any. Proving is minutes of CPU, so a route
+    /// spends most of its time here rather than idle.
+    pub proving: Option<Batch>,
+    /// Set when the destination chain could not be reached this request.
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Batch {
+    pub height: u64,
+    pub messages: Vec<String>,
+}
+
+/// Attestations are read from the proof store, so the API has no state of its own and a
+/// restart loses nothing.
+const RECENT_BATCHES: usize = 10;
+
+#[derive(Clone)]
+pub struct Api {
+    root: Arc<PathBuf>,
+    routes: Arc<Vec<RouteConfig>>,
+}
+
+impl Api {
+    pub fn new(proof_dir: impl Into<PathBuf>, routes: Vec<RouteConfig>) -> Self {
+        Self { root: Arc::new(proof_dir.into()), routes: Arc::new(routes) }
+    }
+
+    pub fn router(self) -> Router {
+        Router::new()
+            // The root is the status too, so opening the port in a browser shows something.
+            .route("/", get(status))
+            .route("/api/status", get(status))
+            .route("/api/attestation/{message_id}", get(attestation))
+            .route("/api/health", get(|| async { "ok" }))
+            .with_state(self)
+    }
+
+    /// The batch this route is proving right now, read from its staging file.
+    fn in_flight(&self, route: &str) -> Option<Batch> {
+        let staged = self.root.join(route).join("staging").join("attestation.json");
+        let raw = std::fs::read(staged).ok()?;
+        let record: serde_json::Value = serde_json::from_slice(&raw).ok()?;
+        let state = hex::decode(record["attestation"]["new_state"].as_str()?).ok()?;
+        let state = decode_ism_state(&state).ok()?;
+        let messages = record["messages"].as_array()?;
+        Some(Batch {
+            height: state.height,
+            messages: messages
+                .iter()
+                .filter_map(|m| m.as_str())
+                .map(message_id)
+                .collect(),
+        })
+    }
+
+    /// The last few batches this route proved, newest first.
+    fn recent_batches(&self, route: &str) -> Vec<Batch> {
+        let mut batches: Vec<Batch> = read_dir(&self.root.join(route))
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|f| f.extension().is_some_and(|e| e == "json"))
+            .filter_map(|f| serde_json::from_slice::<AttestationRecord>(&std::fs::read(f).ok()?).ok())
+            .map(|record| Batch { height: record.height, messages: record.batch })
+            .collect();
+        batches.sort_by(|a, b| b.height.cmp(&a.height));
+        batches.truncate(RECENT_BATCHES);
+        batches
+    }
+
+    /// Scan recorded batches for one containing this message.
+    fn find(&self, message_id: &str) -> Result<Option<AttestationRecord>> {
+        let wanted = message_id.trim_start_matches("0x").to_lowercase();
+        for route in read_dir(self.root.as_path())? {
+            for file in read_dir(&route)? {
+                if file.extension().is_none_or(|e| e != "json") {
+                    continue;
+                }
+                let record: AttestationRecord =
+                    match serde_json::from_slice(&std::fs::read(&file)?) {
+                        Ok(record) => record,
+                        // A file the prover is still writing is not an error.
+                        Err(_) => continue,
+                    };
+                if record
+                    .batch
+                    .iter()
+                    .any(|id| id.trim_start_matches("0x").eq_ignore_ascii_case(&wanted))
+                {
+                    return Ok(Some(record));
+                }
+            }
+        }
+        Ok(None)
+    }
+}
+
+/// A Hyperlane message id is the keccak of its encoding.
+fn message_id(message_hex: &str) -> String {
+    let raw = hex::decode(message_hex.trim_start_matches("0x")).unwrap_or_default();
+    format!("0x{}", hex::encode(alloy_primitives::keccak256(raw)))
+}
+
+fn read_dir(path: &std::path::Path) -> Result<Vec<PathBuf>> {
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    Ok(std::fs::read_dir(path)?.filter_map(|e| e.ok().map(|e| e.path())).collect())
+}
+
+/// Read every route's trusted state. Chain reads shell out, so they run off the async pool.
+async fn status(State(api): State<Api>) -> Json<Vec<RouteStatus>> {
+    let statuses = tokio::task::spawn_blocking(move || {
+        api.routes
+            .iter()
+            .map(|route| {
+                let batches = api.recent_batches(&route.name);
+                let proving = api.in_flight(&route.name);
+                let mut status = RouteStatus {
+                    name: route.name.clone(),
+                    origin: route.origin.domain(),
+                    destination: route.destination.domain(),
+                    ism: route.ism_id.clone(),
+                    height: None,
+                    timestamp: None,
+                    state_root: None,
+                    batches,
+                    proving,
+                    error: None,
+                };
+                match read_trusted_state(route) {
+                    Ok((root, height, timestamp)) => {
+                        status.state_root = Some(root);
+                        status.height = Some(height);
+                        status.timestamp = Some(timestamp);
+                    }
+                    Err(error) => status.error = Some(error.to_string()),
+                }
+                status
+            })
+            .collect::<Vec<_>>()
+    })
+    .await
+    .unwrap_or_default();
+    Json(statuses)
+}
+
+fn read_trusted_state(route: &RouteConfig) -> Result<(String, u64, u64)> {
+    let hex_state = read_ism_state(&route.destination, &route.ism_id)?;
+    let raw = hex::decode(hex_state.trim_start_matches("0x"))?;
+    let state = decode_ism_state(&raw)?;
+    Ok((
+        format!("0x{}", hex::encode(state.state_root)),
+        state.height,
+        state.timestamp,
+    ))
+}
+
+async fn attestation(
+    State(api): State<Api>,
+    Path(message_id): Path<String>,
+) -> Result<Json<AttestationRecord>, StatusCode> {
+    match api.find(&message_id) {
+        Ok(Some(record)) => Ok(Json(record)),
+        // Not yet attested is the normal case for a fresh message, not a failure.
+        Ok(None) => Err(StatusCode::NOT_FOUND),
+        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+    }
+}
+
+pub async fn serve(api: Api, addr: &str) -> Result<()> {
+    let listener = tokio::net::TcpListener::bind(addr).await?;
+    info!(%addr, "attestation api listening");
+    axum::serve(listener, api.router()).await?;
+    Ok(())
+}

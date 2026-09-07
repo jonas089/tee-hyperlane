@@ -1,0 +1,24 @@
+# Serves route status and attestations. Read-only over the proof store the coprocessor writes.
+[Unit]
+Description=TEE Hyperlane attestation API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=bridge
+WorkingDirectory=/opt/tee-hyperlane
+ExecStart=/opt/tee-hyperlane/bin/tee-hyperlane \
+  --config /opt/tee-hyperlane/coprocessor.toml \
+  serve --listen 0.0.0.0:3001 --proof-dir /var/lib/tee-hyperlane/proofs
+Restart=always
+RestartSec=10
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/tee-hyperlane
+
+[Install]
+WantedBy=multi-user.target

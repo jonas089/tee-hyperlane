@@ -1,0 +1,517 @@
+//! What each subcommand actually does.
+//!
+//! Split from `main.rs` so that file stays a description of the command line and nothing
+//! else. Each function here is one stage of the pipeline, and each is runnable on its own -
+//! which is what makes a stuck route debuggable.
+
+use std::time::Duration;
+
+use anyhow::{Context, Result};
+use tracing::info;
+
+use crate::config::Config;
+use crate::tasks::{cpu_prover_permit, run_route, ProofStore};
+
+/// Anchor a Celestia-origin ISM to a live header.
+pub async fn bootstrap_celestia(
+    rpc: &str,
+    lag: u64,
+    height: Option<u64>,
+    identity_digest: &str,
+) -> Result<()> {
+    use crate::celestia::CelestiaReader;
+    use tee_node::origins::celestia::{commit_celestia_store, get_celestia_root, CelestiaStore};
+
+    let reader = CelestiaReader::new(rpc)?;
+    let anchor = match height {
+        Some(h) => h,
+        None => reader.latest_height().await?.saturating_sub(lag).max(2),
+    };
+    let trusted = reader.light_block(anchor).await?;
+    let store = CelestiaStore { trusted };
+    let root = get_celestia_root(&store)?;
+
+    let digest = hex::decode(identity_digest.trim_start_matches("0x"))?;
+    let state = tee_attestation::IsmState {
+        state_root: root.state_root.0,
+        origin_domain: tee_node::origins::Origin::Celestia.domain(),
+        height: root.height,
+        timestamp: root.timestamp,
+        lc_store_commit: commit_celestia_store(&store),
+        identity_digest: digest
+            .as_slice()
+            .try_into()
+            .map_err(|_| anyhow::anyhow!("identity digest must be 32 bytes"))?,
+    };
+
+    let header = &store.trusted.signed_header.header;
+    println!("chain            {}", header.chain_id);
+    println!("trusted header   {}", store.trusted.height());
+    println!("app hash commits to state at height {}", state.height);
+    println!("timestamp        {}", state.timestamp);
+    println!("state root       0x{}", hex::encode(state.state_root));
+    println!("lc store commit  0x{}", hex::encode(state.lc_store_commit));
+    println!();
+    println!("genesis state    0x{}", hex::encode(tee_attestation::encode_ism_state(&state)));
+    Ok(())
+}
+
+/// Gather one Ethereum step and hand it to the enclave.
+#[allow(clippy::too_many_arguments)]
+pub async fn attest_ethereum(
+    beacon: &str,
+    execution: &str,
+    archive: Option<&str>,
+    enclave_url: &str,
+    checkpoint: Option<&str>,
+    trusted_state_hex: &str,
+    merkle_tree_hook: &str,
+    mailbox: &str,
+    base_slot: u64,
+    out: Option<String>,
+) -> Result<()> {
+    use helios_consensus_core::{apply_bootstrap, verify_bootstrap};
+    use crate::enclave::EnclaveClient;
+    use crate::ethereum::{
+        expected_current_slot, EthereumReader, ExecutionReader, Spec, SECONDS_PER_SLOT,
+    };
+    use tee_node::origins::ethereum::{commit_ethereum_store, EthereumStore};
+
+    let trusted_raw = hex::decode(trusted_state_hex.trim_start_matches("0x"))?;
+    let trusted = tee_attestation::decode_ism_state(&trusted_raw)?;
+
+    // Rebuild the exact store the ISM committed to. Same checkpoint in, same store out - the
+    // enclave checks that by hashing it against `lc_store_commit`.
+    //
+    // The checkpoint is not a fixed value: the store commitment covers the finalized header,
+    // which moves every epoch, so a checkpoint chosen at bootstrap only reconstructs the
+    // genesis store. It is instead derived from the ISM's own state, which makes the route
+    // resumable from nothing but what is on chain. Post-merge, an execution payload's
+    // timestamp is exactly `genesis_time + slot * 12`, so the trusted timestamp names the
+    // slot, and the slot names the block root.
+    let beacon_reader = EthereumReader::new(beacon);
+    let config = beacon_reader.chain_config().await?;
+    let checkpoint = match checkpoint {
+        Some(explicit) => explicit.to_string(),
+        None => {
+            let slot = trusted.timestamp.saturating_sub(config.genesis_time) / SECONDS_PER_SLOT;
+            beacon_reader
+                .block_root_at_slot(slot)
+                .await
+                .with_context(|| format!("no beacon block at slot {slot}"))?
+        }
+    };
+    let bootstrap = beacon_reader.bootstrap(&checkpoint).await?;
+    let root: alloy_primitives::B256 = checkpoint.parse()?;
+    verify_bootstrap::<Spec>(&bootstrap, root, &config.forks)
+        .map_err(|e| anyhow::anyhow!("bootstrap: {e}"))?;
+    let mut inner = helios_consensus_core::types::LightClientStore::default();
+    apply_bootstrap::<Spec>(&mut inner, &bootstrap);
+
+    let store = EthereumStore {
+        store: inner,
+        genesis_root: config.genesis_root,
+        genesis_time: config.genesis_time,
+        forks: config.forks,
+    };
+    anyhow::ensure!(
+        commit_ethereum_store(&store) == trusted.lc_store_commit,
+        "light-client store rebuilt from checkpoint {checkpoint} does not match the ISM's \
+         commitment"
+    );
+
+    let finality = beacon_reader.finality_update().await?;
+    let slot = expected_current_slot(config.genesis_time);
+
+    let hook: alloy_primitives::Address = merkle_tree_hook.parse()?;
+    let mailbox_address: alloy_primitives::Address = mailbox.parse()?;
+    let exec = ExecutionReader::new(execution);
+    // Reads at the trusted height are historical. A public node keeps state proofs for about
+    // 128 blocks, so resuming after a longer outage needs an archive node - without one the
+    // route is stuck rather than merely behind.
+    let history = ExecutionReader::new(archive.unwrap_or(execution));
+
+    // The finalized execution block the enclave will attest.
+    let target = finality
+        .finalized_header()
+        .execution()
+        .map_err(|_| anyhow::anyhow!("finalized header has no execution payload"))?;
+    let target_block = *target.block_number();
+    anyhow::ensure!(
+        target_block > trusted.height,
+        "finalized head {target_block} has not passed the trusted height {}",
+        trusted.height
+    );
+
+    let tree_proof = exec.merkle_tree_proof(hook, base_slot, target_block).await?;
+    let snapshot_proof = history
+        .merkle_tree_proof(hook, base_slot, trusted.height)
+        .await
+        .context("reading the merkle tree at the trusted height; set `archive_rpc` if pruned")?;
+    let snapshot = tee_node::hyperlane_state::get_evm_merkle_tree(
+        alloy_primitives::B256::from(trusted.state_root),
+        &snapshot_proof,
+    )?;
+
+    let dispatched = history
+        .dispatched_messages(mailbox_address, hook, trusted.height + 1, target_block)
+        .await?;
+    println!(
+        "finalized {target_block} | trusted {} | {} new leaves",
+        trusted.height,
+        dispatched.len()
+    );
+    anyhow::ensure!(!dispatched.is_empty(), "nothing to attest");
+
+    let mut tree_address = [0u8; 32];
+    tree_address[12..].copy_from_slice(hook.as_slice());
+
+    // TreeInput is an internally-tagged enum, so the variant's fields sit alongside `kind`.
+    let mut tree_input = serde_json::to_value(&tree_proof)?;
+    tree_input
+        .as_object_mut()
+        .context("tree proof must be an object")?
+        .insert("kind".into(), serde_json::json!("evm"));
+
+    let request = serde_json::json!({
+        "trusted_state": hex::encode(&trusted_raw),
+        "origin": {
+            "chain": "ethereum",
+            "store": store,
+            "updates": { "committee_updates": [], "finality_update": finality },
+            "expected_current_slot": slot,
+        },
+        "tree": tree_input,
+        "tree_snapshot": snapshot,
+        "message_ids": dispatched.iter().map(|d| d.message_id).collect::<Vec<_>>(),
+        "merkle_tree_address": tree_address,
+    });
+
+    let attestation = EnclaveClient::new(enclave_url).attest(&request).await?;
+    println!("attested new state 0x{}", attestation.new_state);
+    println!("messages           {}", attestation.message_ids.len());
+
+    if let Some(path) = out {
+        let record = serde_json::json!({
+            "attestation": {
+                "quote": attestation.quote,
+                "event_log": attestation.event_log,
+                "payload": attestation.payload,
+                "new_state": attestation.new_state,
+            },
+            "messages": dispatched.iter().map(|d| hex::encode(&d.message)).collect::<Vec<_>>(),
+        });
+        std::fs::write(&path, serde_json::to_vec_pretty(&record)?)?;
+        println!("wrote {path}");
+    }
+    Ok(())
+}
+
+/// Gather one Celestia step and hand it to the enclave.
+pub async fn attest_celestia(
+    rpc: &str,
+    archive: Option<&str>,
+    enclave_url: &str,
+    trusted_state_hex: &str,
+    merkle_tree_hook_hex: &str,
+    lag: u64,
+    out: Option<String>,
+) -> Result<()> {
+    use crate::celestia::CelestiaReader;
+    use crate::enclave::EnclaveClient;
+
+    let trusted_raw = hex::decode(trusted_state_hex.trim_start_matches("0x"))?;
+    let trusted = tee_attestation::decode_ism_state(&trusted_raw)?;
+    let hook_id: [u8; 32] = hex::decode(merkle_tree_hook_hex.trim_start_matches("0x"))?
+        .as_slice()
+        .try_into()
+        .map_err(|_| anyhow::anyhow!("merkle tree hook must be 32 bytes"))?;
+
+    let reader = CelestiaReader::new(rpc)?;
+    // Everything at the trusted height is historical: the header, the state proof and the
+    // tx search. Mocha's public RPCs prune all three.
+    let history = CelestiaReader::new(archive.unwrap_or(rpc))?;
+    let head = reader.latest_height().await?;
+    let target = head.saturating_sub(lag);
+    anyhow::ensure!(
+        target > trusted.height + 1,
+        "head has not advanced past the trusted state ({} vs {})",
+        target,
+        trusted.height
+    );
+
+    // The header we verify is one past the state it commits to.
+    let new_block = reader.light_block(target + 1).await?;
+    let trusted_block = history.light_block(trusted.height + 1).await?;
+
+    let (hook_bytes, proof) = reader.merkle_tree_hook_proof(hook_id, target).await?;
+    let onchain = tee_node::state_proofs::decode_merkle_tree_hook(&hook_bytes)?;
+
+    // Everything inserted since the ISM's trusted height, in tree order.
+    let inserted = history.dispatched_messages(trusted.height + 1, target).await?;
+    println!("head {head} | attesting state at {target} | {} new leaves", inserted.len());
+    anyhow::ensure!(!inserted.is_empty(), "nothing to attest; no messages dispatched");
+
+    // The tree as it stood at the ISM's trusted height, proven rather than assumed. The
+    // enclave replays the new leaves onto it and checks the result against the tree it just
+    // proved at the head, so a wrong snapshot cannot pass.
+    let (snapshot_bytes, _) = history
+        .merkle_tree_hook_proof(hook_id, trusted.height)
+        .await
+        .context("reading the merkle tree at the trusted height; set `archive_rpc` if pruned")?;
+    let snapshot = tee_node::state_proofs::decode_merkle_tree_hook(&snapshot_bytes)?;
+    anyhow::ensure!(
+        snapshot.count as usize + inserted.len() == onchain.count as usize,
+        "snapshot has {} leaves and {} were found, but the head proves {}",
+        snapshot.count,
+        inserted.len(),
+        onchain.count
+    );
+
+    let request = serde_json::json!({
+        "trusted_state": hex::encode(&trusted_raw),
+        "origin": {
+            "chain": "celestia",
+            "store": { "trusted": trusted_block },
+            "updates": [new_block],
+            // The coprocessor's clock. The enclave uses it only for the trusting-period
+            // check and never derives it from the header being verified, which is what
+            // keeps that check meaningful.
+            "now": tendermint::Time::from_unix_timestamp(
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)?
+                    .as_secs() as i64,
+                0,
+            )?,
+        },
+        "tree": {
+            "kind": "celestia",
+            "hook_id": hook_id,
+            "hook_bytes": hook_bytes,
+            "proof": proof,
+        },
+        "tree_snapshot": snapshot,
+        "message_ids": inserted.iter().map(|m| m.message_id).collect::<Vec<_>>(),
+        "merkle_tree_address": hook_id,
+    });
+
+    let client = EnclaveClient::new(enclave_url);
+    let attestation = client.attest(&request).await?;
+
+    println!("attested new state 0x{}", attestation.new_state);
+    println!("quote bytes        {}", attestation.quote.len() / 2);
+    println!("messages           {}", attestation.message_ids.len());
+    if let Some(path) = out {
+        let record = serde_json::json!({
+            "attestation": {
+                "quote": attestation.quote,
+                "event_log": attestation.event_log,
+                "payload": attestation.payload,
+                "new_state": attestation.new_state,
+            },
+            "messages": inserted.iter().map(|m| hex::encode(&m.message)).collect::<Vec<_>>(),
+        });
+        std::fs::write(&path, serde_json::to_vec_pretty(&record)?)?;
+        println!("wrote {path}");
+    }
+    Ok(())
+}
+
+/// Anchor an Ethereum-origin ISM to a sync-committee checkpoint.
+pub async fn bootstrap_ethereum(
+    beacon: &str,
+    execution: &str,
+    checkpoint: Option<String>,
+    identity_digest: &str,
+) -> Result<()> {
+    use helios_consensus_core::{apply_bootstrap, verify_bootstrap};
+    use crate::ethereum::EthereumReader;
+    use tee_node::origins::ethereum::{commit_ethereum_store, get_ethereum_root, EthereumStore};
+
+    let reader = EthereumReader::new(beacon);
+    let config = reader.chain_config().await?;
+    let checkpoint = match checkpoint {
+        Some(c) => c,
+        None => reader.finalized_root().await?,
+    };
+    let bootstrap = reader.bootstrap(&checkpoint).await?;
+
+    // Check the bootstrap against the checkpoint before believing any of it. This is the
+    // one place trust enters, and it enters by explicit choice of block root.
+    let root: alloy_primitives::B256 = checkpoint.parse()?;
+    verify_bootstrap::<crate::ethereum::Spec>(&bootstrap, root, &config.forks)
+        .map_err(|e| anyhow::anyhow!("bootstrap does not match checkpoint {checkpoint}: {e}"))?;
+
+    let mut inner = helios_consensus_core::types::LightClientStore::default();
+    apply_bootstrap::<crate::ethereum::Spec>(&mut inner, &bootstrap);
+
+    let store = EthereumStore {
+        store: inner,
+        genesis_root: config.genesis_root,
+        genesis_time: config.genesis_time,
+        forks: config.forks,
+    };
+    let head = get_ethereum_root(&store)?;
+
+    let digest = hex::decode(identity_digest.trim_start_matches("0x"))?;
+    let state = tee_attestation::IsmState {
+        state_root: head.state_root.0,
+        origin_domain: tee_node::origins::Origin::Ethereum.domain(),
+        height: head.height,
+        timestamp: head.timestamp,
+        lc_store_commit: commit_ethereum_store(&store),
+        identity_digest: digest
+            .as_slice()
+            .try_into()
+            .map_err(|_| anyhow::anyhow!("identity digest must be 32 bytes"))?,
+    };
+
+    let _ = execution;
+    println!("checkpoint       {checkpoint}");
+    println!("execution block  {}", state.height);
+    println!("timestamp        {}", state.timestamp);
+    println!("state root       0x{}", hex::encode(state.state_root));
+    println!("lc store commit  0x{}", hex::encode(state.lc_store_commit));
+    println!();
+    println!("genesis state    0x{}", hex::encode(tee_attestation::encode_ism_state(&state)));
+    Ok(())
+}
+
+/// Produce the two Groth16 proofs the destination needs.
+pub async fn prove(attestation_path: &str, elf_dir: &str, out: &str) -> Result<()> {
+    use sp1_sdk::{Prover, ProverClient, SP1Stdin};
+    use std::time::Instant;
+    use crate::enclave::fetch_collateral;
+
+    let record: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(attestation_path)?)?;
+    let att = &record["attestation"];
+    let quote_hex = att["quote"].as_str().context("quote")?;
+
+    println!("fetching Intel collateral from PCCS...");
+    let collateral = fetch_collateral(quote_hex).await?;
+
+    let payload = hex::decode(att["payload"].as_str().context("payload")?)?;
+    let update = tee_attestation::decode_attested_update(&payload)?;
+
+    // The prover's clock, which the circuit bounds to the attested head's timestamp. It may
+    // not be freely chosen: too far back and a revoked TCB could be revived, too far forward
+    // and the collateral has not been issued yet.
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)?
+        .as_secs();
+    println!("attested head {} | prover clock {now}", update.new_state.timestamp);
+
+    let inputs = tee_attestation::AttestationInputs {
+        quote: hex::decode(quote_hex.trim_start_matches("0x"))?,
+        event_log: att["event_log"].as_str().context("event log")?.as_bytes().to_vec(),
+        collateral: tee_attestation::AttestationInputs::encode_collateral(&collateral),
+        now,
+        payload: payload.clone(),
+    };
+
+    let mut stdin = SP1Stdin::new();
+    stdin.write(&inputs);
+
+    let client = ProverClient::builder().cpu().build();
+    let mut proofs = serde_json::Map::new();
+    for (name, elf_name) in
+        [("state_transition", "tee-state-transition"), ("state_membership", "tee-state-membership")]
+    {
+        let elf = std::fs::read(std::path::Path::new(elf_dir).join(elf_name))
+            .with_context(|| format!("{elf_name}: run `xtask build` in tee-circuit"))?;
+        let (pk, vk) = client.setup(&elf);
+        println!("proving {name}...");
+        let started = Instant::now();
+        let proof = client.prove(&pk, &stdin).groth16().run()?;
+        client.verify(&proof, &vk)?;
+        println!("  {name}: {:.0}s, {} proof bytes", started.elapsed().as_secs_f64(), proof.bytes().len());
+
+        proofs.insert(
+            name.to_string(),
+            serde_json::json!({
+                "proof": hex::encode(proof.bytes()),
+                "public_values": hex::encode(proof.public_values.as_slice()),
+            }),
+        );
+    }
+
+    let mut record = record.clone();
+    record["proofs"] = serde_json::Value::Object(proofs);
+
+    // The same file is what the UI reads, so record the batch in the shape it expects:
+    // which messages were attested together, and the measurements of the enclave that did
+    // it. Everything here is public.
+    let measurements = enclave_measurements(att)?;
+    record["height"] = update.new_state.height.into();
+    record["state_root"] = format!("0x{}", hex::encode(update.new_state.state_root)).into();
+    record["quote"] = quote_hex.into();
+    record["measurements"] = serde_json::to_value(measurements)?;
+    record["batch"] = update
+        .message_ids
+        .iter()
+        .map(|id| format!("0x{}", hex::encode(id)))
+        .collect::<Vec<_>>()
+        .into();
+
+    std::fs::write(out, serde_json::to_vec_pretty(&record)?)?;
+    println!("wrote {out}");
+    Ok(())
+}
+
+/// Pull the measurements out of the quote and event log, for display.
+pub fn enclave_measurements(
+    attestation: &serde_json::Value,
+) -> Result<crate::api::Measurements> {
+    let quote_bytes =
+        hex::decode(attestation["quote"].as_str().context("quote")?.trim_start_matches("0x"))?;
+    let quote = dcap_qvl::quote::Quote::parse(&quote_bytes)
+        .map_err(|e| anyhow::anyhow!("quote does not parse: {e:?}"))?;
+    let td = quote.report.as_td10().context("not a TDX quote")?;
+
+    let events: Vec<tee_attestation::EventLog> =
+        serde_json::from_str(attestation["event_log"].as_str().context("event log")?)?;
+    let read = |name: &str| {
+        tee_attestation::get_event_value(&events, name)
+            .map(hex::encode)
+            .unwrap_or_default()
+    };
+
+    Ok(crate::api::Measurements {
+        mr_td: hex::encode(td.mr_td),
+        os_image_hash: read("os-image-hash"),
+        compose_hash: read("compose-hash"),
+    })
+}
+
+pub async fn run(config: Config) -> Result<()> {
+    let tick = Duration::from_secs(config.tick_secs);
+    let cpu = cpu_prover_permit();
+    let store = std::sync::Arc::new(ProofStore::new(expand_home(&config.proof_dir)));
+
+    let mut routes = Vec::new();
+    for route in config.routes {
+        info!(
+            route = %route.name,
+            origin = route.origin.domain(),
+            destination = route.destination.domain(),
+            "configured"
+        );
+        routes.push(tokio::spawn(run_route(route, store.clone(), cpu.clone(), tick)));
+    }
+    info!(tick_secs = config.tick_secs, routes = routes.len(), "coprocessor running");
+
+    // A route runs until the process stops. If one panics, take the service down so systemd
+    // restarts it, rather than leaving a direction silently dead.
+    for handle in routes {
+        handle.await?;
+    }
+    Ok(())
+}
+
+pub fn expand_home(path: &str) -> String {
+    match (path.strip_prefix("~/"), std::env::var("HOME")) {
+        (Some(rest), Ok(home)) => format!("{home}/{rest}"),
+        _ => path.to_string(),
+    }
+}
