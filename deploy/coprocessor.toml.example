@@ -1,18 +1,16 @@
-# Routes the coprocessor drives. One block per direction.
+# The six live routes, with the Alchemy key redacted. Celestia is the hub: every route has it
+# on one side, so the four networks reach each other through Celestia rather than through a
+# mesh of ISMs.
 #
-# Copy to coprocessor.toml and adjust. Nothing here is secret; keys live in .env.
-
-# How often to look for work. Interval-driven, so behaviour is the same busy or idle.
-tick_secs = 60
-
-# Proved batches are kept here. The attestation API reads the same directory, so a restart
-# loses nothing and the UI keeps working across one.
+# Kept in step with what runs on the coprocessor host, because a config that has drifted from
+# the deployment is worse than none - the addresses here are the ones the ISMs actually pin.
+tick_secs = 120
 proof_dir = "/var/lib/tee-hyperlane/proofs"
 
 [[routes]]
 name = "celestia-to-sepolia"
-tee_node_url = "https://a545800ddb811ccf2a5c9bcba4e18b28fb402cc0-8080.dstack-pha-prod9.phala.network"
-ism_id = "0xb9E5E3eb926EA22B951d2fb7392F9F3D6c704054"
+tee_node_url = "https://d37cfd9c3598f2335cd3c6c4a1f76da46407d421-8080.dstack-pha-prod9.phala.network"
+ism_id = "0x6f31D79D898f86a60832Fd1caB31ceC67Bc71Fb6"
 merkle_tree_address = "0x726f757465725f706f73745f6469737061746368000000030000000000000000"
 
 [routes.origin]
@@ -27,18 +25,53 @@ merkle_tree_hook_id = "0x726f757465725f706f73745f6469737061746368000000030000000
 kind = "ethereum"
 domain = 11155111
 execution_rpc = "https://ethereum-sepolia-rpc.publicnode.com"
-beacon_rpc = "https://ethereum-sepolia-beacon-api.publicnode.com"
 mailbox = "0xfFAEF09B3cd11D9b20d1a19bECca54EEC2884766"
-merkle_tree_hook = "0x4917a9746A7B6E0A57159cCb7F5a6744247f2d0d"
-merkle_tree_base_slot = 103
+
+[[routes]]
+name = "celestia-to-arbitrum"
+tee_node_url = "https://d37cfd9c3598f2335cd3c6c4a1f76da46407d421-8080.dstack-pha-prod9.phala.network"
+ism_id = "0x21bdf13D66D3e5F0D4793B64bb4c85034B9EDc88"
+merkle_tree_address = "0x726f757465725f706f73745f6469737061746368000000030000000000000000"
+
+[routes.origin]
+kind = "celestia"
+domain = 1297040200
+rpc = "https://rpc-mocha.pops.one"
+grpc = "https://grpc-mocha.pops.one"
+mailbox_id = "0x68797065726c616e650000000000000000000000000000000000000000000000"
+merkle_tree_hook_id = "0x726f757465725f706f73745f6469737061746368000000030000000000000000"
+
+[routes.destination]
+kind = "ethereum"
+domain = 421614
+execution_rpc = "https://arbitrum-sepolia-rpc.publicnode.com"
+mailbox = "0x598facE78a4302f11E3de0bee1894Da0b2Cb71F8"
+
+[[routes]]
+name = "celestia-to-base"
+tee_node_url = "https://d37cfd9c3598f2335cd3c6c4a1f76da46407d421-8080.dstack-pha-prod9.phala.network"
+ism_id = "0x1D32350f3440BEa7f7E450Aa085f63E0d7E38729"
+merkle_tree_address = "0x726f757465725f706f73745f6469737061746368000000030000000000000000"
+
+[routes.origin]
+kind = "celestia"
+domain = 1297040200
+rpc = "https://rpc-mocha.pops.one"
+grpc = "https://grpc-mocha.pops.one"
+mailbox_id = "0x68797065726c616e650000000000000000000000000000000000000000000000"
+merkle_tree_hook_id = "0x726f757465725f706f73745f6469737061746368000000030000000000000000"
+
+[routes.destination]
+kind = "ethereum"
+domain = 84532
+execution_rpc = "https://base-sepolia-rpc.publicnode.com"
+mailbox = "0x6966b0E55883d49BFB24539356a2f8A673E02039"
 
 [[routes]]
 name = "sepolia-to-celestia"
-tee_node_url = "https://a1e3cd5d7fd24c2d1dc82237005316e4cd334db0-8080.dstack-pha-prod9.phala.network"
-ism_id = "0x726f757465725f69736d000000000000000000000000002a0000000000000001"
+tee_node_url = "https://f8da571c89be34182a39099d2c0684f6d46dfd75-8080.dstack-pha-prod9.phala.network"
+ism_id = "0x726f757465725f69736d000000000000000000000000002a0000000000000009"
 merkle_tree_address = "0x0000000000000000000000004917a9746a7b6e0a57159ccb7f5a6744247f2d0d"
-# `checkpoint` may be set to pin an Ethereum origin's light-client anchor. Left out, it is
-# derived from the ISM's trusted state each tick, which is what makes the route resumable.
 
 [routes.origin]
 kind = "ethereum"
@@ -59,36 +92,38 @@ grpc = "https://grpc-mocha.pops.one"
 mailbox_id = "0x68797065726c616e650000000000000000000000000000000000000000000000"
 merkle_tree_hook_id = "0x726f757465725f706f73745f6469737061746368000000030000000000000000"
 
-# Celestia to the L2s. Same enclave, same circuits, same vkeys as celestia-to-sepolia -
-# only the destination differs. This is what "two enclaves cover four networks" buys.
-
+# Arbitrum back to Celestia. The enclave is Ethereum's: an L2 root is derived from the L1
+# state root that light client already verifies, so this needs no third enclave.
+#
+# Latency is the rollup's, not ours - a BoLD assertion confirms about every 31 minutes, and
+# only a confirmed one is trustless.
 [[routes]]
-name = "celestia-to-arbitrum"
-tee_node_url = "https://a545800ddb811ccf2a5c9bcba4e18b28fb402cc0-8080.dstack-pha-prod9.phala.network"
-ism_id = "0xf48fefa3848f1F25093D3e7937BdD4b80B421D64"
-merkle_tree_address = "0x726f757465725f706f73745f6469737061746368000000030000000000000000"
+name = "arbitrum-to-celestia"
+tee_node_url = "https://f8da571c89be34182a39099d2c0684f6d46dfd75-8080.dstack-pha-prod9.phala.network"
+ism_id = "0x726f757465725f69736d000000000000000000000000002a000000000000000a"
+merkle_tree_address = "0x000000000000000000000000ad34a66bf6db18e858f6b686557075568c6e031c"
 
 [routes.origin]
-kind = "celestia"
-domain = 1297040200
-rpc = "https://rpc-mocha.pops.one"
-grpc = "https://grpc-mocha.pops.one"
-mailbox_id = "0x68797065726c616e650000000000000000000000000000000000000000000000"
-merkle_tree_hook_id = "0x726f757465725f706f73745f6469737061746368000000030000000000000000"
-
-[routes.destination]
-kind = "ethereum"
+kind = "ethereum_l2"
 domain = 421614
-execution_rpc = "https://arbitrum-sepolia-rpc.publicnode.com"
+l2_rpc = "https://arb-sepolia.g.alchemy.com/v2/<ALCHEMY_KEY>"
+# Alchemy's free tier caps eth_getLogs at ten blocks and a confirmed L2 head moves
+# thousands at a time; publicnode serves the whole span. Both are untrusted.
+logs_rpc = "https://arbitrum-sepolia-rpc.publicnode.com"
+rollup = "arbitrum"
+l1_anchor_contract = "0x042B2E6C5E99d4c521bd49beeD5E99651D9B0Cf4"
 mailbox = "0x598facE78a4302f11E3de0bee1894Da0b2Cb71F8"
+merkle_tree_hook = "0xAD34A66Bf6dB18E858F6B686557075568c6E031C"
+merkle_tree_base_slot = 151
 
-[[routes]]
-name = "celestia-to-base"
-tee_node_url = "https://a545800ddb811ccf2a5c9bcba4e18b28fb402cc0-8080.dstack-pha-prod9.phala.network"
-ism_id = "0xFeA14C1444A7a8beAb7122fdE5A168212D7185bE"
-merkle_tree_address = "0x726f757465725f706f73745f6469737061746368000000030000000000000000"
+[routes.origin.l1]
+kind = "ethereum"
+domain = 11155111
+execution_rpc = "https://rpc.sepolia.ethpandaops.io"
+beacon_rpc = "https://ethereum-sepolia-beacon-api.publicnode.com"
+mailbox = "0xfFAEF09B3cd11D9b20d1a19bECca54EEC2884766"
 
-[routes.origin]
+[routes.destination]
 kind = "celestia"
 domain = 1297040200
 rpc = "https://rpc-mocha.pops.one"
@@ -96,8 +131,38 @@ grpc = "https://grpc-mocha.pops.one"
 mailbox_id = "0x68797065726c616e650000000000000000000000000000000000000000000000"
 merkle_tree_hook_id = "0x726f757465725f706f73745f6469737061746368000000030000000000000000"
 
-[routes.destination]
-kind = "ethereum"
+# Base back to Celestia. Same shape as Arbitrum, but Base's dispute window is five days, so a
+# transfer out of Base is a multi-day trip. That is the rollup's parameter, not ours.
+[[routes]]
+name = "base-to-celestia"
+tee_node_url = "https://f8da571c89be34182a39099d2c0684f6d46dfd75-8080.dstack-pha-prod9.phala.network"
+ism_id = "0x726f757465725f69736d000000000000000000000000002a000000000000000b"
+merkle_tree_address = "0x00000000000000000000000086fb9f1c124fb20ff130c41a79a432f770f67afd"
+
+[routes.origin]
+kind = "ethereum_l2"
 domain = 84532
-execution_rpc = "https://base-sepolia-rpc.publicnode.com"
+rollup = "base"
+l2_rpc = "https://base-sepolia.g.alchemy.com/v2/<ALCHEMY_KEY>"
+# Alchemy's free tier caps eth_getLogs at ten blocks and a confirmed L2 head moves
+# thousands at a time; publicnode serves the whole span. Both are untrusted.
+logs_rpc = "https://base-sepolia-rpc.publicnode.com"
+l1_anchor_contract = "0x2fF5cC82dBf333Ea30D8ee462178ab1707315355"
 mailbox = "0x6966b0E55883d49BFB24539356a2f8A673E02039"
+merkle_tree_hook = "0x86fb9F1c124fB20ff130C41a79a432F770f67AFD"
+merkle_tree_base_slot = 151
+
+[routes.origin.l1]
+kind = "ethereum"
+domain = 11155111
+execution_rpc = "https://rpc.sepolia.ethpandaops.io"
+beacon_rpc = "https://ethereum-sepolia-beacon-api.publicnode.com"
+mailbox = "0xfFAEF09B3cd11D9b20d1a19bECca54EEC2884766"
+
+[routes.destination]
+kind = "celestia"
+domain = 1297040200
+rpc = "https://rpc-mocha.pops.one"
+grpc = "https://grpc-mocha.pops.one"
+mailbox_id = "0x68797065726c616e650000000000000000000000000000000000000000000000"
+merkle_tree_hook_id = "0x726f757465725f706f73745f6469737061746368000000030000000000000000"
