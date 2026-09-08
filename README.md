@@ -39,53 +39,76 @@ docs/            integration guide
 
 ## Docs
 
-- [docs/integrations.md](docs/integrations.md) — adding a chain: EVM rollups, evolve-stack,
+- [docs/integrations.md](docs/integrations.md) - adding a chain: EVM rollups, evolve-stack,
   and entirely new chains like Solana.
-- [deploy/DEPLOYMENT.md](deploy/DEPLOYMENT.md) — live addresses and the deployment footguns.
-- [deploy/E2E.md](deploy/E2E.md) — the four testnet transfers, with what each cost.
-- [deploy/server/README.md](deploy/server/README.md) — running the coprocessor and UI on a box.
-- [bridge-app/README.md](bridge-app/README.md) — the UI.
+- [deploy/DEPLOYMENT.md](deploy/DEPLOYMENT.md) - live addresses and the deployment footguns.
+- [deploy/E2E.md](deploy/E2E.md) - the four testnet transfers, with what each cost.
+- [deploy/server/README.md](deploy/server/README.md) - running the coprocessor and UI on a box.
+- [bridge-app/README.md](bridge-app/README.md) - the UI.
+- [docs/verify-deployment.md](docs/verify-deployment.md) - checking that what is deployed is
+  what is in this repo, without taking its word for it.
+- [docs/redeploy.md](docs/redeploy.md) - replacing an enclave.
+
+See [docs/verify-deployment.md](docs/verify-deployment.md) to check any of the values
+below yourself, without trusting this file.
 
 ## Deployments
 
-Enclaves — Phala Cloud `prod9`, image `ghcr.io/jonas089/tee-node`, OS `dstack-0.5.9`
+Enclaves - Phala Cloud `prod9`, image `ghcr.io/jonas089/tee-node`, OS `dstack-0.5.9`
 (production), `tdx.small`. $0.0608/hr each.
 
 | node | app id |
 |---|---|
-| `tee-node-ethereum` | `a1e3cd5d7fd24c2d1dc82237005316e4cd334db0` |
-| `tee-node-celestia` | `a545800ddb811ccf2a5c9bcba4e18b28fb402cc0` |
+| `tee-node-ethereum` | `a3feb765232e08e567d5f7de773db9dac55e7d5b` |
+| `tee-node-celestia` | `596ed37171fa16da4a9ba5afaec8f19cb8b2860d` |
 
 Reach them at `https://<app-id>-8080.dstack-pha-prod9.phala.network`.
 
-The pinned identity constrains the **OS image, the container image and the KMS** — never the
+The pinned identity constrains the **OS image, the container image and the KMS** - never the
 app id or instance id. That is deliberate: instances get replaced and providers may change,
 and an identity tied to one instance would have to be re-pinned every time. Both nodes above
 were deployed independently and produce byte-identical measurements.
 
-```
-mr_td          f06dfda6dce1cf904d4e2bab1dc370634cf95cef…
-os_image_hash  bd369a8c2f9edb2b52dad48ac8e0b32dde5f1337c423a506b48d07403a7d8033
-compose_hash   6d5768a900398b566d58bd0773ca1f9fa4964acb…
-identity       3a7485ed3a1510392fc486ded782074b79228beddade0256a17cfc643a76e0d2
+The image is built with Nix, so its digest is reproducible rather than something to take on
+trust. [docs/verify-deployment.md](docs/verify-deployment.md) is how to check it yourself.
 
-state_transition_vkey  0x000418a0d4a0a30e349a683f04e657b05cd8f596366fa6dab3f116f4262c92b8
-state_membership_vkey  0x0008514a2af6c5a50da1312a385a3839f453a4fcd847a5f1c997df338296247b
+```
+image          ghcr.io/jonas089/tee-node@sha256:55dfce65f16be7c0cb95f858f7443bfa8b3634b1227d95f569022901d59d8808
+mr_td          f06dfda6dce1cf904d4e2bab1dc370634cf95cefa2ceb2de2eee127c93826980...
+os_image_hash  bd369a8c2f9edb2b52dad48ac8e0b32dde5f1337c423a506b48d07403a7d8033
+compose_hash   99e157b98b57729bbd6b97adc76964897356b40406ca7b0942214dc1511e64e8
+mr_kms         92a4bf40c88734b0e56f54b09b1f0fe4b8d3e230047e9298f491968ada8dedf8
+identity       241dd0baf8e3065e22732b08ed99c286d6ec10958ca2885c26a381324dca0a95
+
+state_transition_vkey  0x000d223dcbccdb71106e4205f81caa8cfeefab16157898b120ca5908f47e53f7
+state_membership_vkey  0x00cb0f3e39c2f501de946600002a68409db9aab53bf1f31284231225298829df
 ```
 
 ### ISMs
 
+Every ISM below was created against the vkeys above. Nothing from an earlier identity is in
+use: the routers all point here, and the older ISMs are unreachable rather than merely unused.
+
 | chain | ISM | verifies messages from |
 |---|---|---|
-| Sepolia | `0xb9E5E3eb926EA22B951d2fb7392F9F3D6c704054` | Celestia |
-| Celestia mocha-5 | `0x726f757465725f69736d000000000000000000000000002a0000000000000001` | Sepolia |
-| Arbitrum Sepolia | `0xf48fefa3848f1F25093D3e7937BdD4b80B421D64` | Celestia |
-| Base Sepolia | `0xFeA14C1444A7a8beAb7122fdE5A168212D7185bE` | Celestia |
+| Sepolia | `0x78e86863877279631995805faf34d1D4c4A7a4D8` | Celestia |
+| Arbitrum Sepolia | `0x2630c91BD1Ed46207Ddf6930934DC5827F0A988B` | Celestia |
+| Base Sepolia | `0xf3Cdd261b13A9ed182d934f6A75aF981058D1599` | Celestia |
+| Celestia mocha-5 | `0x726f757465725f69736d00000000000000000000000000010000000000000008` | routes by origin |
 
-The Celestia ISM is an instance of the **already-deployed `x/zkism` module** carrying our TEE
-vkeys, no chain upgrade was needed. Sepolia's is `contracts/src/TeeIsm.sol`, a port of that
-module, verifying against SP1's v5 Groth16 verifier `0x50ACFBEdecf4cbe350E1a86fC6f03a821772f1e5`
-(the same address on all three EVM testnets).
+Celestia accepts three origins, so its warp tokens point at a routing ISM rather than at one
+ISM directly. Each origin gets its own `x/zkism` behind it, because an ISM's state chain is
+one origin's history and cannot be shared:
+
+| origin | ISM |
+|---|---|
+| Sepolia (11155111) | `0x726f757465725f69736d000000000000000000000000002a0000000000000005` |
+| Arbitrum (421614) | `0x726f757465725f69736d000000000000000000000000002a0000000000000006` |
+| Base (84532) | `0x726f757465725f69736d000000000000000000000000002a0000000000000007` |
+
+The EVM ISMs are `contracts/src/TeeIsm.sol`, a port of `x/zkism`, verifying against SP1's v5
+Groth16 verifier `0x50ACFBEdecf4cbe350E1a86fC6f03a821772f1e5` - the same address with
+byte-identical code on all three EVM testnets, checked rather than assumed.
 
 ### Tokens
 

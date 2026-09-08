@@ -1,94 +1,113 @@
 # Live testnet deployment
 
-Everything below is deployed and reachable. Addresses are stable; vkeys and the enclave
-identity move together whenever the enclave image or its compose file changes, because the
-identity is measured from exactly those.
+Everything below is deployed and reachable, and nothing from an earlier identity is still in
+use. [../docs/verify-deployment.md](../docs/verify-deployment.md) is how to check any of it
+without trusting this file.
 
-## Enclaves — Phala Cloud, node prod9
+Addresses are stable; vkeys and the enclave identity move together whenever the enclave image
+or its compose file changes, because the identity is measured from exactly those.
+
+## Enclaves - Phala Cloud, node prod9
 
 | | |
 |---|---|
-| image | `ghcr.io/jonas089/tee-node@sha256:098cc066…` |
+| image | `ghcr.io/jonas089/tee-node@sha256:55dfce65f16be7c0cb95f858f7443bfa8b3634b1227d95f569022901d59d8808` |
+| built by | `nix build .#image`, reproducible |
 | OS | `dstack-0.5.9` (production; `is_dev = false`) |
 | instance | `tdx.small`, 1 vCPU / 2 GB / 20 GB |
 | cost | $0.0608/hr each, $2.92/day for both |
 
 ```
-tee-node-ethereum  a1e3cd5d7fd24c2d1dc82237005316e4cd334db0
-tee-node-celestia  a545800ddb811ccf2a5c9bcba4e18b28fb402cc0
+tee-node-ethereum  a3feb765232e08e567d5f7de773db9dac55e7d5b
+tee-node-celestia  596ed37171fa16da4a9ba5afaec8f19cb8b2860d
 https://<app-id>-8080.dstack-pha-prod9.phala.network
 ```
 
-Both run the *same* compose file, so both measure identically. `app-id` and `instance-id`
-differ and are deliberately not pinned.
+Both run the *same* compose file, so both measure identically. The names say which route uses
+which; either enclave could serve either origin. `app-id` and `instance-id` differ and are
+deliberately not pinned.
 
-> prod5 cannot host these: its teepod reports `tproxy_base_domain: None`, so the gateway
-> never registers an instance and every request terminates TLS then returns empty. Use
-> `--node-id 18` (the *teepod* id for prod9), not `--node-id 9`.
+> Deploy with `--node-id 18`. Auto-selection sometimes lands on prod5, whose teepod reports
+> `tproxy_base_domain: None`: the CVM runs, the gateway never registers it, and every request
+> terminates TLS then returns nothing. Node 26 is prod5; node 18 is prod9.
 
 ## Enclave identity and circuits
 
 ```
-mr_td          f06dfda6dce1cf904d4e2bab1dc370634cf95cefa2ceb2de2eee127c93826980…
+mr_td          f06dfda6dce1cf904d4e2bab1dc370634cf95cefa2ceb2de2eee127c93826980...
 os_image_hash  bd369a8c2f9edb2b52dad48ac8e0b32dde5f1337c423a506b48d07403a7d8033
-compose_hash   6d5768a900398b566d58bd0773ca1f9fa4964acbcac2eef690e2e…
-identity        3a7485ed3a1510392fc486ded782074b79228beddade0256a17cfc643a76e0d2
+compose_hash   99e157b98b57729bbd6b97adc76964897356b40406ca7b0942214dc1511e64e8
+mr_kms         92a4bf40c88734b0e56f54b09b1f0fe4b8d3e230047e9298f491968ada8dedf8
+identity       241dd0baf8e3065e22732b08ed99c286d6ec10958ca2885c26a381324dca0a95
 
-state_transition_vkey  0x000418a0d4a0a30e349a683f04e657b05cd8f596366fa6dab3f116f4262c92b8
-state_membership_vkey  0x0008514a2af6c5a50da1312a385a3839f453a4fcd847a5f1c997df338296247b
-groth16 wrap vk        396 bytes, sha256 a4594c59… (identical to celestia-app v9.0.6's)
+state_transition_vkey  0x000d223dcbccdb71106e4205f81caa8cfeefab16157898b120ca5908f47e53f7
+state_membership_vkey  0x00cb0f3e39c2f501de946600002a68409db9aab53bf1f31284231225298829df
+groth16 wrap vk        396 bytes, sha256 a4594c59... (identical to celestia-app v9.0.6's)
 ```
 
 ## Celestia mocha-5
 
-Deployed by us; the chain had no Hyperlane stack at all.
-
 ```
 mailbox           0x68797065726c616e650000000000000000000000000000000000000000000000
-merkle tree hook  0x726f757465725f706f73745f6469737061746368000000030000000000000000
-noop hook         0x726f757465725f706f73745f6469737061746368000000000000000000000001
-noop ism          0x726f757465725f69736d00000000000000000000000000000000000000000000
-TIA collateral    0x726f757465725f61707000000000000000000000000000010000000000000000
-local domain      1297040200   (ASCII "MOCH")
+merkle tree hook  0x726f757465725f706f73745f6469737061746368000000030000000000000000  (required_hook)
+IGP               0x726f757465725f706f73745f6469737061746368000000040000000000000002  (default_hook)
+domain            1297040200
+
+routing ISM       0x726f757465725f69736d00000000000000000000000000010000000000000008
+  11155111  ->    0x726f757465725f69736d000000000000000000000000002a0000000000000005
+  421614    ->    0x726f757465725f69736d000000000000000000000000002a0000000000000006
+  84532     ->    0x726f757465725f69736d000000000000000000000000002a0000000000000007
+
+TIA  collateral   0x726f757465725f61707000000000000000000000000000010000000000000000
+USDC synthetic    0x726f757465725f61707000000000000000000000000000020000000000000001
 ```
 
-> `required_hook` is the merkle tree hook; `default_hook` **must** be the noop hook. Setting
-> both to the merkle tree hook inserts every message into the tree twice, which is harmless
-> for the root but doubles the leaves the relayer has to replay.
+Celestia accepts three origins, so the warp tokens point at the routing ISM rather than at one
+ISM. An ISM's state chain is one origin's history, which is why each origin needs its own.
 
 ## Ethereum Sepolia
 
 ```
-TeeIsm            0xb9E5E3eb926EA22B951d2fb7392F9F3D6c704054
-synthetic TIA     0xFeA14C1444A7a8beAb7122fdE5A168212D7185bE   ism -> TeeIsm
+TeeIsm            0x78e86863877279631995805faf34d1D4c4A7a4D8
+synthetic TIA     0xFeA14C1444A7a8beAb7122fdE5A168212D7185bE
+collateral USDC   0xfb611B6f6CE92033960e99C2D65cee4237e64cDD
 mailbox           0xfFAEF09B3cd11D9b20d1a19bECca54EEC2884766   (Hyperlane canonical)
 merkle tree hook  0x4917a9746A7B6E0A57159cCb7F5a6744247f2d0d   (branch at slot 103)
 SP1 verifier      0x50ACFBEdecf4cbe350E1a86fC6f03a821772f1e5   (v5.0.0 groth16)
 ```
 
-## Arbitrum and Base Sepolia
-
-Both are Celestia-origin destinations only, and cost no new enclave and no new circuits —
-just an ISM, a router, and a config block.
+## Arbitrum Sepolia
 
 ```
-Arbitrum Sepolia   TeeIsm   0xf48fefa3848f1F25093D3e7937BdD4b80B421D64
-                   TIA      0xFeA14C1444A7a8beAb7122fdE5A168212D7185bE
-                   USDC     0xb9E5E3eb926EA22B951d2fb7392F9F3D6c704054
-                   mailbox  0x598facE78a4302f11E3de0bee1894Da0b2Cb71F8
-
-Base Sepolia       TeeIsm   0xFeA14C1444A7a8beAb7122fdE5A168212D7185bE
-                   TIA      0xf4197C55C944987E9b10e09C0A47915211769B78
-                   USDC     0x0ee6374a92ba4E11F920A23c6dd271b594D69A9B
-                   mailbox  0x6966b0E55883d49BFB24539356a2f8A673E02039
+TeeIsm            0x2630c91BD1Ed46207Ddf6930934DC5827F0A988B
+synthetic TIA     0xFeA14C1444A7a8beAb7122fdE5A168212D7185bE
+synthetic USDC    0xb9E5E3eb926EA22B951d2fb7392F9F3D6c704054
+mailbox           0x598facE78a4302f11E3de0bee1894Da0b2Cb71F8
+merkle tree hook  0xAD34A66Bf6dB18E858F6B686557075568c6E031C   (branch at slot 151)
+BoLD rollup       0x042B2E6C5E99d4c521bd49beeD5E99651D9B0Cf4   (pinned in the enclave)
 ```
 
-The SP1 v5 verifier is at the same address on all three EVM chains, with byte-identical
-code — checked, not assumed.
+## Base Sepolia
+
+```
+TeeIsm            0xf3Cdd261b13A9ed182d934f6A75aF981058D1599
+synthetic TIA     0xf4197C55C944987E9b10e09C0A47915211769B78
+synthetic USDC    0x0ee6374a92ba4E11F920A23c6dd271b594D69A9B
+mailbox           0x6966b0E55883d49BFB24539356a2f8A673E02039
+merkle tree hook  0x86fb9F1c124fB20ff130C41a79a432F770f67AFD   (branch at slot 151)
+anchor registry   0x2fF5cC82dBf333Ea30D8ee462178ab1707315355   (pinned in the enclave)
+```
+
+The SP1 v5 verifier is at the same address with byte-identical code on all three EVM chains,
+checked rather than assumed.
+
+An L2's anchor contract and its storage layout are compiled into the enclave, not taken from
+the request. A proof against a caller-named contract proves nothing: anyone can deploy a
+contract whose storage mimics a rollup and prove it honestly against the real L1 state root.
 
 ## Gas
 
-An IGP on each side, kept current by `gas-oracle` once an hour.
+An IGP on each side, kept current hourly by `crates/gas-oracle`.
 
 ```
 Celestia IGP       0x726f757465725f706f73745f6469737061746368000000040000000000000002
@@ -107,14 +126,14 @@ Base      0x225B8488242c90085B7A8Ea33Ce8e39Ae9f79722
 
 A router picks exactly *one* post-dispatch hook, and this bridge needs two: the merkle tree
 hook, or the message is never inserted and can never be attested, and the paymaster. Pointing
-a router straight at the IGP costs it the first, silently — the transfer succeeds and the
+a router straight at the IGP costs it the first, silently - the transfer succeeds and the
 message is unprovable forever. Verified by dispatching and watching the hook's `count()`
 advance.
 
 On Celestia no aggregation is needed: `required_hook` is already the merkle tree hook, so
 `default_hook` is set to the IGP and both run.
 
-Falling back to the mailbox default is not an option either — Hyperlane's Sepolia default
+Falling back to the mailbox default is not an option either - Hyperlane's Sepolia default
 quotes **0.009 ETH** for Celestia's domain, about $22 a transfer, because the domain is not
 in its oracle. Ours quotes $0.0014. Deployment and the arithmetic are in
 [server/README.md](server/README.md).
@@ -130,7 +149,7 @@ proved last round instead, and only reach back at bootstrap.
 
 **A shared mailbox means shared batches.** Hyperlane's canonical Sepolia mailbox is used by
 everyone, so the merkle tree contains other people's messages. The attested batch must
-contain *every* leaf in the range or the replay cannot reproduce the branch — so the ISM
+contain *every* leaf in the range or the replay cannot reproduce the branch - so the ISM
 authorises those ids too. They are never delivered here, because their destination domain is
 not ours. It costs a little state and nothing else.
 
@@ -147,7 +166,7 @@ can be attested at all. Celestia finalises in one block, so the other direction 
 
 `tee-hyperlane run --config coprocessor.toml` drives every configured route: read the ISM
 state, attest, prove, submit, deliver. A tick with nothing to do costs nothing, and a tick
-that fails warns and retries — the ISM state on the destination chain is the only progress
+that fails warns and retries - the ISM state on the destination chain is the only progress
 marker, so restarting is the same as continuing.
 
 The same stages are also individual subcommands, which is how you step through a route that

@@ -45,7 +45,7 @@ export const CHAINS: Record<ChainId, Chain> = {
     rpc: "https://ethereum-sepolia-rpc.publicnode.com",
     explorer: "https://sepolia.etherscan.io",
     mailbox: "0xfFAEF09B3cd11D9b20d1a19bECca54EEC2884766",
-    ism: "0xb9E5E3eb926EA22B951d2fb7392F9F3D6c704054",
+    ism: "0x78e86863877279631995805faf34d1D4c4A7a4D8",
   },
   arbitrum: {
     kind: "evm",
@@ -56,7 +56,7 @@ export const CHAINS: Record<ChainId, Chain> = {
     rpc: "https://arbitrum-sepolia-rpc.publicnode.com",
     explorer: "https://sepolia.arbiscan.io",
     mailbox: "0x598facE78a4302f11E3de0bee1894Da0b2Cb71F8",
-    ism: "0xf48fefa3848f1F25093D3e7937BdD4b80B421D64",
+    ism: "0x2630c91BD1Ed46207Ddf6930934DC5827F0A988B",
   },
   base: {
     kind: "evm",
@@ -67,7 +67,7 @@ export const CHAINS: Record<ChainId, Chain> = {
     rpc: "https://base-sepolia-rpc.publicnode.com",
     explorer: "https://sepolia.basescan.org",
     mailbox: "0x6966b0E55883d49BFB24539356a2f8A673E02039",
-    ism: "0xFeA14C1444A7a8beAb7122fdE5A168212D7185bE",
+    ism: "0xf3Cdd261b13A9ed182d934f6A75aF981058D1599",
   },
   celestia: {
     kind: "cosmos",
@@ -85,7 +85,7 @@ export const CHAINS: Record<ChainId, Chain> = {
     mailboxId: "0x68797065726c616e650000000000000000000000000000000000000000000000",
     /// The paymaster a Celestia-origin transfer pays, quoted live before sending.
     igpId: "0x726f757465725f706f73745f6469737061746368000000040000000000000002",
-    ismId: "0x726f757465725f69736d000000000000000000000000002a0000000000000001",
+    ismId: "0x726f757465725f69736d00000000000000000000000000010000000000000008",
   },
 };
 

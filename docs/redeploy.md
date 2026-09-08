@@ -1,6 +1,6 @@
 # Replacing an enclave
 
-An enclave is disposable. It holds no keys, no state and no disk — the destination chain's
+An enclave is disposable. It holds no keys, no state and no disk - the destination chain's
 ISM is the light client's only database, so a new CVM picks up exactly where the old one left
 off. Replacing one is: deploy, re-pin, point the relayer at the new URL.
 
@@ -35,7 +35,7 @@ from the ISM.
 ## When the digest does not match
 
 Then the image or the OS changed, and the old vkeys no longer describe this enclave. That is
-a new identity, and the ISMs that trust the old one cannot be updated to trust it — an ISM's
+a new identity, and the ISMs that trust the old one cannot be updated to trust it - an ISM's
 vkeys are immutable by design. The path is to re-pin and deploy fresh ISMs:
 
 ```sh
@@ -65,7 +65,7 @@ because advancing past it would strand its messages permanently.
 
 **Historical reads need an archive node.** Resuming from a trusted height older than about
 128 blocks needs state proofs a public node has already pruned. Set `archive_rpc` on the
-origin — without it a long outage ends with the route stuck rather than merely behind:
+origin - without it a long outage ends with the route stuck rather than merely behind:
 
 ```toml
 [routes.origin]
@@ -78,5 +78,5 @@ archive_rpc = "https://..."   # serves eth_getProof at the trusted height
 
 Nothing in the enclave is Phala-specific except the dstack socket it asks for a quote. Any
 TDX host that runs the same compose file and reports the same measurements satisfies the same
-circuits, and the ISMs cannot tell the difference — they were never told which instance, or
+circuits, and the ISMs cannot tell the difference - they were never told which instance, or
 which provider, to expect.
