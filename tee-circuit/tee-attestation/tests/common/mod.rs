@@ -98,6 +98,7 @@ pub fn update() -> AttestedUpdate {
         prev_state: state(1, 100, HEAD_TS - 60),
         new_state: state(2, 101, HEAD_TS),
         merkle_tree_address: [0x5a; 32],
+        attested_at: HEAD_TS,
         message_ids: vec![[9u8; 32]],
     }
 }

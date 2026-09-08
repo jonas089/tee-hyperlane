@@ -25,8 +25,12 @@ use dcap_qvl::QuoteCollateralV3;
 ///
 /// `now` is supplied by an untrusted host and drives every certificate, CRL and TCB validity
 /// window. Left free, a host could name a time in the past and revive a platform Intel has
-/// since revoked. Anchoring it to the attested head timestamp - which only moves forward
-/// across an ISM's state chain - bounds that rewind to this window.
+/// since revoked. Anchoring it to a chain time the enclave verified bounds that rewind to
+/// this window.
+///
+/// The anchor is `attested_at`, not the origin head. An optimistic rollup's confirmed head is
+/// old by design, so bounding against it would reject every honest L2 proof while doing
+/// nothing extra for safety.
 pub const MAX_QUOTE_SKEW_SECS: u64 = 30 * 60;
 
 /// dstack's own runtime event type, outside the TCG-defined range.
@@ -241,6 +245,8 @@ pub enum AttestationError {
     ClockBehindAttestedHead { now: u64, head: u64 },
     #[error("prover clock {now} is more than the allowed skew ahead of the attested head {head}")]
     ClockTooFarAhead { now: u64, head: u64 },
+    #[error("attested at {attested_at}, before the state it carries at {state}")]
+    AttestedBeforeState { attested_at: u64, state: u64 },
 }
 
 /// Verify a quote and everything it must say before its payload may be believed.
@@ -283,12 +289,22 @@ pub fn check_attested_report(
 
     crate::ism::check_transition(&update.prev_state, &update.new_state)?;
 
-    let head = update.new_state.timestamp;
+    let head = update.attested_at;
     if now < head {
         return Err(AttestationError::ClockBehindAttestedHead { now, head });
     }
     if now > head + MAX_QUOTE_SKEW_SECS {
         return Err(AttestationError::ClockTooFarAhead { now, head });
+    }
+
+    // The attested time must also be at least as new as the state it accompanies, or an L2
+    // origin could pair a fresh L1 header with an arbitrarily old L2 root and defeat the
+    // destination's staleness check.
+    if update.attested_at < update.new_state.timestamp {
+        return Err(AttestationError::AttestedBeforeState {
+            attested_at: update.attested_at,
+            state: update.new_state.timestamp,
+        });
     }
     Ok(update)
 }

@@ -48,6 +48,8 @@ contract TeeIsm is IInterchainSecurityModule {
     bytes32 public immutable stateTransitionVkey;
     bytes32 public immutable stateMembershipVkey;
     bytes32 public immutable merkleTreeAddress;
+    /// The only address allowed to consume an authorisation.
+    address public immutable mailbox;
 
     /// Opaque to this contract except for the first 32 bytes, which are the state root.
     bytes public state;
@@ -68,12 +70,14 @@ contract TeeIsm is IInterchainSecurityModule {
     error MalformedPublicValues();
     error TooManyMessages();
     error StateTooOld();
+    error NotMailbox();
 
     constructor(
         ISP1Verifier _verifier,
         bytes32 _stateTransitionVkey,
         bytes32 _stateMembershipVkey,
         bytes32 _merkleTreeAddress,
+        address _mailbox,
         bytes memory _genesisState,
         uint256 _maxStateAge
     ) {
@@ -84,6 +88,7 @@ contract TeeIsm is IInterchainSecurityModule {
         stateTransitionVkey = _stateTransitionVkey;
         stateMembershipVkey = _stateMembershipVkey;
         merkleTreeAddress = _merkleTreeAddress;
+        mailbox = _mailbox;
         state = _genesisState;
         maxStateAge = _maxStateAge;
     }
@@ -142,7 +147,15 @@ contract TeeIsm is IInterchainSecurityModule {
     /// @inheritdoc IInterchainSecurityModule
     /// @dev Consume-once. All verification already happened; this is a set lookup, so the
     /// Mailbox pays a storage read rather than a proof verification per message.
+    ///
+    /// Only the Mailbox may call it. The call is not a query: it deletes the authorisation.
+    /// Left open, anyone could take a message id out of the origin chain's Dispatch log, call
+    /// this directly, and burn the authorisation before the relayer delivers it. Re-authorising
+    /// is impossible - the batch is already submitted for this root, the next snapshot already
+    /// contains those leaves, and the state may not move backwards - so the transfer's tokens
+    /// would be stranded for good.
     function verify(bytes calldata, bytes calldata message) external returns (bool) {
+        if (msg.sender != mailbox) revert NotMailbox();
         bytes32 id = keccak256(message);
         if (!authorizedMessages[id]) return false;
         delete authorizedMessages[id];

@@ -56,10 +56,16 @@ fn options() -> Options {
 
 /// Walk the trusted header forward over the supplied light blocks.
 ///
-/// `now` is the enclave's clock. It is only used for the trusting-period check, and it is
-/// deliberately *not* derived from the header being verified: taking `now` from the
-/// untrusted new header - as `evolve-tee` does - makes the trusting period vacuous, since a
-/// forged header can simply claim to be recent.
+/// `now` drives the trusting-period check, and it must come from the enclave rather than
+/// from the request. The check is `trusted.time + trusting_period > now`, so a caller who
+/// chooses `now` can hold an expired header open forever, and an old validator set - whose
+/// keys are worth far less once the period has passed - could then sign a fork the enclave
+/// would accept. Deriving it from the header being verified has the same flaw, which is what
+/// makes `evolve-tee`'s trusting period vacuous.
+///
+/// The residual is the host's clock, which a TDX guest cannot escape. That is a much smaller
+/// surface than a free field: it takes the operator rewinding the machine, not an attacker
+/// choosing a number in a request anyone can send.
 pub fn verify_celestia_updates(
     store: &mut CelestiaStore,
     updates: &[LightBlock],

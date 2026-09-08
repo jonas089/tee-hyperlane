@@ -161,7 +161,7 @@ pub async fn attest_ethereum(
     out: Option<String>,
 ) -> Result<()> {
     use crate::enclave::EnclaveClient;
-    use crate::ethereum::{expected_current_slot, EthereumReader, ExecutionReader};
+    use crate::ethereum::{EthereumReader, ExecutionReader};
 
     let trusted_raw = hex::decode(trusted_state_hex.trim_start_matches("0x"))?;
     let trusted = tee_attestation::decode_ism_state(&trusted_raw)?;
@@ -172,7 +172,6 @@ pub async fn attest_ethereum(
         rebuild_ethereum_store(&beacon_reader, &config, &trusted, checkpoint).await?;
 
     let finality = beacon_reader.finality_update().await?;
-    let slot = expected_current_slot(config.genesis_time);
 
     let hook: alloy_primitives::Address = merkle_tree_hook.parse()?;
     let mailbox_address: alloy_primitives::Address = mailbox.parse()?;
@@ -230,7 +229,6 @@ pub async fn attest_ethereum(
             "chain": "ethereum",
             "store": store,
             "updates": { "committee_updates": [], "finality_update": finality },
-            "expected_current_slot": slot,
         },
         "tree": tree_input,
         "tree_snapshot": snapshot,
@@ -412,7 +410,7 @@ pub async fn attest_l2(
     out: Option<String>,
 ) -> Result<()> {
     use crate::enclave::EnclaveClient;
-    use crate::ethereum::{expected_current_slot, EthereumReader, ExecutionReader};
+    use crate::ethereum::{EthereumReader, ExecutionReader};
 
     let trusted_raw = hex::decode(trusted_state_hex.trim_start_matches("0x"))?;
     let trusted = tee_attestation::decode_ism_state(&trusted_raw)?;
@@ -423,7 +421,6 @@ pub async fn attest_l2(
         rebuild_ethereum_store(&beacon_reader, &config, &trusted, None).await?;
 
     let finality = beacon_reader.finality_update().await?;
-    let slot = expected_current_slot(config.genesis_time);
     let l1_block = *finality
         .finalized_header()
         .execution()
@@ -494,7 +491,6 @@ pub async fn attest_l2(
                 "chain": "ethereum",
                 "store": store,
                 "updates": { "committee_updates": [], "finality_update": finality },
-                "expected_current_slot": slot,
             },
             "proof": root_proof,
         },
@@ -591,15 +587,6 @@ pub async fn attest_celestia(
             "chain": "celestia",
             "store": { "trusted": trusted_block },
             "updates": [new_block],
-            // The coprocessor's clock. The enclave uses it only for the trusting-period
-            // check and never derives it from the header being verified, which is what
-            // keeps that check meaningful.
-            "now": tendermint::Time::from_unix_timestamp(
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)?
-                    .as_secs() as i64,
-                0,
-            )?,
         },
         "tree": {
             "kind": "celestia",

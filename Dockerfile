@@ -9,9 +9,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /build
 # tee-node depends on tee-attestation by path, so both trees are needed.
 COPY tee-circuit/Cargo.toml tee-circuit/rust-toolchain ./tee-circuit/
-COPY tee-circuit/crates ./tee-circuit/crates
-COPY tee-circuit/policy ./tee-circuit/policy
-COPY tee-circuit/xtask ./tee-circuit/xtask
+COPY tee-circuit/tee-attestation ./tee-circuit/tee-attestation
+COPY tee-circuit/circuit-tool ./tee-circuit/circuit-tool
 COPY tee-hyperlane ./tee-hyperlane
 
 # The enclave is the only thing that ships.

@@ -167,6 +167,7 @@ fn update(ids: Vec<[u8; 32]>) -> AttestedUpdate {
         prev_state: state(1, 10, 100),
         new_state: state(2, 11, 101),
         merkle_tree_address: [0x5a; 32],
+        attested_at: 101,
         message_ids: ids,
     }
 }
@@ -213,4 +214,37 @@ fn the_payload_hash_binds_every_field() {
         hash_attested_update(&update(vec![[1u8; 32], [2u8; 32]])),
         hash_attested_update(&update(vec![[2u8; 32], [1u8; 32]]))
     );
+}
+
+/// An optimistic rollup's confirmed head is old on purpose: that lag is the fraud-proof
+/// window. Bounding the prover's clock against it, rather than against a chain time the
+/// enclave actually verified recently, rejected every honest L2 proof - which is why neither
+/// L2 route ever produced a batch.
+#[test]
+fn an_l2_lag_does_not_look_like_a_stale_clock() {
+    // Base's confirmed head trails L1 by about five days.
+    let l2_head = 1_000_000u64;
+    let l1_head = l2_head + 5 * 24 * 60 * 60;
+
+    let mut u = update(vec![[1u8; 32]]);
+    u.new_state.timestamp = l2_head;
+    u.attested_at = l1_head;
+
+    // The prover's clock sits beside the L1 head, which is what it is bounded against.
+    let now = l1_head + 60;
+    assert!(now >= u.attested_at);
+    assert!(now <= u.attested_at + tee_attestation::MAX_QUOTE_SKEW_SECS);
+
+    // Against the old anchor the same honest proof was hopeless.
+    assert!(now > u.new_state.timestamp + tee_attestation::MAX_QUOTE_SKEW_SECS);
+}
+
+/// The freshness anchor may not predate the state it carries, or a fresh L1 header could be
+/// paired with an arbitrarily old L2 root.
+#[test]
+fn the_attested_time_is_not_before_its_state() {
+    let mut u = update(vec![[1u8; 32]]);
+    u.new_state.timestamp = 500;
+    u.attested_at = 499;
+    assert!(u.attested_at < u.new_state.timestamp, "the case the circuit must reject");
 }

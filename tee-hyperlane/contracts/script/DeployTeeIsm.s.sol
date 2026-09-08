@@ -16,6 +16,7 @@ contract DeployTeeIsm is Script {
         bytes32 stateTransitionVkey = vm.envBytes32("STATE_TRANSITION_VKEY");
         bytes32 stateMembershipVkey = vm.envBytes32("STATE_MEMBERSHIP_VKEY");
         bytes32 merkleTreeAddress = vm.envBytes32("ORIGIN_MERKLE_TREE");
+        address mailbox = vm.envAddress("MAILBOX");
         bytes memory genesisState = vm.envBytes("GENESIS_STATE");
         uint256 maxStateAge = vm.envOr("MAX_STATE_AGE", uint256(6 hours));
 
@@ -25,12 +26,14 @@ contract DeployTeeIsm is Script {
             stateTransitionVkey,
             stateMembershipVkey,
             merkleTreeAddress,
+            mailbox,
             genesisState,
             maxStateAge
         );
         vm.stopBroadcast();
 
         console.log("TeeIsm            ", address(ism));
+        console.log("mailbox           ", mailbox);
         console.log("verifier          ", SP1_VERIFIER_GROTH16_V5);
         console.log("max state age (s) ", maxStateAge);
         console.logBytes32(ism.stateRoot());

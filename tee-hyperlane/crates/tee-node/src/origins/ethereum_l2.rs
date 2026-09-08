@@ -45,6 +45,49 @@ impl RollupLayout {
         Self { latest_confirmed_slot: 116, assertions_mapping_slot: 117 };
 }
 
+/// Which L1 contract defines an L2's state, and how to read it.
+///
+/// This is pinned in the enclave rather than taken from the request, and that distinction is
+/// the whole security of an L2 origin. A proof against a caller-named contract proves nothing:
+/// anyone can deploy a contract on L1 whose storage mimics a rollup, claim any L2 root in it,
+/// and prove it perfectly honestly against the real L1 state root. Naming the contract here
+/// puts it under `compose_hash`, which the circuit pins and the ISM's vkeys commit to, so
+/// changing it is a redeploy rather than a request field.
+pub struct L2Anchor;
+
+impl L2Anchor {
+    pub const ARBITRUM_SEPOLIA_ROLLUP: Address =
+        Address::new(hex_literal_address("042B2E6C5E99d4c521bd49beeD5E99651D9B0Cf4"));
+    pub const BASE_SEPOLIA_REGISTRY: Address =
+        Address::new(hex_literal_address("2fF5cC82dBf333Ea30D8ee462178ab1707315355"));
+
+    /// Slot of `anchorGame` in Base's `AnchorStateRegistry`.
+    pub const BASE_ANCHOR_GAME_SLOT: u64 = 2;
+    /// Byte offset of `rootClaim` in a dispute game clone's runtime code.
+    pub const BASE_ROOT_CLAIM_OFFSET: u64 = 118;
+}
+
+/// `Address::new` needs a byte array, and `const` cannot call a hex parser.
+const fn hex_literal_address(text: &str) -> [u8; 20] {
+    let bytes = text.as_bytes();
+    let mut out = [0u8; 20];
+    let mut i = 0;
+    while i < 20 {
+        out[i] = (nibble(bytes[i * 2]) << 4) | nibble(bytes[i * 2 + 1]);
+        i += 1;
+    }
+    out
+}
+
+const fn nibble(c: u8) -> u8 {
+    match c {
+        b'0'..=b'9' => c - b'0',
+        b'a'..=b'f' => c - b'a' + 10,
+        b'A'..=b'F' => c - b'A' + 10,
+        _ => panic!("not a hex digit"),
+    }
+}
+
 /// The state an assertion claims the L2 reached. `abi.encode` of this is what the assertion
 /// hash commits to, so the field order here is the ABI order and cannot be rearranged.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -84,8 +127,6 @@ pub fn get_assertion_hash(proof: &ArbitrumRootProof) -> B256 {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ArbitrumRootProof {
-    pub rollup: Address,
-    pub layout: RollupLayout,
     pub account: ClaimedAccount,
     pub account_proof: Vec<Bytes>,
     /// Proof of `_latestConfirmed`.
@@ -138,12 +179,14 @@ pub fn get_arbitrum_root(
     l1_state_root: B256,
     proof: &ArbitrumRootProof,
 ) -> Result<AttestedRoot, ArbitrumError> {
+    let rollup = L2Anchor::ARBITRUM_SEPOLIA_ROLLUP;
+    let layout = RollupLayout::ARBITRUM_SEPOLIA;
     let storage_root =
-        verify_account_proof(l1_state_root, proof.rollup, &proof.account, &proof.account_proof)?;
+        verify_account_proof(l1_state_root, rollup, &proof.account, &proof.account_proof)?;
 
     // Which assertion is confirmed is read from L1, never supplied.
     let confirmed = get_assertion_hash(proof);
-    let latest_slot = B256::from(U256::from(proof.layout.latest_confirmed_slot));
+    let latest_slot = B256::from(U256::from(layout.latest_confirmed_slot));
     verify_storage_proof(
         storage_root,
         latest_slot,
@@ -155,7 +198,7 @@ pub fn get_arbitrum_root(
     // A pending assertion is still inside its challenge window and proves nothing.
     verify_storage_proof(
         storage_root,
-        get_assertion_node_slot(confirmed, &proof.layout),
+        get_assertion_node_slot(confirmed, &layout),
         proof.assertion_node_slot_value,
         &proof.assertion_node_proof,
     )?;
@@ -247,9 +290,6 @@ pub struct BaseOutputRootPreimage {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BaseRootProof {
-    pub anchor_state_registry: Address,
-    /// Slot holding `anchorGame`, the game the registry currently vouches for.
-    pub anchor_game_slot: u64,
     pub registry_account: ClaimedAccount,
     pub registry_account_proof: Vec<Bytes>,
     pub anchor_game_proof: Vec<Bytes>,
@@ -263,8 +303,6 @@ pub struct BaseRootProof {
     /// clones-with-immutable-args, so the claim is baked into the code and the only way to
     /// read it under a state root is to prove the code hash and supply the code.
     pub game_code: Bytes,
-    /// Byte offset of `rootClaim` within that code.
-    pub root_claim_offset: u64,
     pub preimage: BaseOutputRootPreimage,
     /// RLP of the L2 block header, whose keccak is `preimage.latest_block_hash`.
     ///
@@ -312,12 +350,12 @@ pub fn get_base_root(
 ) -> Result<AttestedRoot, BaseError> {
     let registry_storage = verify_account_proof(
         l1_state_root,
-        proof.anchor_state_registry,
+        L2Anchor::BASE_SEPOLIA_REGISTRY,
         &proof.registry_account,
         &proof.registry_account_proof,
     )?;
 
-    let slot = B256::from(U256::from(proof.anchor_game_slot));
+    let slot = B256::from(U256::from(L2Anchor::BASE_ANCHOR_GAME_SLOT));
     verify_storage_proof(
         registry_storage,
         slot,
@@ -342,11 +380,11 @@ pub fn get_base_root(
         });
     }
 
-    let start = proof.root_claim_offset as usize;
+    let start = L2Anchor::BASE_ROOT_CLAIM_OFFSET as usize;
     let claimed = proof
         .game_code
         .get(start..start + 32)
-        .ok_or(BaseError::CodeTooShort { offset: proof.root_claim_offset })?;
+        .ok_or(BaseError::CodeTooShort { offset: L2Anchor::BASE_ROOT_CLAIM_OFFSET })?;
 
     let output_root = hash_output_root(&proof.preimage);
     if output_root.as_slice() != claimed {

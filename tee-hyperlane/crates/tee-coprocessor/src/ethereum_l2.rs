@@ -22,7 +22,7 @@ use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
 use anyhow::{Context, Result};
 use tee_node::origins::ethereum_l2::{
     get_assertion_node_slot, ArbitrumRootProof, AssertionState, BaseOutputRootPreimage,
-    BaseRootProof, RollupLayout,
+    BaseRootProof, L2Anchor, RollupLayout,
 };
 
 use crate::ethereum::ExecutionReader;
@@ -76,8 +76,6 @@ pub async fn get_arbitrum_root_proof(
     let l2_header_rlp = get_l2_header_rlp(l2, assertion.after_state.l2_block_hash).await?;
 
     Ok(ArbitrumRootProof {
-        rollup,
-        layout,
         account: serde_json::from_value(serde_json::json!({
             "nonce": proof["nonce"],
             "balance": proof["balance"],
@@ -246,11 +244,6 @@ async fn get_l2_header_rlp(l2: &ExecutionReader, block_hash: B256) -> Result<Vec
     Ok(out)
 }
 
-/// Where Base's `AnchorStateRegistry` keeps `anchorGame`, and where a dispute game's clone
-/// keeps its `rootClaim`. Both read off the live Base Sepolia contracts.
-pub const BASE_ANCHOR_GAME_SLOT: u64 = 2;
-pub const BASE_ROOT_CLAIM_OFFSET: u64 = 118;
-
 /// The L2 predeploy whose storage root the OP Stack output root commits to.
 const L2_TO_L1_MESSAGE_PASSER: &str = "0x4200000000000000000000000000000000000016";
 
@@ -261,7 +254,7 @@ pub async fn get_base_root_proof(
     registry: Address,
     l1_block: u64,
 ) -> Result<BaseRootProof> {
-    let slot = B256::from(U256::from(BASE_ANCHOR_GAME_SLOT));
+    let slot = B256::from(U256::from(L2Anchor::BASE_ANCHOR_GAME_SLOT));
     let registry_proof = l1
         .call(
             "eth_getProof",
@@ -285,7 +278,7 @@ pub async fn get_base_root_proof(
         .await?;
     let code: Bytes = code.as_str().context("eth_getCode")?.parse()?;
 
-    let start = BASE_ROOT_CLAIM_OFFSET as usize;
+    let start = L2Anchor::BASE_ROOT_CLAIM_OFFSET as usize;
     let root_claim: B256 = B256::from_slice(
         code.get(start..start + 32)
             .context("game code is too short to hold rootClaim")?,
@@ -295,8 +288,6 @@ pub async fn get_base_root_proof(
     let l2_header_rlp = get_l2_header_rlp(l2, preimage.latest_block_hash).await?;
 
     Ok(BaseRootProof {
-        anchor_state_registry: registry,
-        anchor_game_slot: BASE_ANCHOR_GAME_SLOT,
         registry_account: serde_json::from_value(serde_json::json!({
             "nonce": registry_proof["nonce"],
             "balance": registry_proof["balance"],
@@ -314,7 +305,6 @@ pub async fn get_base_root_proof(
         }))?,
         game_account_proof: serde_json::from_value(game_proof["accountProof"].clone())?,
         game_code: code,
-        root_claim_offset: BASE_ROOT_CLAIM_OFFSET,
         preimage,
         l2_header_rlp: l2_header_rlp.into(),
     })

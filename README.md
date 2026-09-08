@@ -1,6 +1,6 @@
 # TEE ISMs
 
-Hyperlane bridging between Celestia and Ethereum (plus Arbitrum and Base) where messages are
+Hyperlane bridging between Celestia and (EVM) Chains, where messages are
 authorised by a **light client running inside a TDX enclave**, not by a validator multisig.
 Two enclaves cover four networks.
 
@@ -83,7 +83,7 @@ state_membership_vkey  0x0008514a2af6c5a50da1312a385a3839f453a4fcd847a5f1c997df3
 | Base Sepolia | `0xFeA14C1444A7a8beAb7122fdE5A168212D7185bE` | Celestia |
 
 The Celestia ISM is an instance of the **already-deployed `x/zkism` module** carrying our TEE
-vkeys — no chain upgrade was needed. Sepolia's is `contracts/src/TeeIsm.sol`, a port of that
+vkeys, no chain upgrade was needed. Sepolia's is `contracts/src/TeeIsm.sol`, a port of that
 module, verifying against SP1's v5 Groth16 verifier `0x50ACFBEdecf4cbe350E1a86fC6f03a821772f1e5`
 (the same address on all three EVM testnets).
 

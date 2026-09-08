@@ -23,8 +23,6 @@ const PARENT_ASSERTION: &str =
 
 fn confirmed_assertion_proof() -> ArbitrumRootProof {
     ArbitrumRootProof {
-        rollup: "0x042B2E6C5E99d4c521bd49beeD5E99651D9B0Cf4".parse().unwrap(),
-        layout: RollupLayout::ARBITRUM_SEPOLIA,
         account: ClaimedAccount {
             nonce: 0,
             balance: Default::default(),

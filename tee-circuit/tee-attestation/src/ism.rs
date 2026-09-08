@@ -130,17 +130,27 @@ pub struct AttestedUpdate {
     pub new_state: IsmState,
     /// Origin merkle tree hook, left-padded to 32 bytes for EVM addresses.
     pub merkle_tree_address: [u8; 32],
+    /// The newest chain time the enclave actually verified, which is what the prover's clock
+    /// is bounded against.
+    ///
+    /// Not the same thing as `new_state.timestamp`, and conflating them is what made the two
+    /// optimistic-rollup origins impossible. An L2's confirmed head is old *by design* - that
+    /// lag is the fraud-proof window - so measuring the prover's clock against it rejects
+    /// every honest proof. For an L2 the enclave verified a recent *Ethereum* header on the
+    /// way to that root, and that is the time worth bounding against.
+    pub attested_at: u64,
     /// Message ids the enclave proved present in the origin tree at `new_state`.
     pub message_ids: Vec<[u8; 32]>,
 }
 
-const ATTESTED_UPDATE_HEAD: usize = 2 * ISM_STATE_BYTES + 40;
+const ATTESTED_UPDATE_HEAD: usize = 2 * ISM_STATE_BYTES + 48;
 
 pub fn encode_attested_update(u: &AttestedUpdate) -> Vec<u8> {
     let mut out = Vec::with_capacity(ATTESTED_UPDATE_HEAD + 32 * u.message_ids.len());
     out.extend_from_slice(&encode_ism_state(&u.prev_state));
     out.extend_from_slice(&encode_ism_state(&u.new_state));
     out.extend_from_slice(&u.merkle_tree_address);
+    out.extend_from_slice(&u.attested_at.to_be_bytes());
     out.extend_from_slice(&(u.message_ids.len() as u64).to_be_bytes());
     for id in &u.message_ids {
         out.extend_from_slice(id);
@@ -157,10 +167,12 @@ pub fn decode_attested_update(b: &[u8]) -> Result<AttestedUpdate, CodecError> {
     let mut o = 2 * ISM_STATE_BYTES;
     let merkle_tree_address: [u8; 32] = b[o..o + 32].try_into().unwrap();
     o += 32;
+    let attested_at = u64::from_be_bytes(b[o..o + 8].try_into().unwrap());
+    o += 8;
     let count = u64::from_be_bytes(b[o..o + 8].try_into().unwrap());
     o += 8;
     let message_ids = read_ids(&b[o..], count)?;
-    Ok(AttestedUpdate { prev_state, new_state, merkle_tree_address, message_ids })
+    Ok(AttestedUpdate { prev_state, new_state, merkle_tree_address, attested_at, message_ids })
 }
 
 /// The value the enclave puts in the first 32 bytes of `report_data`.

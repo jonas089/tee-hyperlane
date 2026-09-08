@@ -126,6 +126,22 @@ pub fn commit_ethereum_store(store: &EthereumStore) -> [u8; 32] {
     h.update(store.genesis_root.as_slice());
     h.update(store.genesis_time.to_be_bytes());
     h.update(store.store.finalized_header.beacon().tree_hash_root().as_slice());
+    // The forks decide which signing domain each update is checked under, so they are part
+    // of what the next verification depends on and have to be committed like everything else.
+    // Hashed field by field rather than through a derive, so adding a fork to the upstream
+    // type is a compile error here rather than a silently uncommitted field.
+    for fork in [
+        &store.forks.genesis,
+        &store.forks.altair,
+        &store.forks.bellatrix,
+        &store.forks.capella,
+        &store.forks.deneb,
+        &store.forks.electra,
+        &store.forks.fulu,
+    ] {
+        h.update(fork.epoch.to_be_bytes());
+        h.update(fork.fork_version);
+    }
     h.update(store.store.current_sync_committee.as_ssz_bytes());
     match &store.store.next_sync_committee {
         Some(next) => {

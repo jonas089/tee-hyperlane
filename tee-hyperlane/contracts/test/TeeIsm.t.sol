@@ -38,6 +38,7 @@ contract TeeIsmTest is Test {
 
     bytes32 constant TRANSITION_VKEY = bytes32(uint256(1));
     bytes32 constant MEMBERSHIP_VKEY = bytes32(uint256(2));
+    address constant MAILBOX = address(0xBEEF);
     uint256 constant MAX_AGE = 6 hours;
 
     MockVerifier verifier;
@@ -53,6 +54,7 @@ contract TeeIsmTest is Test {
             TRANSITION_VKEY,
             MEMBERSHIP_VKEY,
             FIXTURE_TREE,
+            MAILBOX,
             ismState(bytes32(uint256(0xAA)), 100, headTime),
             MAX_AGE
         );
@@ -186,12 +188,14 @@ contract TeeIsmTest is Test {
     }
 
     function test_verifyAuthorisesThenConsumes() public {
+        vm.startPrank(MAILBOX);
         bytes memory message = authorizeOneMessage(bytes32(uint256(7)));
         assertTrue(ism.verify(hex"", message), "first delivery");
         assertFalse(ism.verify(hex"", message), "replay must not verify twice");
     }
 
     function test_verifyRejectsAnUnauthorisedMessage() public {
+        vm.startPrank(MAILBOX);
         authorizeOneMessage(bytes32(uint256(7)));
         assertFalse(ism.verify(hex"", abi.encodePacked("some other message")));
     }
@@ -254,5 +258,22 @@ contract TeeIsmTest is Test {
         bytes memory s = ismState(bytes32(uint256(1)), 0x0102030405060708, 0x1112131415161718);
         assertEq(ism.readHeight(s), 0x0102030405060708);
         assertEq(ism.readTimestamp(s), 0x1112131415161718);
+    }
+}
+
+/// Anyone could once call `verify` directly and delete an authorisation before the relayer
+/// delivered it. Nothing could re-authorise the id afterwards - the batch is already submitted
+/// for that root and the state may not move backwards - so the transfer was stranded for good.
+contract TeeIsmVerifyAccessTest is TeeIsmTest {
+    function test_onlyTheMailboxMayConsumeAnAuthorisation() public {
+        bytes memory message = authorizeOneMessage(bytes32(uint256(7)));
+
+        vm.prank(address(0xBAD));
+        vm.expectRevert(TeeIsm.NotMailbox.selector);
+        ism.verify(hex"", message);
+
+        // Still deliverable, which is the point: the griefer changed nothing.
+        vm.prank(MAILBOX);
+        assertTrue(ism.verify(hex"", message));
     }
 }

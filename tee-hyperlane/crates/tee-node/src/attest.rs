@@ -36,6 +36,7 @@ use hyperlane_types::MerkleTree;
 
 /// How the enclave is asked to advance one ISM by one step.
 #[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AttestRequest {
     /// The ISM's current state, read from the destination chain, hex-encoded.
     #[serde(with = "hex_ism_state")]
@@ -68,18 +69,20 @@ mod hex_ism_state {
 }
 
 /// Per-origin inputs. Adding a network adds one variant and one arm.
+///
+/// Unknown fields are refused. Several fields have been taken out of this request because the
+/// caller should never have chosen them; rejecting leftovers means an old coprocessor fails
+/// loudly instead of sending a value that is now quietly ignored.
 #[derive(Serialize, Deserialize)]
-#[serde(tag = "chain", rename_all = "snake_case")]
+#[serde(tag = "chain", rename_all = "snake_case", deny_unknown_fields)]
 pub enum OriginInput {
     Ethereum {
         store: EthereumStore,
         updates: EthereumUpdates,
-        expected_current_slot: u64,
     },
     Celestia {
         store: CelestiaStore,
         updates: Vec<tendermint_light_client_verifier::types::LightBlock>,
-        now: tendermint::Time,
     },
     /// Arbitrum and Base ride on Ethereum's light client rather than their own.
     Arbitrum {
@@ -121,6 +124,8 @@ pub enum AttestError {
     L2NeedsEthereum,
     #[error("tree proven at 0x{proven} but 0x{attested} was attested")]
     WrongMerkleTree { proven: String, attested: String },
+    #[error("the enclave has no usable clock")]
+    NoClock,
 }
 
 /// Verify everything in the request and produce the update to be attested.
@@ -131,18 +136,24 @@ pub fn build_attested_update(
 ) -> Result<(AttestedUpdate, Vec<u8>), AttestError> {
     let expected = request.trusted_state.origin_domain;
 
-    let (root, store_commit) = advance_origin(&mut request.origin, &request.trusted_state)?;
+    let (root, store_commit, attested_at) =
+        advance_origin(&mut request.origin, &request.trusted_state)?;
 
     let origin = origin_of(&request.origin);
     if origin.domain() != expected {
         return Err(AttestError::WrongOrigin { got: origin.domain(), expected });
     }
 
-    // Where the tree was read must be the address being attested. Both are supplied by the
-    // caller, and proving a tree is not enough on its own: anyone can deploy a merkle tree
-    // hook, fill it with ids of their choosing, and prove it honestly under the real state
-    // root. Only tying the proven address to the attested one makes that useless, because
-    // the destination ISM pins the address it will accept.
+    // The merkle tree hook we read the message ids from must be the same one we name in the
+    // attested update. The caller supplies both, so they can differ.
+    //
+    // A valid tree proof alone proves only that some contract at some address holds these
+    // message ids. An attacker can deploy their own merkle tree hook, insert any message ids
+    // they like, and produce a perfectly valid proof of it against the real state root. What
+    // stops that is the address: the destination ISM accepts updates for one specific merkle
+    // tree hook address, so if the proof reads a different contract than the address we
+    // attest, the update is worthless to the attacker. Rejecting the mismatch here means the
+    // attested address always identifies the contract the ids were actually proven against.
     let proven_at = tree_address_of(&request.tree);
     if proven_at != request.merkle_tree_address {
         return Err(AttestError::WrongMerkleTree {
@@ -171,6 +182,7 @@ pub fn build_attested_update(
         prev_state: request.trusted_state,
         new_state,
         merkle_tree_address: request.merkle_tree_address,
+        attested_at,
         message_ids: request.message_ids.clone(),
     };
     let payload = encode_attested_update(&update);
@@ -197,6 +209,27 @@ pub fn tree_address_of(tree: &TreeInput) -> [u8; 32] {
     }
 }
 
+/// Which beacon slot it is now, from the enclave's clock and the store's own genesis.
+fn current_slot(genesis_time: u64) -> Result<u64, AttestError> {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|_| AttestError::NoClock)?
+        .as_secs();
+    Ok(secs.saturating_sub(genesis_time) / SECONDS_PER_SLOT)
+}
+
+/// Ethereum's slot time, fixed since genesis.
+const SECONDS_PER_SLOT: u64 = 12;
+
+/// The enclave's own clock, for the one check that needs wall time.
+fn enclave_now() -> Result<tendermint::Time, AttestError> {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|_| AttestError::NoClock)?
+        .as_secs();
+    tendermint::Time::from_unix_timestamp(secs as i64, 0).map_err(|_| AttestError::NoClock)
+}
+
 fn origin_of(input: &OriginInput) -> Origin {
     match input {
         OriginInput::Ethereum { .. } => Origin::Ethereum,
@@ -207,35 +240,47 @@ fn origin_of(input: &OriginInput) -> Origin {
 }
 
 /// Walk one origin's light client forward and return its root plus the new store commitment.
+/// Returns the attested root, the light-client store commitment, and the newest chain time
+/// the enclave verified.
+///
+/// That third value is the origin's own head for a chain with its own light client, and the
+/// *L1* head for an L2, whose confirmed head is deliberately old.
 fn advance_origin(
     input: &mut OriginInput,
     trusted: &IsmState,
-) -> Result<(AttestedRoot, [u8; 32]), AttestError> {
+) -> Result<(AttestedRoot, [u8; 32], u64), AttestError> {
     match input {
-        OriginInput::Ethereum { store, updates, expected_current_slot } => {
+        OriginInput::Ethereum { store, updates } => {
             if ethereum::commit_ethereum_store(store) != trusted.lc_store_commit {
                 return Err(AttestError::StoreCommitmentMismatch);
             }
-            verify_ethereum_updates(store, updates, *expected_current_slot)?;
-            Ok((get_ethereum_root(store)?, ethereum::commit_ethereum_store(store)))
+            // Derived here rather than taken from the request: the store already carries
+            // genesis_time, and a caller-named slot is a caller-named clock.
+            let slot = current_slot(store.genesis_time)?;
+            verify_ethereum_updates(store, updates, slot)?;
+            let root = get_ethereum_root(store)?;
+            Ok((root, ethereum::commit_ethereum_store(store), root.timestamp))
         }
-        OriginInput::Celestia { store, updates, now } => {
+        OriginInput::Celestia { store, updates } => {
             if celestia::commit_celestia_store(store) != trusted.lc_store_commit {
                 return Err(AttestError::StoreCommitmentMismatch);
             }
-            verify_celestia_updates(store, updates, *now)?;
-            Ok((get_celestia_root(store)?, celestia::commit_celestia_store(store)))
+            verify_celestia_updates(store, updates, enclave_now()?)?;
+            let root = get_celestia_root(store)?;
+            Ok((root, celestia::commit_celestia_store(store), root.timestamp))
         }
         // An L2's trust chain starts at Ethereum: verify L1 first, then read the L2 root out
         // of L1 storage. The commitment carried in the ISM state is Ethereum's, because
         // Ethereum's light client is the thing with state worth remembering.
+        // The L1 head is what dates this attestation. The L2's confirmed head is older by a
+        // fraud-proof window, which is a property of the rollup and not evidence of staleness.
         OriginInput::Arbitrum { ethereum, proof } => {
-            let (l1, commit) = advance_ethereum(ethereum, trusted)?;
-            Ok((get_arbitrum_root(l1.state_root, proof)?, commit))
+            let (l1, commit, _) = advance_ethereum(ethereum, trusted)?;
+            Ok((get_arbitrum_root(l1.state_root, proof)?, commit, l1.timestamp))
         }
         OriginInput::Base { ethereum, proof } => {
-            let (l1, commit) = advance_ethereum(ethereum, trusted)?;
-            Ok((get_base_root(l1.state_root, proof)?, commit))
+            let (l1, commit, _) = advance_ethereum(ethereum, trusted)?;
+            Ok((get_base_root(l1.state_root, proof)?, commit, l1.timestamp))
         }
     }
 }
@@ -243,7 +288,7 @@ fn advance_origin(
 fn advance_ethereum(
     input: &mut OriginInput,
     trusted: &IsmState,
-) -> Result<(AttestedRoot, [u8; 32]), AttestError> {
+) -> Result<(AttestedRoot, [u8; 32], u64), AttestError> {
     match input {
         OriginInput::Ethereum { .. } => advance_origin(input, trusted),
         _ => Err(AttestError::L2NeedsEthereum),
