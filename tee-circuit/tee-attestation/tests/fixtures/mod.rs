@@ -77,8 +77,14 @@ pub fn report(
             report_data,
         }),
         ppid: vec![],
-        qe_status: TcbStatusWithAdvisory { status: TcbStatus::UpToDate, advisory_ids: vec![] },
-        platform_status: TcbStatusWithAdvisory { status, advisory_ids: vec![] },
+        qe_status: TcbStatusWithAdvisory {
+            status: TcbStatus::UpToDate,
+            advisory_ids: vec![],
+        },
+        platform_status: TcbStatusWithAdvisory {
+            status,
+            advisory_ids: vec![],
+        },
     }
 }
 

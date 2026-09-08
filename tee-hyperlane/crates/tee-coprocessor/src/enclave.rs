@@ -40,7 +40,13 @@ impl EnclaveClient {
     }
 
     pub async fn health(&self) -> Result<String> {
-        Ok(self.http.get(format!("{}/health", self.url)).send().await?.text().await?)
+        Ok(self
+            .http
+            .get(format!("{}/health", self.url))
+            .send()
+            .await?
+            .text()
+            .await?)
     }
 
     /// `request` is `tee_node::attest::AttestRequest`, serialised.
@@ -77,5 +83,8 @@ pub async fn fetch_collateral(quote_hex: &str) -> Result<dcap_qvl::QuoteCollater
         "https://pccs.phala.network/sgx/certification/v4/",
     )
     .map_err(|e| anyhow::anyhow!("PCCS client: {e:?}"))?;
-    client.fetch(&quote).await.map_err(|e| anyhow::anyhow!("PCCS collateral: {e:?}"))
+    client
+        .fetch(&quote)
+        .await
+        .map_err(|e| anyhow::anyhow!("PCCS collateral: {e:?}"))
 }

@@ -36,7 +36,7 @@ root. You CAN already include this path for USDC Sepolia <=> Arbitrum Testnet an
 The goal is to have 2 Nodes / Light Consensus / Validation nodes wrapped in TEE instances on Phala that buy us the whole bridge stack for 4 networks (Ethereum, Arbitrum, Base, Celestia).
 You don't have to touch ANY of the mainnets; just layout the whole infrastructure and test + verify it for the testnets.
 
-The codebase should be human-first. Never introduce complex syntax. Have desciptive function names like "get_merkle_proof" "get_arbitrum_root" "get_base_root" "get_celestia_root" "verify_inclusion", ...;
+The codebase should be human-first. Never introduce complex syntax. Have desciptive function names like "get_merkle_proof" "verify_arbitrum_root" "verify_base_root" "celestia_root" "verify_inclusion", ...;
 It should be extremely clear where and how to extend it to new networks. Code comments should be minimal; the code should describe itself and comments should only add valuable additional context where they are truly needed and do so in a few short sentences max.
 The readme should be succinct and minimal and just show how to run the e2e and how to submit transactions and verify they arrived via a SMALL CLI.
 

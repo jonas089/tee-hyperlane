@@ -34,9 +34,21 @@ impl EthereumReader {
 
     async fn get<T: for<'de> Deserialize<'de>>(&self, path: &str) -> Result<T> {
         let url = format!("{}{path}", self.beacon);
-        let response = self.http.get(&url).send().await.with_context(|| url.clone())?;
-        anyhow::ensure!(response.status().is_success(), "{url} -> {}", response.status());
-        Ok(response.json().await.with_context(|| format!("decoding {url}"))?)
+        let response = self
+            .http
+            .get(&url)
+            .send()
+            .await
+            .with_context(|| url.clone())?;
+        anyhow::ensure!(
+            response.status().is_success(),
+            "{url} -> {}",
+            response.status()
+        );
+        Ok(response
+            .json()
+            .await
+            .with_context(|| format!("decoding {url}"))?)
     }
 
     /// The block root a light client is anchored to.
@@ -58,7 +70,9 @@ impl EthereumReader {
         struct Root {
             root: String,
         }
-        let v: Versioned<Root> = self.get(&format!("/eth/v1/beacon/blocks/{slot}/root")).await?;
+        let v: Versioned<Root> = self
+            .get(&format!("/eth/v1/beacon/blocks/{slot}/root"))
+            .await?;
         Ok(v.data.root)
     }
 
@@ -82,7 +96,9 @@ impl EthereumReader {
 
     pub async fn bootstrap(&self, checkpoint: &str) -> Result<Bootstrap<Spec>> {
         let v: Versioned<Bootstrap<Spec>> = self
-            .get(&format!("/eth/v1/beacon/light_client/bootstrap/{checkpoint}"))
+            .get(&format!(
+                "/eth/v1/beacon/light_client/bootstrap/{checkpoint}"
+            ))
             .await?;
         Ok(v.data)
     }
@@ -98,8 +114,9 @@ impl EthereumReader {
     }
 
     pub async fn finality_update(&self) -> Result<FinalityUpdate<Spec>> {
-        let v: Versioned<FinalityUpdate<Spec>> =
-            self.get("/eth/v1/beacon/light_client/finality_update").await?;
+        let v: Versioned<FinalityUpdate<Spec>> = self
+            .get("/eth/v1/beacon/light_client/finality_update")
+            .await?;
         Ok(v.data)
     }
 
@@ -123,7 +140,10 @@ impl EthereumReader {
                 .unwrap_or("0")
                 .parse()
                 .unwrap_or(0);
-            Ok(Fork { epoch, fork_version: version.parse()? })
+            Ok(Fork {
+                epoch,
+                fork_version: version.parse()?,
+            })
         };
 
         Ok(ChainConfig {
@@ -184,11 +204,9 @@ const MAX_LOG_WINDOW: u64 = 10_000;
 const MIN_LOG_WINDOW: u64 = 10;
 
 /// Hyperlane's `Dispatch(address,uint32,bytes32,bytes)`.
-const DISPATCH_TOPIC: &str =
-    "0x769f711d20c679153d382254f59892613b58a97cc876b249134ac25c80f9c814";
+const DISPATCH_TOPIC: &str = "0x769f711d20c679153d382254f59892613b58a97cc876b249134ac25c80f9c814";
 /// `MerkleTreeHook.InsertedIntoTree(bytes32,uint32)`.
-const INSERTED_TOPIC: &str =
-    "0x253a3a04cab70d47c1504809242d9350cd81627b4f1d50753e159cf8cd76ed33";
+const INSERTED_TOPIC: &str = "0x253a3a04cab70d47c1504809242d9350cd81627b4f1d50753e159cf8cd76ed33";
 
 #[derive(Debug, Clone)]
 pub struct EvmDispatch {
@@ -200,7 +218,11 @@ pub struct EvmDispatch {
 
 impl ExecutionReader {
     pub fn new(rpc: &str) -> Self {
-        Self { rpc: rpc.to_string(), logs_rpc: rpc.to_string(), http: reqwest::Client::new() }
+        Self {
+            rpc: rpc.to_string(),
+            logs_rpc: rpc.to_string(),
+            http: reqwest::Client::new(),
+        }
     }
 
     /// Send `eth_getLogs` somewhere other than the main endpoint.
@@ -261,7 +283,10 @@ impl ExecutionReader {
             match self.call_at(&self.logs_rpc, "eth_getLogs", params).await {
                 Ok(result) => {
                     out.extend(
-                        result.as_array().context("eth_getLogs did not return an array")?.clone(),
+                        result
+                            .as_array()
+                            .context("eth_getLogs did not return an array")?
+                            .clone(),
                     );
                     cursor = end + 1;
                 }
@@ -328,13 +353,22 @@ impl ExecutionReader {
         from_block: u64,
         to_block: u64,
     ) -> Result<Vec<EvmDispatch>> {
-        let dispatches = self.get_logs(mailbox, DISPATCH_TOPIC, from_block, to_block).await?;
-        let inserts = self.get_logs(hook, INSERTED_TOPIC, from_block, to_block).await?;
+        let dispatches = self
+            .get_logs(mailbox, DISPATCH_TOPIC, from_block, to_block)
+            .await?;
+        let inserts = self
+            .get_logs(hook, INSERTED_TOPIC, from_block, to_block)
+            .await?;
 
         // Dispatch carries the message as an ABI-encoded `bytes`: offset, length, payload.
         let mut messages: Vec<Vec<u8>> = Vec::new();
         for log in &dispatches {
-            let data = hex::decode(log["data"].as_str().context("data")?.trim_start_matches("0x"))?;
+            let data = hex::decode(
+                log["data"]
+                    .as_str()
+                    .context("data")?
+                    .trim_start_matches("0x"),
+            )?;
             anyhow::ensure!(data.len() >= 64, "dispatch log too short");
             let len = u64::from_be_bytes(data[56..64].try_into()?) as usize;
             messages.push(data[64..64 + len].to_vec());
@@ -342,12 +376,20 @@ impl ExecutionReader {
 
         let mut out = Vec::new();
         for log in &inserts {
-            let data = hex::decode(log["data"].as_str().context("data")?.trim_start_matches("0x"))?;
+            let data = hex::decode(
+                log["data"]
+                    .as_str()
+                    .context("data")?
+                    .trim_start_matches("0x"),
+            )?;
             anyhow::ensure!(data.len() >= 64, "insert log too short");
             let message_id: [u8; 32] = data[..32].try_into()?;
             let tree_index = u32::from_be_bytes(data[60..64].try_into()?);
             let block = u64::from_str_radix(
-                log["blockNumber"].as_str().context("blockNumber")?.trim_start_matches("0x"),
+                log["blockNumber"]
+                    .as_str()
+                    .context("blockNumber")?
+                    .trim_start_matches("0x"),
                 16,
             )?;
             let message = messages
@@ -359,7 +401,12 @@ impl ExecutionReader {
                 })
                 .cloned()
                 .unwrap_or_default();
-            out.push(EvmDispatch { block, tree_index, message_id, message });
+            out.push(EvmDispatch {
+                block,
+                tree_index,
+                message_id,
+                message,
+            });
         }
         out.sort_by_key(|d| d.tree_index);
         Ok(out)

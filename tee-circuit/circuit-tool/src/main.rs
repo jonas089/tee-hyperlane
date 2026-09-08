@@ -15,6 +15,9 @@ use tee_attestation::AttestationInputs;
 const STATE_TRANSITION: &str = "tee-state-transition";
 const STATE_MEMBERSHIP: &str = "tee-state-membership";
 const BENCH: &str = "tee-bench-attestation";
+/// The two guests an ISM pins. The bench guest is a third program in the same workspace, and
+/// `build` leaves it alone: it is never deployed, and compiling an SP1 guest is not cheap.
+const DEPLOYED: [&str; 2] = [STATE_TRANSITION, STATE_MEMBERSHIP];
 
 #[derive(Parser)]
 #[command(about = "tee-circuit build and measurement tasks")]
@@ -50,7 +53,8 @@ fn elf(name: &str) -> Result<Vec<u8>> {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let candidates = [
         root.join("../elf").join(name),
-        root.join("../programs/target/riscv32im-succinct-zkvm-elf/release").join(name),
+        root.join("../programs/target/riscv32im-succinct-zkvm-elf/release")
+            .join(name),
     ];
     for path in &candidates {
         if let Ok(bytes) = std::fs::read(path) {
@@ -63,7 +67,7 @@ fn elf(name: &str) -> Result<Vec<u8>> {
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
-        Command::Build => build_programs(),
+        Command::Build => build_programs(&DEPLOYED),
         Command::Vkeys => vkeys(),
         Command::Identity { url, write } => identity(&url, write),
         Command::Bench { prove } => bench(prove),
@@ -86,9 +90,10 @@ const GUEST_RUSTFLAGS: &[&str] = &[
     "-C llvm-args=-misched-postra-direction=bottomup",
 ];
 
-fn build_programs() -> Result<()> {
+fn build_programs(names: &[&str]) -> Result<()> {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../programs");
-    let status = std::process::Command::new("cargo")
+    let mut command = std::process::Command::new("cargo");
+    command
         .current_dir(&root)
         .env("RUSTFLAGS", GUEST_RUSTFLAGS.join(" "))
         .args([
@@ -97,13 +102,17 @@ fn build_programs() -> Result<()> {
             "--release",
             "--target",
             "riscv32im-succinct-zkvm-elf",
-        ])
+        ]);
+    for name in names {
+        command.args(["-p", name]);
+    }
+    let status = command
         .status()
         .context("failed to run cargo for the guest programs")?;
     anyhow::ensure!(status.success(), "guest build failed");
 
     let out = PathBuf::from(elf_dir()?);
-    for name in [STATE_TRANSITION, STATE_MEMBERSHIP, BENCH] {
+    for name in names {
         let built = root
             .join("target/riscv32im-succinct-zkvm-elf/release")
             .join(name);
@@ -128,7 +137,12 @@ fn vkeys() -> Result<()> {
     }
 
     let wrap = groth16_wrap_vk()?;
-    println!("{:24} {} bytes, sha256 {}", "groth16 wrap vk", wrap.len(), hex::encode(sha256(&wrap)));
+    println!(
+        "{:24} {} bytes, sha256 {}",
+        "groth16 wrap vk",
+        wrap.len(),
+        hex::encode(sha256(&wrap))
+    );
     println!(
         "{:24} {}",
         "identity digest",
@@ -219,7 +233,10 @@ fn identity(url: &str, write: bool) -> Result<()> {
     // Cross-check before trusting any of it: the log must reproduce the signed RTMRs.
     let replayed = tee_attestation::replay_event_logs(&events);
     let signed = [td.rt_mr0, td.rt_mr1, td.rt_mr2, td.rt_mr3];
-    anyhow::ensure!(replayed == signed, "event log does not replay to the quote's RTMRs");
+    anyhow::ensure!(
+        replayed == signed,
+        "event log does not replay to the quote's RTMRs"
+    );
 
     let read = |name: &str| -> Result<String> {
         let value = tee_attestation::get_event_value(&events, name)
@@ -273,6 +290,8 @@ fn ureq_get(url: &str) -> Result<serde_json::Value> {
 
 fn bench(prove: bool) -> Result<()> {
     sp1_sdk::utils::setup_logger();
+    // Built here rather than by `build`, because this is the only thing that runs it.
+    build_programs(&[BENCH])?;
     let inputs = sample_inputs()?;
     let mut stdin = SP1Stdin::new();
     stdin.write(&inputs);
@@ -280,7 +299,10 @@ fn bench(prove: bool) -> Result<()> {
     let client = ProverClient::builder().cpu().build();
 
     let (_, report) = client.execute(&elf(BENCH)?, &stdin).run()?;
-    println!("cycles (DCAP verification + event log replay): {}", report.total_instruction_count());
+    println!(
+        "cycles (DCAP verification + event log replay): {}",
+        report.total_instruction_count()
+    );
 
     if prove {
         let (pk, vk) = client.setup(&elf(BENCH)?);
@@ -288,8 +310,14 @@ fn bench(prove: bool) -> Result<()> {
         let proof = client.prove(&pk, &stdin).groth16().run()?;
         let elapsed = start.elapsed();
         client.verify(&proof, &vk)?;
-        println!("groth16 proof on CPU:                      {:.1}s", elapsed.as_secs_f64());
-        println!("proof bytes:                               {}", proof.bytes().len());
+        println!(
+            "groth16 proof on CPU:                      {:.1}s",
+            elapsed.as_secs_f64()
+        );
+        println!(
+            "proof bytes:                               {}",
+            proof.bytes().len()
+        );
     }
     Ok(())
 }

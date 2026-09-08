@@ -142,7 +142,10 @@ async fn read_assertion_created(
         .context("no parent assertion in topics")?
         .parse()?;
 
-    let data = log["data"].as_str().context("log data")?.trim_start_matches("0x");
+    let data = log["data"]
+        .as_str()
+        .context("log data")?
+        .trim_start_matches("0x");
     let word = |index: usize| -> Result<B256> {
         let start = index * 64;
         let text = data
@@ -179,17 +182,26 @@ async fn get_l2_header_rlp(l2: &ExecutionReader, block_hash: B256) -> Result<Vec
     anyhow::ensure!(!block.is_null(), "L2 has no block {block_hash}");
 
     let raw = |name: &str| -> Result<Vec<u8>> {
-        let text = block[name].as_str().with_context(|| format!("header has no {name}"))?;
+        let text = block[name]
+            .as_str()
+            .with_context(|| format!("header has no {name}"))?;
         Ok(hex::decode(text.trim_start_matches("0x"))?)
     };
     // Quantities are RLP-encoded minimally, so leading zero bytes have to go.
     let quantity = |name: &str| -> Result<Vec<u8>> {
-        let text = block[name].as_str().with_context(|| format!("header has no {name}"))?;
+        let text = block[name]
+            .as_str()
+            .with_context(|| format!("header has no {name}"))?;
         let value = u128::from_str_radix(text.trim_start_matches("0x"), 16)?;
         Ok(if value == 0 {
             Vec::new()
         } else {
-            value.to_be_bytes().iter().copied().skip_while(|b| *b == 0).collect()
+            value
+                .to_be_bytes()
+                .iter()
+                .copied()
+                .skip_while(|b| *b == 0)
+                .collect()
         })
     };
 
@@ -225,7 +237,11 @@ async fn get_l2_header_rlp(l2: &ExecutionReader, block_hash: B256) -> Result<Vec
         if block[name].is_null() {
             break;
         }
-        fields.push(if is_quantity { quantity(name)? } else { raw(name)? });
+        fields.push(if is_quantity {
+            quantity(name)?
+        } else {
+            raw(name)?
+        });
     }
 
     let mut payload = Vec::new();
@@ -263,18 +279,28 @@ pub async fn get_base_root_proof(
         .await
         .context("eth_getProof on the anchor state registry")?;
 
-    let slots = registry_proof["storageProof"].as_array().context("storageProof")?;
-    let anchor_game_slot_value: U256 =
-        slots.first().context("no anchorGame slot")?["value"].as_str().context("value")?.parse()?;
+    let slots = registry_proof["storageProof"]
+        .as_array()
+        .context("storageProof")?;
+    let anchor_game_slot_value: U256 = slots.first().context("no anchorGame slot")?["value"]
+        .as_str()
+        .context("value")?
+        .parse()?;
     let game = Address::from_slice(&anchor_game_slot_value.to_be_bytes::<32>()[12..]);
 
     let game_proof = l1
-        .call("eth_getProof", serde_json::json!([game, [], format!("0x{l1_block:x}")]))
+        .call(
+            "eth_getProof",
+            serde_json::json!([game, [], format!("0x{l1_block:x}")]),
+        )
         .await
         .context("eth_getProof on the anchor game")?;
 
     let code = l1
-        .call("eth_getCode", serde_json::json!([game, format!("0x{l1_block:x}")]))
+        .call(
+            "eth_getCode",
+            serde_json::json!([game, format!("0x{l1_block:x}")]),
+        )
         .await?;
     let code: Bytes = code.as_str().context("eth_getCode")?.parse()?;
 
@@ -377,8 +403,17 @@ async fn get_anchor_block_number(
             ]),
         )
         .await?;
-    let raw = hex::decode(result.as_str().context("eth_call")?.trim_start_matches("0x"))?;
-    anyhow::ensure!(raw.len() >= 64, "getAnchorRoot returned {} bytes", raw.len());
+    let raw = hex::decode(
+        result
+            .as_str()
+            .context("eth_call")?
+            .trim_start_matches("0x"),
+    )?;
+    anyhow::ensure!(
+        raw.len() >= 64,
+        "getAnchorRoot returned {} bytes",
+        raw.len()
+    );
     Ok(U256::from_be_slice(&raw[32..64]).to::<u64>())
 }
 
@@ -396,7 +431,12 @@ fn encode_rlp_length(length: usize, offset: u8, out: &mut Vec<u8>) {
         out.push(offset + length as u8);
         return;
     }
-    let be: Vec<u8> = length.to_be_bytes().iter().copied().skip_while(|b| *b == 0).collect();
+    let be: Vec<u8> = length
+        .to_be_bytes()
+        .iter()
+        .copied()
+        .skip_while(|b| *b == 0)
+        .collect();
     out.push(offset + 55 + be.len() as u8);
     out.extend_from_slice(&be);
 }

@@ -41,25 +41,25 @@ pub struct RollupLayout {
 
 impl RollupLayout {
     /// Arbitrum Sepolia's BoLD rollup, read off live L1 storage.
-    pub const ARBITRUM_SEPOLIA: Self =
-        Self { latest_confirmed_slot: 116, assertions_mapping_slot: 117 };
+    pub const ARBITRUM_SEPOLIA: Self = Self {
+        latest_confirmed_slot: 116,
+        assertions_mapping_slot: 117,
+    };
 }
 
 /// Which L1 contract defines an L2's state, and how to read it.
 ///
-/// This is pinned in the enclave rather than taken from the request, and that distinction is
-/// the whole security of an L2 origin. A proof against a caller-named contract proves nothing:
-/// anyone can deploy a contract on L1 whose storage mimics a rollup, claim any L2 root in it,
-/// and prove it perfectly honestly against the real L1 state root. Naming the contract here
-/// puts it under `compose_hash`, which the circuit pins and the ISM's vkeys commit to, so
-/// changing it is a redeploy rather than a request field.
+/// Pinned here rather than taken from the request, which is the whole security of an L2
+/// origin: a proof against a caller-named contract proves nothing. See docs/security.md.
 pub struct L2Anchor;
 
 impl L2Anchor {
-    pub const ARBITRUM_SEPOLIA_ROLLUP: Address =
-        Address::new(hex_literal_address("042B2E6C5E99d4c521bd49beeD5E99651D9B0Cf4"));
-    pub const BASE_SEPOLIA_REGISTRY: Address =
-        Address::new(hex_literal_address("2fF5cC82dBf333Ea30D8ee462178ab1707315355"));
+    pub const ARBITRUM_SEPOLIA_ROLLUP: Address = Address::new(hex_literal_address(
+        "042B2E6C5E99d4c521bd49beeD5E99651D9B0Cf4",
+    ));
+    pub const BASE_SEPOLIA_REGISTRY: Address = Address::new(hex_literal_address(
+        "2fF5cC82dBf333Ea30D8ee462178ab1707315355",
+    ));
 
     /// Slot of `anchorGame` in Base's `AnchorStateRegistry`.
     pub const BASE_ANCHOR_GAME_SLOT: u64 = 2;
@@ -175,7 +175,7 @@ pub fn read_assertion_status(slot_value: U256) -> u8 {
 /// Three links, each checked rather than trusted: L1 storage says which assertion is
 /// confirmed, the assertion's preimage says which L2 block it ends at, and the L2 header's
 /// preimage says what that block's state root is.
-pub fn get_arbitrum_root(
+pub fn verify_arbitrum_root(
     l1_state_root: B256,
     proof: &ArbitrumRootProof,
 ) -> Result<AttestedRoot, ArbitrumError> {
@@ -193,7 +193,10 @@ pub fn get_arbitrum_root(
         U256::from_be_bytes(confirmed.0),
         &proof.latest_confirmed_proof,
     )
-    .map_err(|_| ArbitrumError::AssertionMismatch { got: confirmed, expected: confirmed })?;
+    .map_err(|_| ArbitrumError::AssertionMismatch {
+        got: confirmed,
+        expected: confirmed,
+    })?;
 
     // A pending assertion is still inside its challenge window and proves nothing.
     verify_storage_proof(
@@ -204,7 +207,10 @@ pub fn get_arbitrum_root(
     )?;
     let status = read_assertion_status(proof.assertion_node_slot_value);
     if status != ASSERTION_CONFIRMED {
-        return Err(ArbitrumError::NotConfirmed { hash: confirmed, status });
+        return Err(ArbitrumError::NotConfirmed {
+            hash: confirmed,
+            status,
+        });
     }
 
     let header = decode_l2_header(&proof.l2_header_rlp)?;
@@ -344,7 +350,7 @@ pub fn hash_output_root(p: &BaseOutputRootPreimage) -> B256 {
 /// what root it claims; and the claim's preimage says what L2 state that root is. The
 /// registry only ever points at a resolved game whose dispute window has closed, so trusting
 /// its choice is the same assumption the rollup itself makes.
-pub fn get_base_root(
+pub fn verify_base_root(
     l1_state_root: B256,
     proof: &BaseRootProof,
 ) -> Result<AttestedRoot, BaseError> {
@@ -384,7 +390,9 @@ pub fn get_base_root(
     let claimed = proof
         .game_code
         .get(start..start + 32)
-        .ok_or(BaseError::CodeTooShort { offset: L2Anchor::BASE_ROOT_CLAIM_OFFSET })?;
+        .ok_or(BaseError::CodeTooShort {
+            offset: L2Anchor::BASE_ROOT_CLAIM_OFFSET,
+        })?;
 
     let output_root = hash_output_root(&proof.preimage);
     if output_root.as_slice() != claimed {
@@ -406,4 +414,3 @@ pub fn get_base_root(
         timestamp: header.timestamp,
     })
 }
-

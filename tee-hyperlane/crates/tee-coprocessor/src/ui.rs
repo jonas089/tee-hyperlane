@@ -30,12 +30,7 @@ struct Upstreams {
 }
 
 /// Serve `dir` as a single-page app, with `/api` and `/celestia` proxied.
-pub async fn serve(
-    dir: PathBuf,
-    api: String,
-    celestia_rest: String,
-    addr: &str,
-) -> Result<()> {
+pub async fn serve(dir: PathBuf, api: String, celestia_rest: String, addr: &str) -> Result<()> {
     let index = dir.join("index.html");
     let upstreams = Upstreams {
         http: reqwest::Client::new(),
@@ -64,19 +59,25 @@ async fn proxy_api(State(up): State<Upstreams>, request: Request) -> Response {
 async fn proxy_celestia(State(up): State<Upstreams>, request: Request) -> Response {
     // The route strips nothing, so drop the prefix this proxy is mounted under.
     let rest = path_and_query(request.uri());
-    let target = format!("{}{}", up.celestia_rest, rest.trim_start_matches("/celestia"));
+    let target = format!(
+        "{}{}",
+        up.celestia_rest,
+        rest.trim_start_matches("/celestia")
+    );
     forward(&up, target).await
 }
 
 fn path_and_query(uri: &Uri) -> String {
-    uri.path_and_query().map(|p| p.as_str().to_string()).unwrap_or_else(|| uri.path().into())
+    uri.path_and_query()
+        .map(|p| p.as_str().to_string())
+        .unwrap_or_else(|| uri.path().into())
 }
 
 async fn forward(up: &Upstreams, target: String) -> Response {
     match up.http.get(&target).send().await {
         Ok(response) => {
-            let status = StatusCode::from_u16(response.status().as_u16())
-                .unwrap_or(StatusCode::BAD_GATEWAY);
+            let status =
+                StatusCode::from_u16(response.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
             let mut headers = HeaderMap::new();
             if let Some(kind) = response.headers().get(axum::http::header::CONTENT_TYPE) {
                 headers.insert(axum::http::header::CONTENT_TYPE, kind.clone());

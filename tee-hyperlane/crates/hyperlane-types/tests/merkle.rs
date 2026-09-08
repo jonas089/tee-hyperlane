@@ -7,7 +7,10 @@
 use hyperlane_types::*;
 
 fn h(s: &str) -> [u8; 32] {
-    hex::decode(s.trim_start_matches("0x")).unwrap().try_into().unwrap()
+    hex::decode(s.trim_start_matches("0x"))
+        .unwrap()
+        .try_into()
+        .unwrap()
 }
 
 /// The Solidity test's message, with `body[31] = k`.
@@ -36,7 +39,12 @@ fn roots_match_hyperlanes_own_merkle_tree_hook_vectors() {
     for (k, want) in expected.iter().enumerate() {
         insert_leaf(&mut tree, get_message_id(&message(k as u8))).unwrap();
         assert_eq!(tree.count as usize, k + 1);
-        assert_eq!(get_tree_root(&tree), h(want), "root after {} inserts", k + 1);
+        assert_eq!(
+            get_tree_root(&tree),
+            h(want),
+            "root after {} inserts",
+            k + 1
+        );
     }
 }
 
@@ -44,7 +52,10 @@ fn roots_match_hyperlanes_own_merkle_tree_hook_vectors() {
 fn empty_tree_root_is_the_top_zero_hash() {
     let tree = MerkleTree::default();
     let z = zero_hashes();
-    assert_eq!(get_tree_root(&tree), keccak_pair(&z[TREE_DEPTH - 1], &z[TREE_DEPTH - 1]));
+    assert_eq!(
+        get_tree_root(&tree),
+        keccak_pair(&z[TREE_DEPTH - 1], &z[TREE_DEPTH - 1])
+    );
 }
 
 /// The canonical deposit-contract zero hashes; a mistake here changes every root.
@@ -52,8 +63,14 @@ fn empty_tree_root_is_the_top_zero_hash() {
 fn zero_hashes_match_the_canonical_values() {
     let z = zero_hashes();
     assert_eq!(z[0], [0u8; 32]);
-    assert_eq!(z[1], h("0xad3228b676f7d3cd4284a5443f17f1962b36e491b30a40b2405849e597ba5fb5"));
-    assert_eq!(z[2], h("0xb4c11951957c6f8f642c4af61cd6b24640fec6dc7fc607ee8206a99e92410d30"));
+    assert_eq!(
+        z[1],
+        h("0xad3228b676f7d3cd4284a5443f17f1962b36e491b30a40b2405849e597ba5fb5")
+    );
+    assert_eq!(
+        z[2],
+        h("0xb4c11951957c6f8f642c4af61cd6b24640fec6dc7fc607ee8206a99e92410d30")
+    );
 }
 
 /// A branch proof folded back up must reproduce the root the tree reports - this is the
@@ -87,7 +104,11 @@ fn branch_proofs_reproduce_the_tree_root() {
             level_nodes = next;
             idx /= 2;
         }
-        assert_eq!(get_branch_root(*leaf, &proof, index as u32), root, "leaf {index}");
+        assert_eq!(
+            get_branch_root(*leaf, &proof, index as u32),
+            root,
+            "leaf {index}"
+        );
     }
 }
 

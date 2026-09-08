@@ -9,7 +9,7 @@
 //! These checks now run before any light-client work, so they cost nothing and need no chain
 //! fixtures. Reaching past them would.
 
-use tee_node::attest::{tree_address_of, TreeInput};
+use tee_node::attest::{attested_tree_address, TreeInput};
 use tee_node::hyperlane_state::merkle_tree_base_slot;
 
 const SEPOLIA_HOOK: &str = "4917a9746a7b6e0a57159ccb7f5a6744247f2d0d";
@@ -42,15 +42,21 @@ fn padded(hook: &str) -> [u8; 32] {
 /// exactly the value an attacker would claim.
 #[test]
 fn a_tree_proven_elsewhere_does_not_match_the_canonical_address() {
-    assert_eq!(tree_address_of(&evm_tree(SEPOLIA_HOOK)), padded(SEPOLIA_HOOK));
-    assert_ne!(tree_address_of(&evm_tree(ATTACKER_HOOK)), padded(SEPOLIA_HOOK));
+    assert_eq!(
+        attested_tree_address(&evm_tree(SEPOLIA_HOOK)),
+        padded(SEPOLIA_HOOK)
+    );
+    assert_ne!(
+        attested_tree_address(&evm_tree(ATTACKER_HOOK)),
+        padded(SEPOLIA_HOOK)
+    );
 }
 
 /// Hyperlane addresses are 32 bytes and an EVM one is left-padded, so the comparison has to
 /// be done in that form rather than on the raw twenty.
 #[test]
 fn an_evm_hook_is_compared_left_padded() {
-    let padded_hook = tree_address_of(&evm_tree(SEPOLIA_HOOK));
+    let padded_hook = attested_tree_address(&evm_tree(SEPOLIA_HOOK));
     assert_eq!(&padded_hook[..12], &[0u8; 12]);
     assert_eq!(hex::encode(&padded_hook[12..]), SEPOLIA_HOOK);
 }
@@ -59,8 +65,12 @@ fn an_evm_hook_is_compared_left_padded() {
 fn a_celestia_hook_id_is_used_as_given() {
     let mut id = [0u8; 32];
     id[..20].copy_from_slice(b"router_post_dispatch");
-    let tree = TreeInput::Celestia { hook_id: id, hook_bytes: Vec::new(), proof: Default::default() };
-    assert_eq!(tree_address_of(&tree), id);
+    let tree = TreeInput::Celestia {
+        hook_id: id,
+        hook_bytes: Vec::new(),
+        proof: Default::default(),
+    };
+    assert_eq!(attested_tree_address(&tree), id);
 }
 
 /// Several fields have been taken out of the request because the caller should never have
@@ -103,14 +113,21 @@ fn a_request_without_the_current_protocol_is_refused() {
         serde_json::from_value::<AttestRequest>(missing).is_err(),
         "a request with no protocol field must not parse"
     );
-    assert_eq!(PROTOCOL_VERSION, 3, "bump this when the request shape changes");
+    assert_eq!(
+        PROTOCOL_VERSION, 3,
+        "bump this when the request shape changes"
+    );
 }
 
 /// Each origin's tree layout is fixed, and an unknown origin gets no default: guessing would
 /// mean reading whichever slots happened to line up.
 #[test]
 fn the_tree_layout_is_pinned_per_origin() {
-    assert_eq!(merkle_tree_base_slot(11155111), Some(103), "Sepolia's canonical hook");
+    assert_eq!(
+        merkle_tree_base_slot(11155111),
+        Some(103),
+        "Sepolia's canonical hook"
+    );
     assert_eq!(merkle_tree_base_slot(421614), Some(151), "Arbitrum Sepolia");
     assert_eq!(merkle_tree_base_slot(84532), Some(151), "Base Sepolia");
     assert_eq!(merkle_tree_base_slot(999), None);
@@ -125,7 +142,10 @@ fn an_empty_batch_is_refused() {
     use hyperlane_types::MerkleTree;
     use tee_node::hyperlane_state::{verify_message_batch, HyperlaneStateError};
 
-    let tree = MerkleTree { branch: [[0u8; 32]; 32], count: 0 };
+    let tree = MerkleTree {
+        branch: [[0u8; 32]; 32],
+        count: 0,
+    };
     let err = verify_message_batch(tree, &[], &tree).unwrap_err();
     assert!(matches!(err, HyperlaneStateError::EmptyBatch), "got {err}");
 }
@@ -136,7 +156,10 @@ fn a_batch_must_reproduce_the_onchain_tree() {
     use hyperlane_types::{insert_leaf, MerkleTree};
     use tee_node::hyperlane_state::{verify_message_batch, HyperlaneStateError};
 
-    let snapshot = MerkleTree { branch: [[0u8; 32]; 32], count: 0 };
+    let snapshot = MerkleTree {
+        branch: [[0u8; 32]; 32],
+        count: 0,
+    };
     let mut onchain = snapshot;
     insert_leaf(&mut onchain, [1u8; 32]).unwrap();
     insert_leaf(&mut onchain, [2u8; 32]).unwrap();
@@ -144,7 +167,10 @@ fn a_batch_must_reproduce_the_onchain_tree() {
     assert!(verify_message_batch(snapshot, &[[1u8; 32], [2u8; 32]], &onchain).is_ok());
 
     let partial = verify_message_batch(snapshot, &[[1u8; 32]], &onchain).unwrap_err();
-    assert!(matches!(partial, HyperlaneStateError::CountMismatch { .. }), "got {partial}");
+    assert!(
+        matches!(partial, HyperlaneStateError::CountMismatch { .. }),
+        "got {partial}"
+    );
 }
 
 /// The span check does not pin where a batch starts, and reading it as though it did was the
@@ -184,7 +210,11 @@ fn the_span_check_alone_does_not_pin_where_a_batch_starts() {
         verify_message_batch(attacker_picks, &[[8u8; 32]], &head).is_ok(),
         "the span check is satisfied by any real intermediate tree"
     );
-    assert_eq!(skipped.len(), 3, "and those three ids are the ones nobody ever attests");
+    assert_eq!(
+        skipped.len(),
+        3,
+        "and those three ids are the ones nobody ever attests"
+    );
 
     // The honest span from where the ISM actually stands carries all four.
     let honest = [[5u8; 32], [6u8; 32], [7u8; 32], [8u8; 32]];

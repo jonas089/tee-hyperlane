@@ -36,7 +36,12 @@ struct ErrorResponse {
 type ApiResult<T> = Result<Json<T>, (StatusCode, Json<ErrorResponse>)>;
 
 fn reject(status: StatusCode, error: impl std::fmt::Display) -> (StatusCode, Json<ErrorResponse>) {
-    (status, Json(ErrorResponse { error: error.to_string() }))
+    (
+        status,
+        Json(ErrorResponse {
+            error: error.to_string(),
+        }),
+    )
 }
 
 #[tokio::main]

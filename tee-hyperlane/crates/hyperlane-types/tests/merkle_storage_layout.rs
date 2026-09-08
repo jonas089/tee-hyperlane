@@ -22,7 +22,10 @@ fn fixture() -> Fixture {
 }
 
 fn h(s: &str) -> [u8; 32] {
-    hex::decode(s.trim_start_matches("0x")).unwrap().try_into().unwrap()
+    hex::decode(s.trim_start_matches("0x"))
+        .unwrap()
+        .try_into()
+        .unwrap()
 }
 
 #[test]
@@ -60,5 +63,8 @@ fn a_wrong_base_slot_is_caught_rather_than_silently_accepted() {
     // Reading a slot that holds something other than a small count must fail loudly.
     let mut values = [[0u8; 32]; TREE_DEPTH + 1];
     values[TREE_DEPTH] = [0xff; 32];
-    assert!(matches!(build_tree_from_slots(&values), Err(LayoutError::CountNotUint32(_))));
+    assert!(matches!(
+        build_tree_from_slots(&values),
+        Err(LayoutError::CountNotUint32(_))
+    ));
 }

@@ -48,7 +48,10 @@ impl DstackClient {
                 .unwrap_or(&SOCKET_PATHS[0])
                 .to_string()
         });
-        Self { socket, http: Client::unix() }
+        Self {
+            socket,
+            http: Client::unix(),
+        }
     }
 
     pub fn socket_path(&self) -> &str {
@@ -58,14 +61,22 @@ impl DstackClient {
     /// Ask for a quote over exactly these 32 bytes.
     pub async fn get_quote(&self, report_data: [u8; 32]) -> Result<Quote> {
         let body = serde_json::json!({ "report_data": hex::encode(report_data) }).to_string();
-        let raw: RawQuote = self.post("/GetQuote", body).await.context("dstack GetQuote")?;
-        Ok(Quote { quote: raw.quote, event_log: raw.event_log })
+        let raw: RawQuote = self
+            .post("/GetQuote", body)
+            .await
+            .context("dstack GetQuote")?;
+        Ok(Quote {
+            quote: raw.quote,
+            event_log: raw.event_log,
+        })
     }
 
     /// dstack's view of this CVM. Used once at bootstrap to capture the measurements that
     /// go into `policy/identity.toml`.
     pub async fn info(&self) -> Result<serde_json::Value> {
-        self.post("/Info", "{}".to_string()).await.context("dstack Info")
+        self.post("/Info", "{}".to_string())
+            .await
+            .context("dstack Info")
     }
 
     async fn post<T: for<'de> Deserialize<'de>>(&self, path: &str, body: String) -> Result<T> {
@@ -79,7 +90,11 @@ impl DstackClient {
         let response = self.http.request(request).await?;
         let status = response.status();
         let bytes = response.into_body().collect().await?.to_bytes();
-        anyhow::ensure!(status.is_success(), "dstack returned {status}: {}", String::from_utf8_lossy(&bytes));
+        anyhow::ensure!(
+            status.is_success(),
+            "dstack returned {status}: {}",
+            String::from_utf8_lossy(&bytes)
+        );
         Ok(serde_json::from_slice(&bytes)?)
     }
 }

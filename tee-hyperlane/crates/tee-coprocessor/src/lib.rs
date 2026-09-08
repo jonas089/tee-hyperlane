@@ -5,12 +5,12 @@
 //! bridge, but it cannot make either chain accept a message the enclave did not attest.
 
 pub mod api;
-pub mod ethereum_l2;
 pub mod celestia;
 pub mod chains;
 pub mod commands;
+pub mod config;
 pub mod enclave;
 pub mod ethereum;
-pub mod config;
+pub mod ethereum_l2;
 pub mod tasks;
 pub mod ui;

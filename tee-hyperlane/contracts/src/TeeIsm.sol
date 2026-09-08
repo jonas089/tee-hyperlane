@@ -148,12 +148,8 @@ contract TeeIsm is IInterchainSecurityModule {
     /// @dev Consume-once. All verification already happened; this is a set lookup, so the
     /// Mailbox pays a storage read rather than a proof verification per message.
     ///
-    /// Only the Mailbox may call it. The call is not a query: it deletes the authorisation.
-    /// Left open, anyone could take a message id out of the origin chain's Dispatch log, call
-    /// this directly, and burn the authorisation before the relayer delivers it. Re-authorising
-    /// is impossible - the batch is already submitted for this root, the next snapshot already
-    /// contains those leaves, and the state may not move backwards - so the transfer's tokens
-    /// would be stranded for good.
+    /// Only the Mailbox may call it, because the call is not a query - it deletes the
+    /// authorisation, and a burned authorisation cannot be reissued. See docs/security.md.
     function verify(bytes calldata, bytes calldata message) external returns (bool) {
         if (msg.sender != mailbox) revert NotMailbox();
         bytes32 id = keccak256(message);

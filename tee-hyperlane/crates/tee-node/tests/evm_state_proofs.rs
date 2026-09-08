@@ -35,7 +35,8 @@ fn tree_proof(f: &Fixture) -> EvmTreeProof {
 #[test]
 fn live_sepolia_state_root_yields_the_hyperlane_merkle_root() {
     let f = fixture();
-    let tree = get_evm_merkle_tree(f.state_root, f.base_slot, &tree_proof(&f)).expect("proof must verify");
+    let tree = verify_evm_merkle_tree(f.state_root, f.base_slot, &tree_proof(&f))
+        .expect("proof must verify");
     assert_eq!(tree.count, f.expected_count);
     assert_eq!(
         B256::from(get_merkle_root(&tree)),
@@ -52,13 +53,8 @@ fn zero_valued_branch_slots_are_proven_by_exclusion() {
     let f = fixture();
     let zeros = f.storage_proof.iter().filter(|s| s.value.is_zero()).count();
     assert!(zeros > 0, "fixture should contain unset branch levels");
-    let storage_root = verify_account_proof(
-        f.state_root,
-        f.address,
-        &f.account,
-        &f.account_proof,
-    )
-    .unwrap();
+    let storage_root =
+        verify_account_proof(f.state_root, f.address, &f.account, &f.account_proof).unwrap();
     for s in f.storage_proof.iter().filter(|s| s.value.is_zero()) {
         verify_storage_proof(storage_root, s.slot, s.value, &s.proof)
             .expect("exclusion proof must verify");
@@ -68,8 +64,12 @@ fn zero_valued_branch_slots_are_proven_by_exclusion() {
 #[test]
 fn a_wrong_state_root_is_rejected() {
     let f = fixture();
-    let err = get_evm_merkle_tree(B256::repeat_byte(0xab), f.base_slot, &tree_proof(&f)).unwrap_err();
-    assert!(matches!(err, HyperlaneStateError::Mpt(MptError::AccountProof { .. })));
+    let err =
+        verify_evm_merkle_tree(B256::repeat_byte(0xab), f.base_slot, &tree_proof(&f)).unwrap_err();
+    assert!(matches!(
+        err,
+        HyperlaneStateError::Mpt(MptError::AccountProof { .. })
+    ));
 }
 
 #[test]
@@ -77,8 +77,11 @@ fn a_tampered_slot_value_is_rejected() {
     let f = fixture();
     let mut p = tree_proof(&f);
     p.storage_proof[0].value = U256::from(1);
-    let err = get_evm_merkle_tree(f.state_root, f.base_slot, &p).unwrap_err();
-    assert!(matches!(err, HyperlaneStateError::Mpt(MptError::StorageProof { .. })));
+    let err = verify_evm_merkle_tree(f.state_root, f.base_slot, &p).unwrap_err();
+    assert!(matches!(
+        err,
+        HyperlaneStateError::Mpt(MptError::StorageProof { .. })
+    ));
 }
 
 /// Claiming a real value for the wrong slot must not slip through.
@@ -87,8 +90,11 @@ fn slots_must_arrive_in_the_expected_order() {
     let f = fixture();
     let mut p = tree_proof(&f);
     p.storage_proof.swap(0, 1);
-    let err = get_evm_merkle_tree(f.state_root, f.base_slot, &p).unwrap_err();
-    assert!(matches!(err, HyperlaneStateError::SlotMismatch { index: 0, .. }));
+    let err = verify_evm_merkle_tree(f.state_root, f.base_slot, &p).unwrap_err();
+    assert!(matches!(
+        err,
+        HyperlaneStateError::SlotMismatch { index: 0, .. }
+    ));
 }
 
 /// 151 is the L2 deployments' layout and wrong for Hyperlane's Sepolia hook. The slot is
@@ -97,18 +103,29 @@ fn slots_must_arrive_in_the_expected_order() {
 #[test]
 fn a_wrong_base_slot_is_rejected() {
     let f = fixture();
-    let err = get_evm_merkle_tree(f.state_root, 151, &tree_proof(&f)).unwrap_err();
-    assert!(matches!(err, HyperlaneStateError::SlotMismatch { index: 0, .. }));
+    let err = verify_evm_merkle_tree(f.state_root, 151, &tree_proof(&f)).unwrap_err();
+    assert!(matches!(
+        err,
+        HyperlaneStateError::SlotMismatch { index: 0, .. }
+    ));
 }
 
 /// Each origin's slot is fixed, and an unknown origin has none rather than a default.
 #[test]
 fn the_base_slot_is_pinned_per_origin() {
     use tee_node::hyperlane_state::merkle_tree_base_slot;
-    assert_eq!(merkle_tree_base_slot(11155111), Some(103), "Sepolia's canonical hook");
+    assert_eq!(
+        merkle_tree_base_slot(11155111),
+        Some(103),
+        "Sepolia's canonical hook"
+    );
     assert_eq!(merkle_tree_base_slot(421614), Some(151), "Arbitrum Sepolia");
     assert_eq!(merkle_tree_base_slot(84532), Some(151), "Base Sepolia");
-    assert_eq!(merkle_tree_base_slot(1), None, "no guessing for an unknown origin");
+    assert_eq!(
+        merkle_tree_base_slot(1),
+        None,
+        "no guessing for an unknown origin"
+    );
 }
 
 #[test]
@@ -117,8 +134,11 @@ fn a_short_storage_proof_is_rejected() {
     let mut p = tree_proof(&f);
     p.storage_proof.pop();
     assert!(matches!(
-        get_evm_merkle_tree(f.state_root, f.base_slot, &p),
-        Err(HyperlaneStateError::WrongSlotCount { expected: 33, got: 32 })
+        verify_evm_merkle_tree(f.state_root, f.base_slot, &p),
+        Err(HyperlaneStateError::WrongSlotCount {
+            expected: 33,
+            got: 32
+        })
     ));
 }
 
@@ -157,7 +177,10 @@ fn the_exact_message_batch_is_accepted() {
 #[test]
 fn an_empty_batch_is_refused_even_when_nothing_was_dispatched() {
     let (t, _) = tree_of(5);
-    assert_eq!(verify_message_batch(t, &[], &t), Err(HyperlaneStateError::EmptyBatch));
+    assert_eq!(
+        verify_message_batch(t, &[], &t),
+        Err(HyperlaneStateError::EmptyBatch)
+    );
 }
 
 #[test]
@@ -203,7 +226,10 @@ fn a_snapshot_ahead_of_chain_state_is_rejected() {
     let (onchain, _) = tree_of(5);
     assert!(matches!(
         verify_message_batch(ahead, &ids[..1], &onchain),
-        Err(HyperlaneStateError::SnapshotAhead { snapshot: 9, onchain: 5 })
+        Err(HyperlaneStateError::SnapshotAhead {
+            snapshot: 9,
+            onchain: 5
+        })
     ));
 }
 
@@ -229,7 +255,6 @@ fn a_wrong_snapshot_cannot_reproduce_the_onchain_tree() {
     assert_eq!(verify_message_batch(snapshot, &all[5..], &onchain), Ok(()));
     assert_eq!(get_tree_root(&onchain), get_merkle_root(&onchain));
 }
-
 
 /// hyperlane-cosmos pre-fills a tree's unused branch levels with the canonical zero hashes;
 /// Solidity leaves them zero. Those levels sit above the highest set bit of `count`, so they
@@ -258,7 +283,10 @@ fn unused_branch_levels_may_differ_between_implementations() {
 
     let snapshot = MerkleTree::default();
     assert_eq!(verify_message_batch(snapshot, &ids, &cosmos_style), Ok(()));
-    assert_eq!(verify_message_batch(snapshot, &ids, &solidity_style), Ok(()));
+    assert_eq!(
+        verify_message_batch(snapshot, &ids, &solidity_style),
+        Ok(())
+    );
 
     // And a genuinely different tree is still refused.
     solidity_style.branch[0] = [0xff; 32];

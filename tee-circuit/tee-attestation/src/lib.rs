@@ -14,20 +14,19 @@ pub mod enclave_identity;
 pub mod ism;
 
 pub use attestation::{
-    check_attested_report, event_digest_matches, get_event_value, get_measurements,
-    get_report_data, replay_event_logs, verify_attestation, verify_quote, AttestationError,
-    AttestationInputs, EventLog, Measurements, APPLICATION_IMR, DSTACK_RUNTIME_EVENT_TYPE,
-    MAX_QUOTE_SKEW_SECS,
+    event_digest_matches, get_event_value, get_measurements, get_report_data, replay_event_logs,
+    verify_attestation, verify_attested_report, verify_quote, AttestationError, AttestationInputs,
+    EventLog, Measurements, APPLICATION_IMR, DSTACK_RUNTIME_EVENT_TYPE, MAX_QUOTE_SKEW_SECS,
 };
 pub use enclave_identity::{
-    build_identity_digest, build_identity_policy, check_enclave_identity, check_platform_tcb,
+    build_identity_digest, build_identity_policy, verify_enclave_identity, verify_platform_tcb,
     EnclaveIdentity, IdentityError, IdentityPolicy, ALLOWED_TCB_STATUS,
 };
 pub use ism::{
-    check_transition, decode_attested_update, decode_ism_state,
-    decode_state_membership_values, decode_state_transition_values, encode_attested_update,
-    encode_ism_state, encode_state_membership_values, encode_state_transition_values,
-    hash_attested_update, AttestedUpdate, IsmState, StateMembershipValues, StateTransitionValues,
+    decode_attested_update, decode_ism_state, decode_state_membership_values,
+    decode_state_transition_values, encode_attested_update, encode_ism_state,
+    encode_state_membership_values, encode_state_transition_values, hash_attested_update,
+    verify_transition, AttestedUpdate, IsmState, StateMembershipValues, StateTransitionValues,
     TransitionError, ISM_STATE_BYTES,
 };
 

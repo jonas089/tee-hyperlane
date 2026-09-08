@@ -5,9 +5,9 @@
 //!
 //!   ALCHEMY_API_KEY=... cargo test -p tee-coprocessor --test base_live -- --ignored
 
-use tee_coprocessor::ethereum_l2::get_base_root_proof;
 use tee_coprocessor::ethereum::ExecutionReader;
-use tee_node::origins::ethereum_l2::get_base_root;
+use tee_coprocessor::ethereum_l2::get_base_root_proof;
+use tee_node::origins::ethereum_l2::verify_base_root;
 
 const ANCHOR_STATE_REGISTRY: &str = "0x2fF5cC82dBf333Ea30D8ee462178ab1707315355";
 
@@ -35,7 +35,10 @@ async fn a_live_anchor_game_yields_bases_state_root() {
         .expect("gathering the proof");
 
     let l1_state_root: alloy_primitives::B256 = l1
-        .call("eth_getBlockByNumber", serde_json::json!([format!("0x{l1_block:x}"), false]))
+        .call(
+            "eth_getBlockByNumber",
+            serde_json::json!([format!("0x{l1_block:x}"), false]),
+        )
         .await
         .unwrap()["stateRoot"]
         .as_str()
@@ -44,8 +47,11 @@ async fn a_live_anchor_game_yields_bases_state_root() {
         .unwrap();
 
     // The same check the enclave makes.
-    let root = get_base_root(l1_state_root, &proof).expect("deriving the root");
-    println!("base block {} root {} at {}", root.height, root.state_root, root.timestamp);
+    let root = verify_base_root(l1_state_root, &proof).expect("deriving the root");
+    println!(
+        "base block {} root {} at {}",
+        root.height, root.state_root, root.timestamp
+    );
     assert!(root.height > 0);
     assert_ne!(root.state_root, alloy_primitives::B256::ZERO);
 }

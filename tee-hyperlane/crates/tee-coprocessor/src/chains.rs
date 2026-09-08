@@ -45,19 +45,34 @@ impl Destination {
 
         // Which chain to send to comes from the route, so a second EVM destination is config.
         match &self.chain {
-            ChainConfig::Ethereum { execution_rpc, mailbox, domain, .. } => {
+            ChainConfig::Ethereum {
+                execution_rpc,
+                mailbox,
+                domain,
+                ..
+            } => {
                 command
                     .env("EVM_RPC", execution_rpc)
                     .env("MAILBOX", mailbox)
                     .env("LOCAL_DOMAIN", domain.to_string());
             }
-            ChainConfig::EthereumL2 { l2_rpc, mailbox, domain, .. } => {
+            ChainConfig::EthereumL2 {
+                l2_rpc,
+                mailbox,
+                domain,
+                ..
+            } => {
                 command
                     .env("EVM_RPC", l2_rpc)
                     .env("MAILBOX", mailbox)
                     .env("LOCAL_DOMAIN", domain.to_string());
             }
-            ChainConfig::Celestia { rpc, mailbox_id, domain, .. } => {
+            ChainConfig::Celestia {
+                rpc,
+                mailbox_id,
+                domain,
+                ..
+            } => {
                 command
                     .env("CELESTIA_RPC", rpc)
                     .env("CELESTIA_MAILBOX", mailbox_id)
@@ -91,7 +106,10 @@ pub fn read_ism_state(chain: &ChainConfig, ism: &str) -> Result<String> {
             .output()
             .context("celestia-appd query zkism ism")?,
         ChainConfig::Ethereum { execution_rpc, .. }
-        | ChainConfig::EthereumL2 { l2_rpc: execution_rpc, .. } => Command::new("cast")
+        | ChainConfig::EthereumL2 {
+            l2_rpc: execution_rpc,
+            ..
+        } => Command::new("cast")
             .args(["call", ism, "state()(bytes)", "--rpc-url", execution_rpc])
             .output()
             .context("cast call state()")?,

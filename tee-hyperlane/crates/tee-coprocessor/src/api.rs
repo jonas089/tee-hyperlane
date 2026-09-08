@@ -83,7 +83,10 @@ pub struct Api {
 
 impl Api {
     pub fn new(proof_dir: impl Into<PathBuf>, routes: Vec<RouteConfig>) -> Self {
-        Self { root: Arc::new(proof_dir.into()), routes: Arc::new(routes) }
+        Self {
+            root: Arc::new(proof_dir.into()),
+            routes: Arc::new(routes),
+        }
     }
 
     pub fn router(self) -> Router {
@@ -98,7 +101,11 @@ impl Api {
 
     /// The batch this route is proving right now, read from its staging file.
     fn in_flight(&self, route: &str) -> Option<Batch> {
-        let staged = self.root.join(route).join("staging").join("attestation.json");
+        let staged = self
+            .root
+            .join(route)
+            .join("staging")
+            .join("attestation.json");
         let raw = std::fs::read(staged).ok()?;
         let record: serde_json::Value = serde_json::from_slice(&raw).ok()?;
         let state = hex::decode(record["attestation"]["new_state"].as_str()?).ok()?;
@@ -120,8 +127,13 @@ impl Api {
             .unwrap_or_default()
             .into_iter()
             .filter(|f| f.extension().is_some_and(|e| e == "json"))
-            .filter_map(|f| serde_json::from_slice::<AttestationRecord>(&std::fs::read(f).ok()?).ok())
-            .map(|record| Batch { height: record.height, messages: record.batch })
+            .filter_map(|f| {
+                serde_json::from_slice::<AttestationRecord>(&std::fs::read(f).ok()?).ok()
+            })
+            .map(|record| Batch {
+                height: record.height,
+                messages: record.batch,
+            })
             .collect();
         batches.sort_by(|a, b| b.height.cmp(&a.height));
         batches.truncate(RECENT_BATCHES);
@@ -136,12 +148,12 @@ impl Api {
                 if file.extension().is_none_or(|e| e != "json") {
                     continue;
                 }
-                let record: AttestationRecord =
-                    match serde_json::from_slice(&std::fs::read(&file)?) {
-                        Ok(record) => record,
-                        // A file the prover is still writing is not an error.
-                        Err(_) => continue,
-                    };
+                let record: AttestationRecord = match serde_json::from_slice(&std::fs::read(&file)?)
+                {
+                    Ok(record) => record,
+                    // A file the prover is still writing is not an error.
+                    Err(_) => continue,
+                };
                 if record
                     .batch
                     .iter()
@@ -165,7 +177,9 @@ fn read_dir(path: &std::path::Path) -> Result<Vec<PathBuf>> {
     if !path.exists() {
         return Ok(Vec::new());
     }
-    Ok(std::fs::read_dir(path)?.filter_map(|e| e.ok().map(|e| e.path())).collect())
+    Ok(std::fs::read_dir(path)?
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .collect())
 }
 
 /// The page this port serves. Small enough to embed, so the API ships as one binary.
@@ -183,7 +197,9 @@ async fn status(State(api): State<Api>) -> Json<Vec<RouteStatus>> {
     for (index, route) in api.routes.iter().enumerate() {
         let route = route.clone();
         let api = api.clone();
-        reads.push(tokio::task::spawn_blocking(move || (index, read_route(&api, &route))));
+        reads.push(tokio::task::spawn_blocking(move || {
+            (index, read_route(&api, &route))
+        }));
     }
 
     let mut statuses: Vec<(usize, RouteStatus)> = Vec::new();
@@ -244,7 +260,12 @@ fn read_confirmed_l2_block(rollup: &str, anchor: &str, l1_rpc: &str) -> Option<u
         .output()
         .ok()?;
     let text = String::from_utf8(output.stdout).ok()?;
-    text.lines().nth(line)?.split_whitespace().next()?.parse().ok()
+    text.lines()
+        .nth(line)?
+        .split_whitespace()
+        .next()?
+        .parse()
+        .ok()
 }
 
 fn read_origin_head(origin: &ChainConfig) -> Option<u64> {
@@ -255,13 +276,23 @@ fn read_origin_head(origin: &ChainConfig) -> Option<u64> {
                 .output()
                 .ok()?;
             let status: serde_json::Value = serde_json::from_slice(&output.stdout).ok()?;
-            status["sync_info"]["latest_block_height"].as_str()?.parse().ok()
+            status["sync_info"]["latest_block_height"]
+                .as_str()?
+                .parse()
+                .ok()
         }
         // For an Ethereum origin the relevant head is the *finalized* one, because that is
         // all the enclave will attest.
         ChainConfig::Ethereum { execution_rpc, .. } => {
             let output = std::process::Command::new("cast")
-                .args(["block", "finalized", "--field", "number", "--rpc-url", execution_rpc])
+                .args([
+                    "block",
+                    "finalized",
+                    "--field",
+                    "number",
+                    "--rpc-url",
+                    execution_rpc,
+                ])
                 .output()
                 .ok()?;
             String::from_utf8(output.stdout).ok()?.trim().parse().ok()
@@ -269,7 +300,12 @@ fn read_origin_head(origin: &ChainConfig) -> Option<u64> {
         // An L2's own head is not the useful number: the enclave attests the block Ethereum
         // has *confirmed*, which trails it by a challenge window. Reporting the head would
         // make every L2 route look permanently thousands of blocks behind.
-        ChainConfig::EthereumL2 { rollup, l1_anchor_contract, l1, .. } => {
+        ChainConfig::EthereumL2 {
+            rollup,
+            l1_anchor_contract,
+            l1,
+            ..
+        } => {
             let ChainConfig::Ethereum { execution_rpc, .. } = &**l1 else {
                 return None;
             };

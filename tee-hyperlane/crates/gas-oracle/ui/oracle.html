@@ -88,7 +88,7 @@
   <h2 class="section">Last round</h2>
   <p class="note">The prices and gas those values were derived from.</p>
   <div class="card wrap">
-    <table id="readings"><thead><tr>
+    <table id="pushes"><thead><tr>
       <th>Route</th><th>Gas price</th><th>Local</th><th>Remote</th><th>Pushed</th>
     </tr></thead><tbody></tbody></table>
   </div>
@@ -132,7 +132,7 @@
   async function refresh() {
     let d;
     try {
-      d = await (await fetch("/api/readings")).json();
+      d = await (await fetch("/api/pushes")).json();
     } catch {
       document.getElementById("when").textContent = "unreachable";
       return;
@@ -158,7 +158,7 @@
         <td class="num">${c.gas_overhead ?? "-"}</td>
       </tr>${c.error ? `<tr><td colspan="5" class="err">${c.error}</td></tr>` : ""}`));
 
-    fill("readings", (d.readings || []).map((r) => `
+    fill("pushes", (d.pushes || []).map((r) => `
       <tr>
         <td>${r.name}</td>
         <td class="num">${gwei(r.gas_price_wei)}</td>

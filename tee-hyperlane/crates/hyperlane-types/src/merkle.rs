@@ -25,10 +25,7 @@ mod hex_branch {
     use super::TREE_DEPTH;
     use serde::{Deserialize, Deserializer, Serializer};
 
-    pub fn serialize<S: Serializer>(
-        v: &[[u8; 32]; TREE_DEPTH],
-        s: S,
-    ) -> Result<S::Ok, S::Error> {
+    pub fn serialize<S: Serializer>(v: &[[u8; 32]; TREE_DEPTH], s: S) -> Result<S::Ok, S::Error> {
         s.collect_seq(v.iter().map(hex::encode))
     }
 
@@ -56,7 +53,10 @@ mod hex_branch {
 
 impl Default for MerkleTree {
     fn default() -> Self {
-        Self { branch: [[0u8; 32]; TREE_DEPTH], count: 0 }
+        Self {
+            branch: [[0u8; 32]; TREE_DEPTH],
+            count: 0,
+        }
     }
 }
 
@@ -132,7 +132,6 @@ pub fn get_branch_root(leaf: [u8; 32], proof: &[[u8; 32]; TREE_DEPTH], index: u3
 // ============================================================================
 // Where MerkleTreeHook.sol keeps this tree in storage
 // ============================================================================
-
 
 /// Hyperlane's canonical Sepolia `merkleTreeHook`, confirmed on chain.
 pub const SEPOLIA_MERKLE_TREE_BASE_SLOT: u64 = 103;

@@ -60,8 +60,10 @@ pub fn verify_account_proof(
     account.encode(&mut encoded);
 
     let key = Nibbles::unpack(keccak256(address.as_slice()));
-    verify_proof(state_root, key, Some(encoded), proof)
-        .map_err(|_| MptError::AccountProof { address, root: state_root })?;
+    verify_proof(state_root, key, Some(encoded), proof).map_err(|_| MptError::AccountProof {
+        address,
+        root: state_root,
+    })?;
     Ok(claimed.storage_root)
 }
 
@@ -83,22 +85,10 @@ pub fn verify_storage_proof(
         Some(buf)
     };
     let key = Nibbles::unpack(keccak256(slot.as_slice()));
-    verify_proof(storage_root, key, expected, proof)
-        .map_err(|_| MptError::StorageProof { slot, root: storage_root })
-}
-
-/// Prove every slot in one go, returning the values in the order the slots were given.
-pub fn verify_storage_slots(
-    storage_root: B256,
-    slots: &[ClaimedSlot],
-) -> Result<Vec<U256>, MptError> {
-    slots
-        .iter()
-        .map(|s| {
-            verify_storage_proof(storage_root, s.slot, s.value, &s.proof)?;
-            Ok(s.value)
-        })
-        .collect()
+    verify_proof(storage_root, key, expected, proof).map_err(|_| MptError::StorageProof {
+        slot,
+        root: storage_root,
+    })
 }
 
 /// JSON-RPC returns integers as hex quantities ("0x1"), so accept those as well as plain
@@ -157,7 +147,11 @@ pub enum CelestiaStateError {
     #[error("expected two proof ops (iavl then simple), got {0}")]
     WrongProofShape(usize),
     #[error("proof op {index} has type `{got}`, expected `{expected}`")]
-    WrongProofType { index: usize, got: String, expected: &'static str },
+    WrongProofType {
+        index: usize,
+        got: String,
+        expected: &'static str,
+    },
     #[error("proof op {0} is not a decodable ics23 commitment proof")]
     UndecodableProof(usize),
     #[error("proof op {0} is not an existence proof")]
@@ -251,7 +245,7 @@ pub fn verify_store_value(
 /// A cosmos store proof for one merkle tree hook.
 pub type Ics23TreeProof = Vec<StoreProofOp>;
 
-pub fn get_celestia_merkle_tree(
+pub fn verify_celestia_merkle_tree(
     app_hash: [u8; 32],
     hook_id: [u8; 32],
     hook_bytes: &[u8],
@@ -285,8 +279,7 @@ struct TreeProto {
 }
 
 pub fn decode_merkle_tree_hook(bytes: &[u8]) -> Result<MerkleTree, CelestiaStateError> {
-    let hook =
-        MerkleTreeHookProto::decode(bytes).map_err(|_| CelestiaStateError::MalformedHook)?;
+    let hook = MerkleTreeHookProto::decode(bytes).map_err(|_| CelestiaStateError::MalformedHook)?;
     let tree = hook.tree.ok_or(CelestiaStateError::HookHasNoTree)?;
     if tree.branch.len() != TREE_DEPTH {
         return Err(CelestiaStateError::WrongBranchLength(tree.branch.len()));
@@ -298,15 +291,18 @@ pub fn decode_merkle_tree_hook(bytes: &[u8]) -> Result<MerkleTree, CelestiaState
             .try_into()
             .map_err(|_| CelestiaStateError::BranchEntryNotHash(i))?;
     }
-    Ok(MerkleTree { branch, count: tree.count })
+    Ok(MerkleTree {
+        branch,
+        count: tree.count,
+    })
 }
 
 fn decode_existence(
     data: &[u8],
     index: usize,
 ) -> Result<ics23::ExistenceProof, CelestiaStateError> {
-    let proof = CommitmentProof::decode(data)
-        .map_err(|_| CelestiaStateError::UndecodableProof(index))?;
+    let proof =
+        CommitmentProof::decode(data).map_err(|_| CelestiaStateError::UndecodableProof(index))?;
     match proof.proof {
         Some(Proof::Exist(e)) => Ok(e),
         _ => Err(CelestiaStateError::NotAnExistenceProof(index)),
@@ -314,5 +310,7 @@ fn decode_existence(
 }
 
 fn wrap(e: ics23::ExistenceProof) -> CommitmentProof {
-    CommitmentProof { proof: Some(Proof::Exist(e)) }
+    CommitmentProof {
+        proof: Some(Proof::Exist(e)),
+    }
 }

@@ -27,11 +27,19 @@ pub struct CelestiaReader {
 
 impl CelestiaReader {
     pub fn new(rpc_url: &str) -> Result<Self> {
-        Ok(Self { rpc: HttpClient::new(rpc_url).context("celestia rpc")? })
+        Ok(Self {
+            rpc: HttpClient::new(rpc_url).context("celestia rpc")?,
+        })
     }
 
     pub async fn latest_height(&self) -> Result<u64> {
-        Ok(self.rpc.status().await?.sync_info.latest_block_height.value())
+        Ok(self
+            .rpc
+            .status()
+            .await?
+            .sync_info
+            .latest_block_height
+            .value())
     }
 
     /// Assemble the light block at `height`.
@@ -42,7 +50,10 @@ impl CelestiaReader {
         let h = Height::try_from(height)?;
         let commit = self.rpc.commit(h).await?;
         let validators = self.rpc.validators(h, Paging::All).await?;
-        let next = self.rpc.validators(Height::try_from(height + 1)?, Paging::All).await?;
+        let next = self
+            .rpc
+            .validators(Height::try_from(height + 1)?, Paging::All)
+            .await?;
         let peer_id = self.rpc.status().await?.node_info.id;
         Ok(LightBlock::new(
             commit.signed_header,
@@ -133,10 +144,7 @@ impl CelestiaReader {
 }
 
 /// Pair each tree insertion with the dispatch it came from, matching on message id.
-fn inserts_in(
-    height: u64,
-    events: &[tendermint::abci::Event],
-) -> Result<Vec<DispatchedMessage>> {
+fn inserts_in(height: u64, events: &[tendermint::abci::Event]) -> Result<Vec<DispatchedMessage>> {
     let mut dispatched: Vec<Vec<u8>> = Vec::new();
     let mut inserts: Vec<(u32, [u8; 32])> = Vec::new();
 
@@ -148,12 +156,15 @@ fn inserts_in(
                 }
             }
             "hyperlane.core.post_dispatch.v1.EventInsertedIntoTree" => {
-                let index: u32 =
-                    attribute(ev, "index").context("insert event without index")?.parse()?;
-                let id = decode_hex(
-                    &attribute(ev, "message_id").context("insert event without id")?,
-                )?;
-                inserts.push((index, id.as_slice().try_into().context("message id length")?));
+                let index: u32 = attribute(ev, "index")
+                    .context("insert event without index")?
+                    .parse()?;
+                let id =
+                    decode_hex(&attribute(ev, "message_id").context("insert event without id")?)?;
+                inserts.push((
+                    index,
+                    id.as_slice().try_into().context("message id length")?,
+                ));
             }
             _ => {}
         }
@@ -171,7 +182,12 @@ fn inserts_in(
                 })
                 .cloned()
                 .unwrap_or_default();
-            DispatchedMessage { height, tree_index, message_id, message }
+            DispatchedMessage {
+                height,
+                tree_index,
+                message_id,
+                message,
+            }
         })
         .map(Ok)
         .collect()

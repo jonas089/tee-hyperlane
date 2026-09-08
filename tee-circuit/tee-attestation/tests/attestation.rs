@@ -1,9 +1,9 @@
 //! What must hold after the quote's signature checks out: the payload is really attested,
 //! the transition is legal, and the prover's clock is anchored to attested chain time.
 
-mod common;
+mod fixtures;
 
-use common::*;
+use fixtures::*;
 use tee_attestation::*;
 
 fn log_json(log: &[EventLog]) -> Vec<u8> {
@@ -12,7 +12,7 @@ fn log_json(log: &[EventLog]) -> Vec<u8> {
 
 fn run(u: &AttestedUpdate, now: u64) -> Result<AttestedUpdate, AttestationError> {
     let log = good_log();
-    check_attested_report(
+    verify_attested_report(
         &report_for(&log, u),
         &log_json(&log),
         &encode_attested_update(u),
@@ -34,7 +34,7 @@ fn a_payload_the_quote_did_not_commit_to_is_rejected() {
     let mut tampered = u.clone();
     tampered.new_state.state_root = [0xff; 32];
     assert_eq!(
-        check_attested_report(
+        verify_attested_report(
             &report_for(&log, &u),
             &log_json(&log),
             &encode_attested_update(&tampered),
@@ -54,7 +54,7 @@ fn the_message_batch_is_bound_to_the_quote() {
     let mut tampered = u.clone();
     tampered.message_ids = vec![[0xaa; 32]];
     assert_eq!(
-        check_attested_report(
+        verify_attested_report(
             &report_for(&log, &u),
             &log_json(&log),
             &encode_attested_update(&tampered),
@@ -75,7 +75,13 @@ fn unaccounted_report_data_padding_is_rejected() {
     rd[63] = 1;
     let r = report(&log, MR_TD, TcbStatus::UpToDate, rd);
     assert_eq!(
-        check_attested_report(&r, &log_json(&log), &encode_attested_update(&u), HEAD_TS, &policy()),
+        verify_attested_report(
+            &r,
+            &log_json(&log),
+            &encode_attested_update(&u),
+            HEAD_TS,
+            &policy()
+        ),
         Err(AttestationError::ReportDataNotPadded)
     );
 }
@@ -86,7 +92,10 @@ fn a_clock_rewound_below_the_attested_head_is_rejected() {
     let u = update();
     assert_eq!(
         run(&u, HEAD_TS - 1),
-        Err(AttestationError::ClockBehindAttestedHead { now: HEAD_TS - 1, head: HEAD_TS })
+        Err(AttestationError::ClockBehindAttestedHead {
+            now: HEAD_TS - 1,
+            head: HEAD_TS
+        })
     );
 }
 
@@ -112,7 +121,9 @@ fn an_illegal_transition_is_rejected_even_when_properly_attested() {
     u.new_state.state_root = u.prev_state.state_root;
     assert_eq!(
         run(&u, HEAD_TS),
-        Err(AttestationError::Transition(TransitionError::StateRootUnchanged))
+        Err(AttestationError::Transition(
+            TransitionError::StateRootUnchanged
+        ))
     );
 }
 
@@ -121,7 +132,7 @@ fn a_malformed_event_log_is_rejected() {
     let log = good_log();
     let u = update();
     assert_eq!(
-        check_attested_report(
+        verify_attested_report(
             &report_for(&log, &u),
             b"not json",
             &encode_attested_update(&u),
@@ -138,7 +149,7 @@ fn a_truncated_payload_is_rejected() {
     let u = update();
     let bytes = encode_attested_update(&u);
     assert_eq!(
-        check_attested_report(
+        verify_attested_report(
             &report_for(&log, &u),
             &log_json(&log),
             &bytes[..bytes.len() - 1],
@@ -155,7 +166,7 @@ fn a_foreign_enclave_is_rejected_before_the_payload_matters() {
     let mut log = good_log();
     log[2] = ev(3, "compose-hash", &[0xde; 32]);
     let u = update();
-    let err = check_attested_report(
+    let err = verify_attested_report(
         &report_for(&log, &u),
         &log_json(&log),
         &encode_attested_update(&u),
@@ -163,7 +174,10 @@ fn a_foreign_enclave_is_rejected_before_the_payload_matters() {
         &policy(),
     )
     .unwrap_err();
-    assert!(matches!(err, AttestationError::Identity(IdentityError::EventMismatch(_))));
+    assert!(matches!(
+        err,
+        AttestationError::Identity(IdentityError::EventMismatch(_))
+    ));
 }
 
 /// Regression test for an encoding bug that silently broke every proof.
@@ -207,4 +221,47 @@ fn sample_dir() -> Option<std::path::PathBuf> {
         let p = e.ok()?.path().join("dcap-qvl-0.5.3/sample");
         p.is_dir().then_some(p)
     })
+}
+
+/// An optimistic rollup's confirmed head is old on purpose: that lag is the fraud-proof
+/// window. Bounding the prover's clock against the *state's* timestamp rather than against
+/// the L1 head the enclave actually verified rejected every honest L2 proof, which is why
+/// neither L2 route ever produced a batch.
+#[test]
+fn an_l2_lag_does_not_look_like_a_stale_clock() {
+    // Base's confirmed head trails L1 by about five days.
+    let lag = 5 * 24 * 60 * 60;
+    let mut u = update();
+    u.prev_state.timestamp = HEAD_TS - lag - 60;
+    u.new_state.timestamp = HEAD_TS - lag;
+    u.attested_at = HEAD_TS;
+
+    // The prover's clock sits beside the L1 head, which is what it is bounded against.
+    assert_eq!(run(&u, HEAD_TS + 60).unwrap(), u);
+
+    // Anchored to the L2 root's own timestamp instead, the same honest proof is hopeless -
+    // the bug this arrangement replaced.
+    let mut old_anchor = u.clone();
+    old_anchor.attested_at = old_anchor.new_state.timestamp;
+    assert!(matches!(
+        run(&old_anchor, HEAD_TS + 60),
+        Err(AttestationError::ClockTooFarAhead { .. })
+    ));
+}
+
+/// The freshness anchor may not predate the state it carries, or an L2 origin could pair a
+/// fresh L1 header with an arbitrarily old L2 root and defeat the destination's staleness
+/// check - the L2 lag above is exactly the cover that would hide it.
+#[test]
+fn the_attested_time_is_not_before_its_state() {
+    let mut u = update();
+    u.new_state.timestamp = HEAD_TS;
+    u.attested_at = HEAD_TS - 1;
+    assert_eq!(
+        run(&u, HEAD_TS - 1),
+        Err(AttestationError::AttestedBeforeState {
+            attested_at: HEAD_TS - 1,
+            state: HEAD_TS,
+        })
+    );
 }

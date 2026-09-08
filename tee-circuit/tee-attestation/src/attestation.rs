@@ -7,7 +7,7 @@
 //! 2. [`replay_event_logs`] - fold the dstack event log into RTMRs. Compared against the
 //!    quote by [`crate::enclave_identity`], this answers "is this log the one the hardware
 //!    measured?".
-//! 3. [`check_attested_report`] - the payload actually rides in `report_data`, the
+//! 3. [`verify_attested_report`] - the payload actually rides in `report_data`, the
 //!    transition is legal, and the prover's clock is anchored to attested chain time.
 //!
 //! Everything here operates on public data; there are no secrets in a quote.
@@ -15,7 +15,7 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha384};
 
-use crate::enclave_identity::{check_enclave_identity, IdentityError, IdentityPolicy};
+use crate::enclave_identity::{verify_enclave_identity, IdentityError, IdentityPolicy};
 use crate::ism::{decode_attested_update, hash_attested_update, AttestedUpdate, TransitionError};
 use dcap_qvl::quote::Report;
 use dcap_qvl::verify::VerifiedReport;
@@ -257,14 +257,20 @@ pub fn verify_attestation(
     let collateral = inputs.decode_collateral()?;
     let report = verify_quote(&inputs.quote, &collateral, inputs.now)
         .map_err(|e| AttestationError::QuoteInvalid(e.to_string()))?;
-    check_attested_report(&report, &inputs.event_log, &inputs.payload, inputs.now, policy)
+    verify_attested_report(
+        &report,
+        &inputs.event_log,
+        &inputs.payload,
+        inputs.now,
+        policy,
+    )
 }
 
 /// Everything after the DCAP signature check.
 ///
 /// Split out so the security-critical path is exercised by ordinary tests without needing a
 /// genuine signed quote.
-pub fn check_attested_report(
+pub fn verify_attested_report(
     report: &VerifiedReport,
     event_log_json: &[u8],
     payload: &[u8],
@@ -275,7 +281,7 @@ pub fn check_attested_report(
         serde_json::from_slice(event_log_json).map_err(|_| AttestationError::EventLogMalformed)?;
 
     let rtmrs = replay_event_logs(&event_log);
-    check_enclave_identity(policy, report, &event_log, &rtmrs)?;
+    verify_enclave_identity(policy, report, &event_log, &rtmrs)?;
 
     let update = decode_attested_update(payload).map_err(|_| AttestationError::PayloadMalformed)?;
 
@@ -287,7 +293,7 @@ pub fn check_attested_report(
         return Err(AttestationError::ReportDataNotPadded);
     }
 
-    crate::ism::check_transition(&update.prev_state, &update.new_state)?;
+    crate::ism::verify_transition(&update.prev_state, &update.new_state)?;
 
     let head = update.attested_at;
     if now < head {

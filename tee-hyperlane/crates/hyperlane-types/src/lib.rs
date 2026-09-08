@@ -5,8 +5,8 @@ pub mod merkle;
 pub mod message;
 
 pub use merkle::{
-    build_tree_from_slots, LayoutError, MerkleTreeSlots, SEPOLIA_MERKLE_TREE_BASE_SLOT,
-    get_branch_root, get_tree_root, insert_leaf, keccak_pair, zero_hashes, MerkleError, MerkleTree,
+    build_tree_from_slots, get_branch_root, get_tree_root, insert_leaf, keccak_pair, zero_hashes,
+    LayoutError, MerkleError, MerkleTree, MerkleTreeSlots, SEPOLIA_MERKLE_TREE_BASE_SLOT,
     TREE_DEPTH,
 };
 pub use message::{

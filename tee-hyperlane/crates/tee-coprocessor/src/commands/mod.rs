@@ -1,0 +1,239 @@
+//! What each subcommand actually does.
+//!
+//! Split from `main.rs` so that file stays a description of the command line and nothing
+//! else. Each function here is one stage of the pipeline, and each is runnable on its own -
+//! which is what makes a stuck route debuggable.
+
+use std::time::Duration;
+
+use anyhow::{Context, Result};
+use tracing::info;
+
+use crate::config::Config;
+use crate::tasks::{cpu_prover_permit, run_route, ProofStore};
+
+mod celestia;
+mod ethereum;
+mod ethereum_l2;
+
+pub use celestia::{attest_celestia, bootstrap_celestia};
+pub use ethereum::{attest_ethereum, bootstrap_ethereum};
+pub use ethereum_l2::{attest_l2, bootstrap_l2, L2Kind};
+
+use ethereum::{bootstrap_store, rebuild_ethereum_store};
+
+/// Wrap an EVM tree proof as the enclave's internally-tagged `TreeInput`, whose variant
+/// fields sit alongside `kind`.
+fn evm_tree_input(proof: &tee_node::hyperlane_state::EvmTreeProof) -> Result<serde_json::Value> {
+    let mut value = serde_json::to_value(proof)?;
+    value
+        .as_object_mut()
+        .context("tree proof must be an object")?
+        .insert("kind".into(), serde_json::json!("evm"));
+    Ok(value)
+}
+
+/// Produce the two Groth16 proofs the destination needs.
+pub async fn prove(attestation_path: &str, elf_dir: &str, out: &str) -> Result<()> {
+    prove_for_route("", attestation_path, elf_dir, out).await
+}
+
+/// Prove one attestation, naming the route in every line.
+///
+/// A proof is tens of minutes of silence otherwise, and with several routes sharing one
+/// prover there is no way to tell from the log which one is working or how far it has got.
+pub async fn prove_for_route(
+    route: &str,
+    attestation_path: &str,
+    elf_dir: &str,
+    out: &str,
+) -> Result<()> {
+    use crate::enclave::fetch_collateral;
+    use sp1_sdk::{Prover, ProverClient, SP1Stdin};
+    use std::time::Instant;
+
+    let record: serde_json::Value = serde_json::from_slice(&std::fs::read(attestation_path)?)?;
+    let att = &record["attestation"];
+    let quote_hex = att["quote"].as_str().context("quote")?;
+
+    let height = update_height(att);
+    info!(route, height, "fetching Intel collateral");
+    let collateral = fetch_collateral(quote_hex).await?;
+
+    let payload = hex::decode(att["payload"].as_str().context("payload")?)?;
+    let update = tee_attestation::decode_attested_update(&payload)?;
+
+    // The prover's clock, which the circuit bounds to the attested head's timestamp. It may
+    // not be freely chosen: too far back and a revoked TCB could be revived, too far forward
+    // and the collateral has not been issued yet.
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)?
+        .as_secs();
+    info!(
+        route,
+        height = update.new_state.height,
+        attested_at = update.attested_at,
+        prover_clock = now,
+        messages = update.message_ids.len(),
+        "proving batch"
+    );
+
+    let inputs = tee_attestation::AttestationInputs {
+        quote: hex::decode(quote_hex.trim_start_matches("0x"))?,
+        event_log: att["event_log"]
+            .as_str()
+            .context("event log")?
+            .as_bytes()
+            .to_vec(),
+        collateral: tee_attestation::AttestationInputs::encode_collateral(&collateral),
+        now,
+        payload: payload.clone(),
+    };
+
+    let mut stdin = SP1Stdin::new();
+    stdin.write(&inputs);
+
+    let client = ProverClient::builder().cpu().build();
+    let mut proofs = serde_json::Map::new();
+    let mut step = 0;
+    for (name, elf_name) in [
+        ("state_transition", "tee-state-transition"),
+        ("state_membership", "tee-state-membership"),
+    ] {
+        let elf = std::fs::read(std::path::Path::new(elf_dir).join(elf_name))
+            .with_context(|| format!("{elf_name}: run `circuit-tool build` in tee-circuit"))?;
+        let (pk, vk) = client.setup(&elf);
+        step += 1;
+        info!(
+            route,
+            height = update.new_state.height,
+            proof = name,
+            step,
+            of = 2,
+            "generating groth16 proof, this takes tens of minutes on CPU"
+        );
+        let started = Instant::now();
+        let proof = client.prove(&pk, &stdin).groth16().run()?;
+        client.verify(&proof, &vk)?;
+        info!(
+            route,
+            height = update.new_state.height,
+            proof = name,
+            seconds = started.elapsed().as_secs(),
+            bytes = proof.bytes().len(),
+            "proof done"
+        );
+
+        proofs.insert(
+            name.to_string(),
+            serde_json::json!({
+                "proof": hex::encode(proof.bytes()),
+                "public_values": hex::encode(proof.public_values.as_slice()),
+            }),
+        );
+    }
+
+    let mut record = record.clone();
+    record["proofs"] = serde_json::Value::Object(proofs);
+
+    // The same file is what the UI reads, so record the batch in the shape it expects:
+    // which messages were attested together, and the measurements of the enclave that did
+    // it. Everything here is public.
+    let measurements = enclave_measurements(att)?;
+    record["height"] = update.new_state.height.into();
+    record["state_root"] = format!("0x{}", hex::encode(update.new_state.state_root)).into();
+    record["quote"] = quote_hex.into();
+    record["measurements"] = serde_json::to_value(measurements)?;
+    record["batch"] = update
+        .message_ids
+        .iter()
+        .map(|id| format!("0x{}", hex::encode(id)))
+        .collect::<Vec<_>>()
+        .into();
+
+    std::fs::write(out, serde_json::to_vec_pretty(&record)?)?;
+    info!(
+        route,
+        height = update.new_state.height,
+        "batch proved and written"
+    );
+    Ok(())
+}
+
+/// The origin height an attestation record advances to, for logging before it is decoded.
+fn update_height(attestation: &serde_json::Value) -> u64 {
+    attestation["new_state"]
+        .as_str()
+        .and_then(|s| hex::decode(s).ok())
+        .and_then(|raw| tee_attestation::decode_ism_state(&raw).ok())
+        .map(|state| state.height)
+        .unwrap_or_default()
+}
+
+/// Pull the measurements out of the quote and event log, for display.
+pub fn enclave_measurements(attestation: &serde_json::Value) -> Result<crate::api::Measurements> {
+    let quote_bytes = hex::decode(
+        attestation["quote"]
+            .as_str()
+            .context("quote")?
+            .trim_start_matches("0x"),
+    )?;
+    let quote = dcap_qvl::quote::Quote::parse(&quote_bytes)
+        .map_err(|e| anyhow::anyhow!("quote does not parse: {e:?}"))?;
+    let td = quote.report.as_td10().context("not a TDX quote")?;
+
+    let events: Vec<tee_attestation::EventLog> =
+        serde_json::from_str(attestation["event_log"].as_str().context("event log")?)?;
+    let read = |name: &str| {
+        tee_attestation::get_event_value(&events, name)
+            .map(hex::encode)
+            .unwrap_or_default()
+    };
+
+    Ok(crate::api::Measurements {
+        mr_td: hex::encode(td.mr_td),
+        os_image_hash: read("os-image-hash"),
+        compose_hash: read("compose-hash"),
+    })
+}
+
+pub async fn run(config: Config) -> Result<()> {
+    let tick = Duration::from_secs(config.tick_secs);
+    let cpu = cpu_prover_permit();
+    let store = std::sync::Arc::new(ProofStore::new(expand_home(&config.proof_dir)));
+
+    let mut routes = Vec::new();
+    for route in config.routes {
+        info!(
+            route = %route.name,
+            origin = route.origin.domain(),
+            destination = route.destination.domain(),
+            "configured"
+        );
+        routes.push(tokio::spawn(run_route(
+            route,
+            store.clone(),
+            cpu.clone(),
+            tick,
+        )));
+    }
+    info!(
+        tick_secs = config.tick_secs,
+        routes = routes.len(),
+        "coprocessor running"
+    );
+
+    // A route runs until the process stops. If one panics, take the service down so systemd
+    // restarts it, rather than leaving a direction silently dead.
+    for handle in routes {
+        handle.await?;
+    }
+    Ok(())
+}
+
+pub fn expand_home(path: &str) -> String {
+    match (path.strip_prefix("~/"), std::env::var("HOME")) {
+        (Some(rest), Ok(home)) => format!("{home}/{rest}"),
+        _ => path.to_string(),
+    }
+}

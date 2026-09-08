@@ -16,7 +16,9 @@ use axum::{Json, Router};
 use clap::Parser;
 use tracing::{info, warn};
 
-use oracle::{read_celestia_configs, read_evm_configs, read_funds, run_once, Config, Reading};
+use oracle::{
+    push_gas_configs, read_celestia_configs, read_evm_configs, read_funds, Config, GasConfigPush,
+};
 
 #[derive(Parser)]
 #[command(about = "Keeps the Celestia IGP's destination gas configs current")]
@@ -33,7 +35,7 @@ struct Options {
 /// What the page shows: the last round, and when the next one is due.
 #[derive(Default)]
 struct State {
-    readings: Vec<Reading>,
+    pushes: Vec<GasConfigPush>,
     last_round: Option<u64>,
     next_round: Option<u64>,
 }
@@ -50,27 +52,36 @@ async fn main() -> Result<()> {
     let options = Options::parse();
 
     let raw = std::fs::read_to_string(&options.config)
-        .with_context(|| format!("reading {}", options.config))?;
+        .with_context(|| format!("push {}", options.config))?;
     let config: Config = toml::from_str(&raw)?;
     // The public price feed rejects requests with no User-Agent.
     let http = reqwest::Client::builder()
-        .user_agent(concat!("tee-hyperlane-gas-oracle/", env!("CARGO_PKG_VERSION")))
+        .user_agent(concat!(
+            "tee-hyperlane-gas-oracle/",
+            env!("CARGO_PKG_VERSION")
+        ))
         .build()?;
 
     if options.once {
-        for reading in run_once(&config, &http).await {
-            println!("{}", serde_json::to_string_pretty(&reading)?);
+        for push in push_gas_configs(&config, &http).await {
+            println!("{}", serde_json::to_string_pretty(&push)?);
         }
         return Ok(());
     }
 
     let state = Arc::new(Mutex::new(State::default()));
-    let shared = Arc::new(Api { config: config.clone(), state: state.clone() });
+    let shared = Arc::new(Api {
+        config: config.clone(),
+        state: state.clone(),
+    });
     let updates = tokio::spawn(update_forever(config, http, state));
 
     let app = Router::new()
-        .route("/", get(|| async { axum::response::Html(include_str!("../ui/oracle.html")) }))
-        .route("/api/readings", get(readings))
+        .route(
+            "/",
+            get(|| async { axum::response::Html(include_str!("../ui/oracle.html")) }),
+        )
+        .route("/api/pushes", get(pushes))
         .with_state(shared);
 
     let listener = tokio::net::TcpListener::bind(&options.listen).await?;
@@ -83,23 +94,23 @@ async fn main() -> Result<()> {
 async fn update_forever(config: Config, http: reqwest::Client, state: Arc<Mutex<State>>) {
     let interval = Duration::from_secs(config.interval_secs);
     loop {
-        let readings = run_once(&config, &http).await;
-        for reading in &readings {
-            match &reading.error {
+        let pushes = push_gas_configs(&config, &http).await;
+        for push in &pushes {
+            match &push.error {
                 None => info!(
-                    destination = %reading.name,
-                    gas_price_wei = reading.gas_price_wei,
-                    exchange_rate = reading.token_exchange_rate,
+                    destination = %push.name,
+                    gas_price_wei = push.gas_price_wei,
+                    exchange_rate = push.token_exchange_rate,
                     "pushed"
                 ),
                 // A failed round is not an outage: the IGP keeps the previous values, which
                 // are stale but still charge something. The next round tries again.
-                Some(error) => warn!(destination = %reading.name, %error, "round failed"),
+                Some(error) => warn!(destination = %push.name, %error, "round failed"),
             }
         }
 
         if let Ok(mut held) = state.lock() {
-            held.readings = readings;
+            held.pushes = pushes;
             held.last_round = Some(oracle::now());
             held.next_round = Some(oracle::now() + config.interval_secs);
         }
@@ -114,7 +125,7 @@ struct Api {
     state: Arc<Mutex<State>>,
 }
 
-async fn readings(
+async fn pushes(
     axum::extract::State(api): axum::extract::State<Arc<Api>>,
 ) -> Json<serde_json::Value> {
     // Chain reads shell out, so they run off the async pool.
@@ -128,16 +139,16 @@ async fn readings(
     .unwrap_or_default();
 
     let held = api.state.lock().ok();
-    let (readings, last, next) = match held {
+    let (pushes, last, next) = match held {
         Some(held) => (
-            serde_json::to_value(&held.readings).unwrap_or_default(),
+            serde_json::to_value(&held.pushes).unwrap_or_default(),
             held.last_round,
             held.next_round,
         ),
         None => (serde_json::Value::Array(Vec::new()), None, None),
     };
     Json(serde_json::json!({
-        "readings": readings,
+        "pushes": pushes,
         "onchain": onchain,
         "funds": funds,
         "lastRound": last,

@@ -8,7 +8,6 @@
 //! this light client's database and the enclave stays stateless.
 
 use sha2::{Digest, Sha256};
-use tendermint::block::Height;
 use tendermint::validator::Set as ValidatorSet;
 use tendermint_light_client_verifier::options::Options;
 use tendermint_light_client_verifier::types::{LightBlock, TrustThreshold};
@@ -32,12 +31,18 @@ pub struct CelestiaStore {
 
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum CelestiaError {
-    #[error("trusted header commits to next validators {committed} but the set hashes to {actual}")]
+    #[error(
+        "trusted header commits to next validators {committed} but the set hashes to {actual}"
+    )]
     InconsistentTrustedSet { committed: String, actual: String },
     #[error("no light blocks supplied")]
     NoUpdates,
     #[error("light block at height {height} is on chain `{got}`, expected `{expected}`")]
-    WrongChain { height: u64, got: String, expected: String },
+    WrongChain {
+        height: u64,
+        got: String,
+        expected: String,
+    },
     #[error("light block at height {height} does not advance from {trusted}")]
     NotAdvancing { height: u64, trusted: u64 },
     #[error("light client rejected the update at height {height}: {reason}")]
@@ -97,7 +102,11 @@ pub fn verify_celestia_updates(
         let height = next.height().value();
         let got = next.signed_header.header.chain_id.to_string();
         if got != chain_id {
-            return Err(CelestiaError::WrongChain { height, got, expected: chain_id });
+            return Err(CelestiaError::WrongChain {
+                height,
+                got,
+                expected: chain_id,
+            });
         }
         if height <= store.trusted.height().value() {
             return Err(CelestiaError::NotAdvancing {
@@ -114,10 +123,16 @@ pub fn verify_celestia_updates(
         match verdict {
             Verdict::Success => store.trusted = next.clone(),
             Verdict::NotEnoughTrust(why) => {
-                return Err(CelestiaError::Rejected { height, reason: why.to_string() })
+                return Err(CelestiaError::Rejected {
+                    height,
+                    reason: why.to_string(),
+                })
             }
             Verdict::Invalid(why) => {
-                return Err(CelestiaError::Rejected { height, reason: format!("{why:?}") })
+                return Err(CelestiaError::Rejected {
+                    height,
+                    reason: format!("{why:?}"),
+                })
             }
         }
     }
@@ -129,7 +144,7 @@ pub fn verify_celestia_updates(
 /// That off-by-one is inherent to Cosmos: `header[H].app_hash` is the result of executing
 /// block `H-1`. Messages dispatched in block `H-1` are therefore provable under this root,
 /// and `height` is reported as `H-1` so the ISM state names the state it actually describes.
-pub fn get_celestia_root(store: &CelestiaStore) -> Result<AttestedRoot, CelestiaError> {
+pub fn celestia_root(store: &CelestiaStore) -> Result<AttestedRoot, CelestiaError> {
     let header = &store.trusted.signed_header.header;
     let height = header.height.value();
     let app_hash = header.app_hash.as_bytes();
@@ -163,9 +178,4 @@ fn validator_set_hash(set: &ValidatorSet) -> [u8; 32] {
     let mut out = [0u8; 32];
     out.copy_from_slice(set.hash().as_bytes());
     out
-}
-
-/// Height helper so callers do not reach into tendermint types.
-pub fn trusted_height(store: &CelestiaStore) -> Height {
-    store.trusted.height()
 }

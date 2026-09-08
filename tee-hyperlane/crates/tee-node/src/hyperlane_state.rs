@@ -31,7 +31,11 @@ pub enum HyperlaneStateError {
     #[error("expected {expected} storage proofs, got {got}")]
     WrongSlotCount { expected: usize, got: usize },
     #[error("storage proof {index} is for slot {got}, expected {expected}")]
-    SlotMismatch { index: usize, got: B256, expected: B256 },
+    SlotMismatch {
+        index: usize,
+        got: B256,
+        expected: B256,
+    },
     #[error("merkle tree count {0} does not fit in uint32")]
     CountNotUint32(u128),
     #[error("replaying {ids} message ids gave root {replayed} at count {count}, but the chain proves {onchain}")]
@@ -64,7 +68,7 @@ pub fn merkle_tree_base_slot(origin_domain: u32) -> Option<u64> {
     }
 }
 
-pub fn get_evm_merkle_tree(
+pub fn verify_evm_merkle_tree(
     state_root: B256,
     base_slot: u64,
     proof: &EvmTreeProof,
@@ -104,27 +108,20 @@ pub fn get_evm_merkle_tree(
     })
 }
 
-/// Confirm that `message_ids` are exactly the leaves between the snapshot and the tree
-/// proven out of chain state.
+/// Confirm that `message_ids` are exactly the leaves between the snapshot and the tree proven
+/// out of chain state.
 ///
-/// Replaying onto the snapshot has to land on the on-chain `(branch, count)` exactly. Because
-/// that branch is a function of every leaf ever inserted, no snapshot behind or beside the
-/// real one can reproduce it. A snapshot *ahead* of where the ISM stands can, though, since
-/// it is a real tree the origin genuinely held - so both arguments have to come from state
-/// the ISM already trusts, the snapshot under `prev_state.state_root` and `onchain` under the
-/// root being attested. `attest::build_attested_update` is what establishes that; this
-/// function only checks the span between them.
+/// This checks the span, not where it starts: an incremental branch is a function of every
+/// leaf ever inserted, so no snapshot beside the real one can reproduce the on-chain root, but
+/// a snapshot further *along* it reproduces one perfectly. Both trees must therefore be read
+/// from state the ISM already trusts, which `attest::build_attested_update` is what does.
 pub fn verify_message_batch(
     snapshot: MerkleTree,
     message_ids: &[[u8; 32]],
     onchain: &MerkleTree,
 ) -> Result<(), HyperlaneStateError> {
-    // An empty batch attests nothing, and attesting nothing is how the bridge gets frozen.
-    // The destination allows one batch per state root and the root must change on every
-    // update, so a batch that authorises no message still burns that root's only slot; repeat
-    // that faster than the relayer and no message is ever authorised while user funds stay
-    // locked. With the snapshot anchored to `prev_state` an empty batch can only pass when the
-    // origin really did dispatch nothing, which is not worth an attestation either.
+    // The destination allows one batch per state root, so attesting nothing still spends that
+    // root's only slot. Nothing to attest is not worth an attestation.
     if message_ids.is_empty() {
         return Err(HyperlaneStateError::EmptyBatch);
     }

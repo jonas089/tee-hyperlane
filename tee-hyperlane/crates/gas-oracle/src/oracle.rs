@@ -106,7 +106,7 @@ pub struct Destination {
 
 /// What the oracle last pushed for one destination, and what it was derived from.
 #[derive(Debug, Clone, Serialize)]
-pub struct Reading {
+pub struct GasConfigPush {
     pub name: String,
     pub domain: u32,
     pub gas_price_wei: u128,
@@ -164,7 +164,11 @@ pub async fn get_token_prices(
     let ids = coin_ids.join(",");
     let url = format!("https://api.coingecko.com/api/v3/simple/price?ids={ids}&vs_currencies=usd");
     let response = http.get(&url).send().await.context("price feed")?;
-    anyhow::ensure!(response.status().is_success(), "price feed returned {}", response.status());
+    anyhow::ensure!(
+        response.status().is_success(),
+        "price feed returned {}",
+        response.status()
+    );
 
     let body: serde_json::Value = response.json().await?;
     let mut prices = std::collections::HashMap::new();
@@ -173,7 +177,10 @@ pub async fn get_token_prices(
             prices.insert(id.clone(), price);
         }
     }
-    anyhow::ensure!(!prices.is_empty(), "price feed returned no prices for {ids}");
+    anyhow::ensure!(
+        !prices.is_empty(),
+        "price feed returned no prices for {ids}"
+    );
     Ok(prices)
 }
 
@@ -189,7 +196,9 @@ pub async fn get_gas_price(http: &reqwest::Client, rpc: &str) -> Result<u128> {
         .with_context(|| format!("eth_gasPrice on {rpc}"))?
         .json()
         .await?;
-    let hex = body["result"].as_str().context("eth_gasPrice returned no result")?;
+    let hex = body["result"]
+        .as_str()
+        .context("eth_gasPrice returned no result")?;
     u128::from_str_radix(hex.trim_start_matches("0x"), 16).context("gas price is not hex")
 }
 
@@ -203,24 +212,37 @@ pub async fn get_gas_price(http: &reqwest::Client, rpc: &str) -> Result<u128> {
 /// CheckTx, and several txs from one account in quick succession collide on sequence - the
 /// first is accepted and the rest are silently rejected. Rounds are sequential and confirmed
 /// for that reason.
-pub fn set_destination_gas_config(config: &Config, reading: &Reading) -> Result<String> {
+pub fn set_destination_gas_config(config: &Config, reading: &GasConfigPush) -> Result<String> {
     let home = std::env::var("CELHOME").unwrap_or_else(|_| "/tmp/celhome".into());
     let output = std::process::Command::new("celestia-appd")
         .args([
-            "tx", "hyperlane", "hooks", "igp", "set-destination-gas-config",
+            "tx",
+            "hyperlane",
+            "hooks",
+            "igp",
+            "set-destination-gas-config",
             &config.igp_id,
             &reading.domain.to_string(),
             &reading.token_exchange_rate.to_string(),
             &reading.gas_price_wei.to_string(),
             &reading.gas_overhead.to_string(),
-            "--from", "bridge",
-            "--home", &home,
-            "--keyring-backend", "test",
-            "--chain-id", &config.chain_id,
-            "--node", &config.celestia_rpc,
-            "--fees", "5000utia",
-            "--gas", "300000",
-            "-y", "-o", "json",
+            "--from",
+            "bridge",
+            "--home",
+            &home,
+            "--keyring-backend",
+            "test",
+            "--chain-id",
+            &config.chain_id,
+            "--node",
+            &config.celestia_rpc,
+            "--fees",
+            "5000utia",
+            "--gas",
+            "300000",
+            "-y",
+            "-o",
+            "json",
         ])
         .output()
         .context("running celestia-appd")?;
@@ -230,12 +252,19 @@ pub fn set_destination_gas_config(config: &Config, reading: &Reading) -> Result<
         "celestia-appd failed: {}",
         String::from_utf8_lossy(&output.stderr).trim()
     );
-    let response: serde_json::Value = serde_json::from_slice(&output.stdout)
-        .context("celestia-appd did not return json")?;
+    let response: serde_json::Value =
+        serde_json::from_slice(&output.stdout).context("celestia-appd did not return json")?;
     let code = response["code"].as_u64().unwrap_or_default();
-    anyhow::ensure!(code == 0, "rejected: {}", response["raw_log"].as_str().unwrap_or(""));
+    anyhow::ensure!(
+        code == 0,
+        "rejected: {}",
+        response["raw_log"].as_str().unwrap_or("")
+    );
 
-    let hash = response["txhash"].as_str().context("no txhash")?.to_string();
+    let hash = response["txhash"]
+        .as_str()
+        .context("no txhash")?
+        .to_string();
     wait_for_tx(config, &hash)?;
     Ok(hash)
 }
@@ -245,7 +274,15 @@ fn wait_for_tx(config: &Config, hash: &str) -> Result<()> {
     for _ in 0..20 {
         std::thread::sleep(std::time::Duration::from_secs(3));
         let output = std::process::Command::new("celestia-appd")
-            .args(["query", "tx", hash, "--node", &config.celestia_rpc, "-o", "json"])
+            .args([
+                "query",
+                "tx",
+                hash,
+                "--node",
+                &config.celestia_rpc,
+                "-o",
+                "json",
+            ])
             .output()
             .context("celestia-appd query tx")?;
         if !output.status.success() {
@@ -253,14 +290,18 @@ fn wait_for_tx(config: &Config, hash: &str) -> Result<()> {
         }
         let result: serde_json::Value = serde_json::from_slice(&output.stdout)?;
         let code = result["code"].as_u64().unwrap_or_default();
-        anyhow::ensure!(code == 0, "failed: {}", result["raw_log"].as_str().unwrap_or(""));
+        anyhow::ensure!(
+            code == 0,
+            "failed: {}",
+            result["raw_log"].as_str().unwrap_or("")
+        );
         return Ok(());
     }
     anyhow::bail!("timed out waiting for {hash}")
 }
 
 /// Read prices and gas, then push one round of configs.
-pub async fn run_once(config: &Config, http: &reqwest::Client) -> Vec<Reading> {
+pub async fn push_gas_configs(config: &Config, http: &reqwest::Client) -> Vec<GasConfigPush> {
     let mut coin_ids = vec![config.local_price_id.clone()];
     for destination in &config.destinations {
         if !coin_ids.contains(&destination.price_id) {
@@ -271,7 +312,7 @@ pub async fn run_once(config: &Config, http: &reqwest::Client) -> Vec<Reading> {
     let mut readings = Vec::new();
 
     for destination in &config.destinations {
-        let mut reading = Reading {
+        let mut reading = GasConfigPush {
             name: destination.name.clone(),
             domain: destination.domain,
             gas_price_wei: 0,
@@ -285,7 +326,10 @@ pub async fn run_once(config: &Config, http: &reqwest::Client) -> Vec<Reading> {
 
         match gather(config, http, destination, &prices).await {
             Ok(filled) => {
-                reading = Reading { name: reading.name, ..filled };
+                reading = GasConfigPush {
+                    name: reading.name,
+                    ..filled
+                };
                 match set_destination_gas_config(config, &reading) {
                     Ok(_) => reading.updated_at = Some(now()),
                     Err(e) => reading.error = Some(e.to_string()),
@@ -304,7 +348,7 @@ async fn gather(
     http: &reqwest::Client,
     destination: &Destination,
     prices: &Result<std::collections::HashMap<String, f64>>,
-) -> Result<Reading> {
+) -> Result<GasConfigPush> {
     let prices = prices.as_ref().map_err(|e| anyhow::anyhow!("{e}"))?;
     let local_price_usd = *prices
         .get(&config.local_price_id)
@@ -314,7 +358,7 @@ async fn gather(
         .with_context(|| format!("no price for {}", destination.price_id))?;
     let gas_price_wei = get_gas_price(http, &destination.rpc).await?;
 
-    Ok(Reading {
+    Ok(GasConfigPush {
         name: destination.name.clone(),
         domain: destination.domain,
         gas_price_wei,
@@ -348,7 +392,11 @@ pub fn set_evm_gas_data(
         .with_context(|| format!("reading {key_file}"))?
         .trim()
         .to_string();
-    let key = if key.starts_with("0x") { key } else { format!("0x{key}") };
+    let key = if key.starts_with("0x") {
+        key
+    } else {
+        format!("0x{key}")
+    };
 
     let configs = format!(
         "[({},{},{})]",
@@ -377,17 +425,20 @@ pub fn set_evm_gas_data(
     let receipt: serde_json::Value = serde_json::from_slice(&output.stdout)?;
     let status = receipt["status"].as_str().unwrap_or("0x0");
     anyhow::ensure!(status == "0x1", "oracle update reverted");
-    Ok(receipt["transactionHash"].as_str().unwrap_or_default().to_string())
+    Ok(receipt["transactionHash"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string())
 }
 
 /// Update every configured EVM chain's own gas oracle.
 pub async fn run_evm_origins(
     config: &Config,
     prices: &Result<std::collections::HashMap<String, f64>>,
-) -> Vec<Reading> {
+) -> Vec<GasConfigPush> {
     let mut readings = Vec::new();
     for origin in &config.evm_origins {
-        let mut reading = Reading {
+        let mut reading = GasConfigPush {
             name: format!("{} to Celestia", origin.name),
             domain: origin.remote_domain,
             gas_price_wei: config.celestia_gas_price,
@@ -404,7 +455,10 @@ pub async fn run_evm_origins(
             Ok(prices) => {
                 // Here the local token is the EVM chain's, and the remote one is TIA.
                 let local = prices.get(&origin.price_id).copied().unwrap_or_default();
-                let remote = prices.get(&config.local_price_id).copied().unwrap_or_default();
+                let remote = prices
+                    .get(&config.local_price_id)
+                    .copied()
+                    .unwrap_or_default();
                 reading.local_price_usd = local;
                 reading.remote_price_usd = remote;
                 // Local is this EVM chain, remote is Celestia - the mirror of the other
@@ -445,8 +499,15 @@ pub struct OnChainConfig {
 pub fn read_celestia_configs(config: &Config) -> Vec<OnChainConfig> {
     let output = std::process::Command::new("celestia-appd")
         .args([
-            "query", "hyperlane", "hooks", "destination-gas-configs",
-            &config.igp_id, "--node", &config.celestia_rpc, "-o", "json",
+            "query",
+            "hyperlane",
+            "hooks",
+            "destination-gas-configs",
+            &config.igp_id,
+            "--node",
+            &config.celestia_rpc,
+            "-o",
+            "json",
         ])
         .output();
 
@@ -536,7 +597,10 @@ fn read_evm_gas_data(origin: &EvmOrigin) -> Result<(String, String)> {
 
     let text = String::from_utf8(output.stdout)?;
     let mut lines = text.lines().map(|line| {
-        line.split_whitespace().next().unwrap_or_default().to_string()
+        line.split_whitespace()
+            .next()
+            .unwrap_or_default()
+            .to_string()
     });
     let rate = lines.next().context("no exchange rate returned")?;
     let price = lines.next().context("no gas price returned")?;
@@ -544,7 +608,10 @@ fn read_evm_gas_data(origin: &EvmOrigin) -> Result<(String, String)> {
 }
 
 fn text(value: &serde_json::Value) -> String {
-    value.as_str().map(str::to_string).unwrap_or_else(|| value.to_string())
+    value
+        .as_str()
+        .map(str::to_string)
+        .unwrap_or_else(|| value.to_string())
 }
 
 /// What the accounts that pay for all this are holding. A quote that is perfectly accurate is
@@ -590,7 +657,16 @@ fn read_celestia_funds(config: &Config) -> Funds {
 fn celestia_balance(config: &Config) -> Result<(String, u128)> {
     let home = std::env::var("CELHOME").unwrap_or_else(|_| "/tmp/celhome".into());
     let show = std::process::Command::new("celestia-appd")
-        .args(["keys", "show", "bridge", "-a", "--home", &home, "--keyring-backend", "test"])
+        .args([
+            "keys",
+            "show",
+            "bridge",
+            "-a",
+            "--home",
+            &home,
+            "--keyring-backend",
+            "test",
+        ])
         .output()
         .context("celestia-appd keys show")?;
     anyhow::ensure!(show.status.success(), "no `bridge` key in {home}");
@@ -598,8 +674,14 @@ fn celestia_balance(config: &Config) -> Result<(String, u128)> {
 
     let query = std::process::Command::new("celestia-appd")
         .args([
-            "query", "bank", "balances", &address,
-            "--node", &config.celestia_rpc, "-o", "json",
+            "query",
+            "bank",
+            "balances",
+            &address,
+            "--node",
+            &config.celestia_rpc,
+            "-o",
+            "json",
         ])
         .output()
         .context("celestia-appd query bank balances")?;
@@ -621,7 +703,11 @@ fn celestia_balance(config: &Config) -> Result<(String, u128)> {
 fn evm_address(config: &Config) -> Option<String> {
     let key_file = config.evm_key_file.as_ref()?;
     let key = std::fs::read_to_string(key_file).ok()?.trim().to_string();
-    let key = if key.starts_with("0x") { key } else { format!("0x{key}") };
+    let key = if key.starts_with("0x") {
+        key
+    } else {
+        format!("0x{key}")
+    };
     let output = std::process::Command::new("cast")
         .args(["wallet", "address", "--private-key", &key])
         .output()
@@ -648,7 +734,10 @@ fn read_evm_funds(origin: &EvmOrigin, address: &str) -> Funds {
     match output {
         Ok(output) if output.status.success() => {
             let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            funds.balance = text.parse::<f64>().map(|v| format!("{v:.5}")).unwrap_or(text);
+            funds.balance = text
+                .parse::<f64>()
+                .map(|v| format!("{v:.5}"))
+                .unwrap_or(text);
         }
         Ok(output) => funds.error = Some(String::from_utf8_lossy(&output.stderr).trim().into()),
         Err(e) => funds.error = Some(e.to_string()),
@@ -687,7 +776,10 @@ mod tests {
         let eth_spent = 21_000.0 * 1e9 / 1e18;
         let usd = eth_spent * 2500.0;
         let tia = fee as f64 / 1e6;
-        assert!((tia * 5.0 - usd).abs() < 1e-9, "{tia} TIA should be {usd} USD");
+        assert!(
+            (tia * 5.0 - usd).abs() < 1e-9,
+            "{tia} TIA should be {usd} USD"
+        );
     }
 
     /// The reverse direction: an EVM chain quoting Celestia gas. Both the decimals and the
@@ -696,13 +788,17 @@ mod tests {
     #[test]
     fn an_evm_origin_quotes_celestia_delivery_at_its_real_cost() {
         // 1 ETH = $2500, 1 TIA = $5.
-        let rate = get_token_exchange_rate_with_decimals(2500.0, 5.0, 18, CELESTIA_GAS_PRICE_DECIMALS);
+        let rate =
+            get_token_exchange_rate_with_decimals(2500.0, 5.0, 18, CELESTIA_GAS_PRICE_DECIMALS);
 
         // 800k gas at 0.004 utia = 3200 utia = 0.0032 TIA = $0.016.
         let gas_price = 4_000u128; // 0.004 utia, scaled by 10^6
         let fee_wei = 800_000u128 * gas_price * rate / EXCHANGE_RATE_SCALE as u128;
         let usd = (fee_wei as f64 / 1e18) * 2500.0;
-        assert!((usd - 0.016).abs() < 1e-4, "quoted ${usd}, should be about $0.016");
+        assert!(
+            (usd - 0.016).abs() < 1e-4,
+            "quoted ${usd}, should be about $0.016"
+        );
     }
 
     #[test]

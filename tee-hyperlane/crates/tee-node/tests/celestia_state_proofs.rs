@@ -51,9 +51,16 @@ fn parts(f: &Fixture) -> ([u8; 32], Vec<u8>, Vec<u8>, Vec<StoreProofOp>) {
 fn a_live_mocha_store_value_verifies_against_the_app_hash() {
     let f = fixture();
     assert_eq!(f.chain_id, "mocha-5");
-    assert_eq!(f.app_hash_height, f.height + 1, "app hash lags state by one block");
+    assert_eq!(
+        f.app_hash_height,
+        f.height + 1,
+        "app hash lags state by one block"
+    );
     let (app_hash, key, value, ops) = parts(&f);
-    assert_eq!(verify_store_value(app_hash, &f.store, &key, &value, &ops), Ok(()));
+    assert_eq!(
+        verify_store_value(app_hash, &f.store, &key, &value, &ops),
+        Ok(())
+    );
 }
 
 #[test]
@@ -102,7 +109,10 @@ fn the_two_levels_must_arrive_in_order() {
     let (app_hash, key, value, mut ops) = parts(&f);
     ops.swap(0, 1);
     let err = verify_store_value(app_hash, &f.store, &key, &value, &ops).unwrap_err();
-    assert!(matches!(err, CelestiaStateError::WrongProofType { index: 0, .. }));
+    assert!(matches!(
+        err,
+        CelestiaStateError::WrongProofType { index: 0, .. }
+    ));
 }
 
 #[test]
@@ -168,8 +178,14 @@ fn encode_hook(branch: &[[u8; 32]], count: u32) -> Vec<u8> {
         }
     }
     let mut hook = Vec::new();
-    hook.extend_from_slice(&delimited(1, b"0x726f757465725f706f73745f64697370617463680000000200000000000001"));
-    hook.extend_from_slice(&delimited(2, b"0x68797065726c616e6500000000000000000000000000000000000000000000"));
+    hook.extend_from_slice(&delimited(
+        1,
+        b"0x726f757465725f706f73745f64697370617463680000000200000000000001",
+    ));
+    hook.extend_from_slice(&delimited(
+        2,
+        b"0x68797065726c616e6500000000000000000000000000000000000000000000",
+    ));
     hook.extend_from_slice(&delimited(3, b"celestia1owner"));
     hook.extend_from_slice(&delimited(4, &tree));
     hook
@@ -190,14 +206,20 @@ fn a_cosmos_merkle_tree_hook_decodes_to_the_same_tree_the_evm_hook_holds() {
 #[test]
 fn a_hook_without_a_tree_is_rejected() {
     let bytes = encode_hook(&[], 0);
-    assert_eq!(decode_merkle_tree_hook(&bytes), Err(CelestiaStateError::WrongBranchLength(0)));
+    assert_eq!(
+        decode_merkle_tree_hook(&bytes),
+        Err(CelestiaStateError::WrongBranchLength(0))
+    );
 }
 
 #[test]
 fn a_hook_with_a_short_branch_is_rejected() {
     let branch = [[0u8; 32]; TREE_DEPTH];
     let bytes = encode_hook(&branch[..31], 3);
-    assert_eq!(decode_merkle_tree_hook(&bytes), Err(CelestiaStateError::WrongBranchLength(31)));
+    assert_eq!(
+        decode_merkle_tree_hook(&bytes),
+        Err(CelestiaStateError::WrongBranchLength(31))
+    );
 }
 
 #[test]

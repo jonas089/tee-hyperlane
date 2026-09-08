@@ -5,9 +5,9 @@
 //!
 //!   ALCHEMY_API_KEY=... cargo test -p tee-coprocessor --test arbitrum_live -- --ignored
 
-use tee_coprocessor::ethereum_l2::get_arbitrum_root_proof;
 use tee_coprocessor::ethereum::ExecutionReader;
-use tee_node::origins::ethereum_l2::{get_arbitrum_root, RollupLayout};
+use tee_coprocessor::ethereum_l2::get_arbitrum_root_proof;
+use tee_node::origins::ethereum_l2::{verify_arbitrum_root, RollupLayout};
 
 const ROLLUP: &str = "0x042B2E6C5E99d4c521bd49beeD5E99651D9B0Cf4";
 
@@ -30,13 +30,21 @@ async fn a_live_confirmed_assertion_yields_arbitrums_state_root() {
     .unwrap();
     let l1_block = head - 8;
 
-    let proof =
-        get_arbitrum_root_proof(&l1, &l2, ROLLUP.parse().unwrap(), RollupLayout::ARBITRUM_SEPOLIA, l1_block)
-            .await
-            .expect("gathering the proof");
+    let proof = get_arbitrum_root_proof(
+        &l1,
+        &l2,
+        ROLLUP.parse().unwrap(),
+        RollupLayout::ARBITRUM_SEPOLIA,
+        l1_block,
+    )
+    .await
+    .expect("gathering the proof");
 
     let l1_state_root: alloy_primitives::B256 = l1
-        .call("eth_getBlockByNumber", serde_json::json!([format!("0x{l1_block:x}"), false]))
+        .call(
+            "eth_getBlockByNumber",
+            serde_json::json!([format!("0x{l1_block:x}"), false]),
+        )
         .await
         .unwrap()["stateRoot"]
         .as_str()
@@ -45,8 +53,11 @@ async fn a_live_confirmed_assertion_yields_arbitrums_state_root() {
         .unwrap();
 
     // The same check the enclave makes.
-    let root = get_arbitrum_root(l1_state_root, &proof).expect("deriving the root");
-    println!("arbitrum block {} root {} at {}", root.height, root.state_root, root.timestamp);
+    let root = verify_arbitrum_root(l1_state_root, &proof).expect("deriving the root");
+    println!(
+        "arbitrum block {} root {} at {}",
+        root.height, root.state_root, root.timestamp
+    );
     assert!(root.height > 0);
     assert_ne!(root.state_root, alloy_primitives::B256::ZERO);
 }

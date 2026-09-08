@@ -18,8 +18,7 @@ fn h(s: &str) -> B256 {
 /// The preimage below is the `AssertionCreated` payload for that assertion.
 const CONFIRMED_ASSERTION: &str =
     "0x21b8c3b857fa797973b6693befba28f6e61aed1b35fe2a6d7ecce238a646e543";
-const PARENT_ASSERTION: &str =
-    "0x1d3df2803af5505c47893636c2b17a8ff955ff5336755aa990caf3baf9603b37";
+const PARENT_ASSERTION: &str = "0x1d3df2803af5505c47893636c2b17a8ff955ff5336755aa990caf3baf9603b37";
 
 fn confirmed_assertion_proof() -> ArbitrumRootProof {
     ArbitrumRootProof {
@@ -32,14 +31,13 @@ fn confirmed_assertion_proof() -> ArbitrumRootProof {
         account_proof: Vec::new(),
         latest_confirmed_proof: Vec::new(),
         assertion_node_proof: Vec::new(),
-        assertion_node_slot_value: "0x00000000000002010000000000b1de2c00000000000000000000000000b1dec9"
-            .parse()
-            .unwrap(),
+        assertion_node_slot_value:
+            "0x00000000000002010000000000b1de2c00000000000000000000000000b1dec9"
+                .parse()
+                .unwrap(),
         prev_assertion_hash: h(PARENT_ASSERTION),
         after_state: AssertionState {
-            l2_block_hash: h(
-                "0x5cfbea5cf869e3cb10c27fdc898c48c9e03e035cf7ccc83cd654b6679fab88f9",
-            ),
+            l2_block_hash: h("0x5cfbea5cf869e3cb10c27fdc898c48c9e03e035cf7ccc83cd654b6679fab88f9"),
             send_root: h("0x6a72af1e7b61faf26be37e52b53622084b38ab56229903c5298a56cdbacc2298"),
             inbox_position: 0xcaba1,
             position_in_message: 0,
@@ -48,9 +46,7 @@ fn confirmed_assertion_proof() -> ArbitrumRootProof {
                 "0x972472422534efc53574219bf39d6c63f0887c07edba578a2ac38bea2d1cdebb",
             ),
         },
-        inbox_accumulator: h(
-            "0xcda07eb616939141ec565f6e837e62c723199d670402bb4791789e33149bfbb7",
-        ),
+        inbox_accumulator: h("0xcda07eb616939141ec565f6e837e62c723199d670402bb4791789e33149bfbb7"),
         l2_header_rlp: Default::default(),
     }
 }
@@ -76,7 +72,11 @@ fn a_live_arbitrum_header_decodes_at_the_expected_field_positions() {
     let rlp = hex::decode(f.rlp.trim_start_matches("0x")).unwrap();
 
     // If the field set or order were wrong, this equality would fail.
-    assert_eq!(keccak256(&rlp), h(&f.hash), "reconstructed header must hash to the block hash");
+    assert_eq!(
+        keccak256(&rlp),
+        h(&f.hash),
+        "reconstructed header must hash to the block hash"
+    );
 
     let header = decode_l2_header(&rlp).unwrap();
     assert_eq!(header.state_root, h(&f.state_root));
@@ -88,7 +88,10 @@ fn a_live_arbitrum_header_decodes_at_the_expected_field_positions() {
 fn a_truncated_header_is_rejected() {
     let f = arb_header();
     let rlp = hex::decode(f.rlp.trim_start_matches("0x")).unwrap();
-    assert_eq!(decode_l2_header(&rlp[..rlp.len() / 2]), Err(ArbitrumError::MalformedHeader));
+    assert_eq!(
+        decode_l2_header(&rlp[..rlp.len() / 2]),
+        Err(ArbitrumError::MalformedHeader)
+    );
     assert_eq!(decode_l2_header(b""), Err(ArbitrumError::MalformedHeader));
 }
 
@@ -126,13 +129,19 @@ fn the_assertion_hash_reproduces_what_l1_confirmed() {
 fn only_a_confirmed_assertion_is_accepted() {
     use alloy_primitives::U256;
     // firstChildBlock | secondChildBlock | createdAtBlock | isFirstChild | status
-    let confirmed: U256 =
-        "0x00000000000002010000000000b1de2c00000000000000000000000000b1dec9".parse().unwrap();
+    let confirmed: U256 = "0x00000000000002010000000000b1de2c00000000000000000000000000b1dec9"
+        .parse()
+        .unwrap();
     assert_eq!(read_assertion_status(confirmed), 2);
 
-    let pending: U256 =
-        "0x00000000000001010000000000b1de2c00000000000000000000000000b1dec9".parse().unwrap();
-    assert_eq!(read_assertion_status(pending), 1, "pending is still in its challenge window");
+    let pending: U256 = "0x00000000000001010000000000b1de2c00000000000000000000000000b1dec9"
+        .parse()
+        .unwrap();
+    assert_eq!(
+        read_assertion_status(pending),
+        1,
+        "pending is still in its challenge window"
+    );
 }
 
 // ---- Base ----
@@ -203,7 +212,7 @@ fn the_output_root_binds_every_component() {
 
 /// The output root commits to the block *hash* and not to its height or its time, which is
 /// exactly why neither may be taken from the preimage: a caller could put anything there and
-/// the root would still match. `get_base_root` reads both out of the header instead, and the
+/// the root would still match. `verify_base_root` reads both out of the header instead, and the
 /// header is bound by that hash.
 ///
 #[test]

@@ -10,27 +10,23 @@
 //! ISM state *is* the light client's database.
 
 use serde::{Deserialize, Serialize};
-use tee_attestation::{
-    encode_attested_update, hash_attested_update, AttestedUpdate, IsmState,
-};
+use tee_attestation::{encode_attested_update, hash_attested_update, AttestedUpdate, IsmState};
 
 use crate::hyperlane_state::{
-    get_evm_merkle_tree, verify_message_batch, EvmTreeProof, HyperlaneStateError,
+    verify_evm_merkle_tree, verify_message_batch, EvmTreeProof, HyperlaneStateError,
 };
 use crate::origins::celestia::{
-    self, get_celestia_root, verify_celestia_updates, CelestiaError, CelestiaStore,
+    self, celestia_root, verify_celestia_updates, CelestiaError, CelestiaStore,
 };
 use crate::origins::ethereum::{
-    self, get_ethereum_root, verify_ethereum_updates, EthereumError, EthereumStore,
-    EthereumUpdates,
+    self, ethereum_root, verify_ethereum_updates, EthereumError, EthereumStore, EthereumUpdates,
 };
 use crate::origins::ethereum_l2::{
-    get_arbitrum_root, get_base_root, ArbitrumError, ArbitrumRootProof, BaseError, BaseRootProof,
+    verify_arbitrum_root, verify_base_root, ArbitrumError, ArbitrumRootProof, BaseError,
+    BaseRootProof,
 };
 use crate::origins::{AttestedRoot, Origin};
-use crate::state_proofs::{
-    get_celestia_merkle_tree, CelestiaStateError, Ics23TreeProof,
-};
+use crate::state_proofs::{verify_celestia_merkle_tree, CelestiaStateError, Ics23TreeProof};
 use hyperlane_types::MerkleTree;
 
 /// The request shape this enclave understands.
@@ -111,7 +107,11 @@ pub enum OriginInput {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum TreeInput {
     Evm(EvmTreeProof),
-    Celestia { hook_id: [u8; 32], hook_bytes: Vec<u8>, proof: Ics23TreeProof },
+    Celestia {
+        hook_id: [u8; 32],
+        hook_bytes: Vec<u8>,
+        proof: Ics23TreeProof,
+    },
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -164,7 +164,7 @@ pub fn build_attested_update(
     // state root. Only tying the proven address to the attested one makes that useless,
     // because the destination ISM pins the address it will accept.
     for tree in [&request.tree, &request.tree_snapshot] {
-        let proven_at = tree_address_of(tree);
+        let proven_at = attested_tree_address(tree);
         if proven_at != request.merkle_tree_address {
             return Err(AttestError::WrongMerkleTree {
                 proven: hex::encode(proven_at),
@@ -174,11 +174,14 @@ pub fn build_attested_update(
     }
 
     let (root, store_commit, attested_at) =
-        advance_origin(&mut request.origin, &request.trusted_state)?;
+        verify_origin_head(&mut request.origin, &request.trusted_state)?;
 
     let origin = origin_of(&request.origin);
     if origin.domain() != expected {
-        return Err(AttestError::WrongOrigin { got: origin.domain(), expected });
+        return Err(AttestError::WrongOrigin {
+            got: origin.domain(),
+            expected,
+        });
     }
 
     // Both ends of the replay are read from state the ISM already trusts: the snapshot under
@@ -192,8 +195,11 @@ pub fn build_attested_update(
     // is targeted censorship of one transfer with the bridge still looking healthy. Anchoring
     // the snapshot to `prev_state` removes the choice: the replay now spans exactly the
     // distance the ISM is moving.
-    let snapshot =
-        read_tree(&request.tree_snapshot, request.trusted_state.state_root, expected)?;
+    let snapshot = read_tree(
+        &request.tree_snapshot,
+        request.trusted_state.state_root,
+        expected,
+    )?;
     let onchain_tree = read_tree(&request.tree, root.state_root.0, expected)?;
     verify_message_batch(snapshot, &request.message_ids, &onchain_tree)?;
 
@@ -229,13 +235,20 @@ fn read_tree(
 ) -> Result<MerkleTree, AttestError> {
     match tree {
         TreeInput::Evm(proof) => {
-            let base_slot = crate::hyperlane_state::merkle_tree_base_slot(origin_domain)
-                .ok_or(AttestError::NoTreeLayout { domain: origin_domain })?;
-            Ok(get_evm_merkle_tree(state_root.into(), base_slot, proof)?)
+            let base_slot = crate::hyperlane_state::merkle_tree_base_slot(origin_domain).ok_or(
+                AttestError::NoTreeLayout {
+                    domain: origin_domain,
+                },
+            )?;
+            Ok(verify_evm_merkle_tree(state_root.into(), base_slot, proof)?)
         }
-        TreeInput::Celestia { hook_id, hook_bytes, proof } => {
-            Ok(get_celestia_merkle_tree(state_root, *hook_id, hook_bytes, proof)?)
-        }
+        TreeInput::Celestia {
+            hook_id,
+            hook_bytes,
+            proof,
+        } => Ok(verify_celestia_merkle_tree(
+            state_root, *hook_id, hook_bytes, proof,
+        )?),
     }
 }
 
@@ -243,7 +256,7 @@ fn read_tree(
 ///
 /// EVM addresses are 20 bytes and Hyperlane left-pads them; Celestia's hook ids are already
 /// 32 bytes.
-pub fn tree_address_of(tree: &TreeInput) -> [u8; 32] {
+pub fn attested_tree_address(tree: &TreeInput) -> [u8; 32] {
     match tree {
         TreeInput::Evm(proof) => {
             let mut padded = [0u8; 32];
@@ -290,7 +303,7 @@ fn origin_of(input: &OriginInput) -> Origin {
 ///
 /// That third value is the origin's own head for a chain with its own light client, and the
 /// *L1* head for an L2, whose confirmed head is deliberately old.
-fn advance_origin(
+fn verify_origin_head(
     input: &mut OriginInput,
     trusted: &IsmState,
 ) -> Result<(AttestedRoot, [u8; 32], u64), AttestError> {
@@ -303,7 +316,7 @@ fn advance_origin(
             // genesis_time, and a caller-named slot is a caller-named clock.
             let slot = current_slot(store.genesis_time)?;
             verify_ethereum_updates(store, updates, slot)?;
-            let root = get_ethereum_root(store)?;
+            let root = ethereum_root(store)?;
             Ok((root, ethereum::commit_ethereum_store(store), root.timestamp))
         }
         OriginInput::Celestia { store, updates } => {
@@ -311,7 +324,7 @@ fn advance_origin(
                 return Err(AttestError::StoreCommitmentMismatch);
             }
             verify_celestia_updates(store, updates, enclave_now()?)?;
-            let root = get_celestia_root(store)?;
+            let root = celestia_root(store)?;
             Ok((root, celestia::commit_celestia_store(store), root.timestamp))
         }
         // An L2's trust chain starts at Ethereum: verify L1 first, then read the L2 root out
@@ -320,22 +333,30 @@ fn advance_origin(
         // The L1 head is what dates this attestation. The L2's confirmed head is older by a
         // fraud-proof window, which is a property of the rollup and not evidence of staleness.
         OriginInput::Arbitrum { ethereum, proof } => {
-            let (l1, commit, _) = advance_ethereum(ethereum, trusted)?;
-            Ok((get_arbitrum_root(l1.state_root, proof)?, commit, l1.timestamp))
+            let (l1, commit, _) = verify_ethereum_head(ethereum, trusted)?;
+            Ok((
+                verify_arbitrum_root(l1.state_root, proof)?,
+                commit,
+                l1.timestamp,
+            ))
         }
         OriginInput::Base { ethereum, proof } => {
-            let (l1, commit, _) = advance_ethereum(ethereum, trusted)?;
-            Ok((get_base_root(l1.state_root, proof)?, commit, l1.timestamp))
+            let (l1, commit, _) = verify_ethereum_head(ethereum, trusted)?;
+            Ok((
+                verify_base_root(l1.state_root, proof)?,
+                commit,
+                l1.timestamp,
+            ))
         }
     }
 }
 
-fn advance_ethereum(
+fn verify_ethereum_head(
     input: &mut OriginInput,
     trusted: &IsmState,
 ) -> Result<(AttestedRoot, [u8; 32], u64), AttestError> {
     match input {
-        OriginInput::Ethereum { .. } => advance_origin(input, trusted),
+        OriginInput::Ethereum { .. } => verify_origin_head(input, trusted),
         _ => Err(AttestError::L2NeedsEthereum),
     }
 }

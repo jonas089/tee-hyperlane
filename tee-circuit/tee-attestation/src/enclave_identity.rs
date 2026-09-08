@@ -5,9 +5,9 @@
 //! acceptable platform, said this" needs two further judgements, and they are different
 //! kinds of judgement, so they are separate functions:
 //!
-//! * [`check_platform_tcb`] - is the *hardware and firmware* still trustworthy? Intel's
+//! * [`verify_platform_tcb`] - is the *hardware and firmware* still trustworthy? Intel's
 //!   answer, from the signed TCB collateral.
-//! * [`check_enclave_identity`] - is this *our software stack*? Our answer, from the
+//! * [`verify_enclave_identity`] - is this *our software stack*? Our answer, from the
 //!   measurements pinned at build time.
 //!
 //! `evolve-tee` makes neither check, which is why its own docs call it unsafe for
@@ -70,7 +70,10 @@ pub enum IdentityError {
     #[error("quote is not a TDX report")]
     NotATdxReport,
     #[error("{layer} TCB status is {status:?}, which this bridge does not accept")]
-    TcbNotAcceptable { layer: &'static str, status: TcbStatus },
+    TcbNotAcceptable {
+        layer: &'static str,
+        status: TcbStatus,
+    },
     #[error("event log does not replay to the RTMRs in the quote")]
     EventLogNotBoundToQuote,
     #[error("mr_td does not match the pinned platform measurement")]
@@ -121,13 +124,16 @@ impl IdentityPolicy {
 }
 
 /// Intel's verdict on the hardware and firmware. Applies whatever our identity policy is.
-pub fn check_platform_tcb(report: &VerifiedReport) -> Result<(), IdentityError> {
+pub fn verify_platform_tcb(report: &VerifiedReport) -> Result<(), IdentityError> {
     for (layer, status) in [
         ("platform", &report.platform_status.status),
         ("quoting enclave", &report.qe_status.status),
     ] {
         if !ALLOWED_TCB_STATUS.contains(status) {
-            return Err(IdentityError::TcbNotAcceptable { layer, status: status.clone() });
+            return Err(IdentityError::TcbNotAcceptable {
+                layer,
+                status: status.clone(),
+            });
         }
     }
     Ok(())
@@ -138,13 +144,13 @@ pub fn check_platform_tcb(report: &VerifiedReport) -> Result<(), IdentityError> 
 /// `replayed_rtmrs` is the caller's replay of `eventlog`, passed in so it happens once.
 /// Checking it against the quote is what makes the event log believable at all; without it
 /// the log is just untrusted text alongside a signature.
-pub fn check_enclave_identity(
+pub fn verify_enclave_identity(
     policy: &IdentityPolicy,
     report: &VerifiedReport,
     eventlog: &[EventLog],
     replayed_rtmrs: &[[u8; 48]; 4],
 ) -> Result<(), IdentityError> {
-    check_platform_tcb(report)?;
+    verify_platform_tcb(report)?;
 
     let measured: Measurements =
         get_measurements(&report.report).ok_or(IdentityError::NotATdxReport)?;

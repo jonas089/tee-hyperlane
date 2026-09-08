@@ -9,11 +9,11 @@
 //! async, operating on a `LightClientStore` we carry in and out. That is exactly the shape a
 //! stateless enclave needs.
 
+use helios_consensus_core::consensus_spec::MainnetConsensusSpec;
+use helios_consensus_core::types::{FinalityUpdate, Forks, LightClientStore, Update};
 use helios_consensus_core::{
     apply_finality_update, apply_update, verify_finality_update, verify_update,
 };
-use helios_consensus_core::consensus_spec::MainnetConsensusSpec;
-use helios_consensus_core::types::{FinalityUpdate, Forks, LightClientStore, Update};
 use sha2::{Digest, Sha256};
 use ssz::Encode;
 use tree_hash::TreeHash;
@@ -76,7 +76,10 @@ pub fn verify_ethereum_updates(
             store.genesis_root,
             &store.forks,
         )
-        .map_err(|e| EthereumError::UpdateRejected { index, reason: e.to_string() })?;
+        .map_err(|e| EthereumError::UpdateRejected {
+            index,
+            reason: e.to_string(),
+        })?;
         apply_update::<Spec>(&mut store.store, update);
     }
 
@@ -88,7 +91,9 @@ pub fn verify_ethereum_updates(
             store.genesis_root,
             &store.forks,
         )
-        .map_err(|e| EthereumError::FinalityRejected { reason: e.to_string() })?;
+        .map_err(|e| EthereumError::FinalityRejected {
+            reason: e.to_string(),
+        })?;
         apply_finality_update::<Spec>(&mut store.store, finality);
     }
 
@@ -103,7 +108,7 @@ pub fn verify_ethereum_updates(
 ///
 /// Finalized, not optimistic: an optimistic head can still be reorged, and a bridge that
 /// mints against a reorged root loses funds.
-pub fn get_ethereum_root(store: &EthereumStore) -> Result<AttestedRoot, EthereumError> {
+pub fn ethereum_root(store: &EthereumStore) -> Result<AttestedRoot, EthereumError> {
     let execution = store
         .store
         .finalized_header
@@ -125,7 +130,14 @@ pub fn commit_ethereum_store(store: &EthereumStore) -> [u8; 32] {
     h.update(b"tee-isms/ethereum-store/v1");
     h.update(store.genesis_root.as_slice());
     h.update(store.genesis_time.to_be_bytes());
-    h.update(store.store.finalized_header.beacon().tree_hash_root().as_slice());
+    h.update(
+        store
+            .store
+            .finalized_header
+            .beacon()
+            .tree_hash_root()
+            .as_slice(),
+    );
     // The forks decide which signing domain each update is checked under, so they are part
     // of what the next verification depends on and have to be committed like everything else.
     // Hashed field by field rather than through a derive, so adding a fork to the upstream
@@ -154,5 +166,10 @@ pub fn commit_ethereum_store(store: &EthereumStore) -> [u8; 32] {
 }
 
 fn finalized_block_number(store: &EthereumStore) -> Option<u64> {
-    store.store.finalized_header.execution().ok().map(|e| *e.block_number())
+    store
+        .store
+        .finalized_header
+        .execution()
+        .ok()
+        .map(|e| *e.block_number())
 }

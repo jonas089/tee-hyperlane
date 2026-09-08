@@ -12,15 +12,17 @@ use std::path::PathBuf;
 use std::{env, fs};
 
 fn main() {
-    let path =
-        PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap()).join("enclave-identity.toml");
+    let path = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap()).join("enclave-identity.toml");
     println!("cargo:rerun-if-changed={}", path.display());
     println!("cargo:rerun-if-changed=build.rs");
 
-    let raw = fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
+    let raw =
+        fs::read_to_string(&path).unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
     let doc: toml::Value = raw.parse().expect("identity.toml is not valid TOML");
-    let require = doc.get("require_enclave").and_then(|v| v.as_bool()).unwrap_or(false);
+    let require = doc
+        .get("require_enclave")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
 
     let body = if require {
         let field = |name: &str, len: Option<usize>| -> String {
@@ -29,9 +31,16 @@ fn main() {
             });
             let bytes = hex::decode(s.strip_prefix("0x").unwrap_or(s))
                 .unwrap_or_else(|e| panic!("identity.toml: `{name}` is not valid hex: {e}"));
-            assert!(!bytes.is_empty(), "identity.toml: `{name}` must not be empty");
+            assert!(
+                !bytes.is_empty(),
+                "identity.toml: `{name}` must not be empty"
+            );
             if let Some(len) = len {
-                assert_eq!(bytes.len(), len, "identity.toml: `{name}` must be {len} bytes");
+                assert_eq!(
+                    bytes.len(),
+                    len,
+                    "identity.toml: `{name}` must be {len} bytes"
+                );
             }
             format!("{bytes:?}")
         };

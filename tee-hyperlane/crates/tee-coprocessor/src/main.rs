@@ -3,7 +3,6 @@
 //! One binary rather than several, because these are three views of the same state and
 //! sharing the config file is the point.
 
-
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use tee_coprocessor::commands;
@@ -64,7 +63,10 @@ enum Command {
     /// walks it to the current finalized head, then proves the origin tree under that head's
     /// execution state root.
     AttestEthereum {
-        #[arg(long, default_value = "https://ethereum-sepolia-beacon-api.publicnode.com")]
+        #[arg(
+            long,
+            default_value = "https://ethereum-sepolia-beacon-api.publicnode.com"
+        )]
         beacon: String,
         #[arg(long, default_value = "https://ethereum-sepolia-rpc.publicnode.com")]
         execution: String,
@@ -96,7 +98,10 @@ enum Command {
         /// `arbitrum` or `base`.
         #[arg(long)]
         rollup: String,
-        #[arg(long, default_value = "https://ethereum-sepolia-beacon-api.publicnode.com")]
+        #[arg(
+            long,
+            default_value = "https://ethereum-sepolia-beacon-api.publicnode.com"
+        )]
         beacon: String,
         /// L1 execution, archive: the rollup's storage is proven at the finalized L1 block.
         #[arg(long, default_value = "https://rpc.sepolia.ethpandaops.io")]
@@ -130,7 +135,10 @@ enum Command {
         /// `arbitrum` or `base`.
         #[arg(long)]
         rollup: String,
-        #[arg(long, default_value = "https://ethereum-sepolia-beacon-api.publicnode.com")]
+        #[arg(
+            long,
+            default_value = "https://ethereum-sepolia-beacon-api.publicnode.com"
+        )]
         beacon: String,
         #[arg(long, default_value = "https://rpc.sepolia.ethpandaops.io")]
         l1_execution: String,
@@ -174,7 +182,10 @@ enum Command {
     /// Anchors to a weak-subjectivity checkpoint. Whoever creates the ISM picks it, and
     /// everyone can see which one they picked, because it is committed in the state.
     BootstrapEthereum {
-        #[arg(long, default_value = "https://ethereum-sepolia-beacon-api.publicnode.com")]
+        #[arg(
+            long,
+            default_value = "https://ethereum-sepolia-beacon-api.publicnode.com"
+        )]
         beacon: String,
         #[arg(long, default_value = "https://ethereum-sepolia-rpc.publicnode.com")]
         execution: String,
@@ -243,14 +254,22 @@ async fn main() -> Result<()> {
 
     match cli.command {
         Command::Run => commands::run(load()?).await,
-        Command::Send { route, token, amount, to } => {
+        Command::Send {
+            route,
+            token,
+            amount,
+            to,
+        } => {
             println!("send {amount} {token} via {route} to {to}");
             println!("requires a deployed warp route; see README `Deploy`");
             Ok(())
         }
-        Command::BootstrapCelestia { rpc, lag, height, identity_digest } => {
-            commands::bootstrap_celestia(&rpc, lag, height, &identity_digest).await
-        }
+        Command::BootstrapCelestia {
+            rpc,
+            lag,
+            height,
+            identity_digest,
+        } => commands::bootstrap_celestia(&rpc, lag, height, &identity_digest).await,
         Command::AttestEthereum {
             beacon,
             execution,
@@ -312,7 +331,7 @@ async fn main() -> Result<()> {
             out,
         } => {
             commands::attest_l2(
-                commands::L2Kind::parse(&rollup)?,
+                rollup.parse()?,
                 &beacon,
                 &l1_execution,
                 &l2_archive,
@@ -337,7 +356,7 @@ async fn main() -> Result<()> {
             identity_digest,
         } => {
             commands::bootstrap_l2(
-                commands::L2Kind::parse(&rollup)?,
+                rollup.parse()?,
                 &beacon,
                 &l1_execution,
                 &l2_archive,
@@ -347,21 +366,28 @@ async fn main() -> Result<()> {
             )
             .await
         }
-        Command::BootstrapEthereum { beacon, execution, checkpoint, identity_digest } => {
-            commands::bootstrap_ethereum(&beacon, &execution, checkpoint, &identity_digest).await
-        }
-        Command::Prove { attestation, elf_dir, out } => {
-            commands::prove(&attestation, &elf_dir, &out).await
-        }
+        Command::BootstrapEthereum {
+            beacon,
+            execution,
+            checkpoint,
+            identity_digest,
+        } => commands::bootstrap_ethereum(&beacon, &execution, checkpoint, &identity_digest).await,
+        Command::Prove {
+            attestation,
+            elf_dir,
+            out,
+        } => commands::prove(&attestation, &elf_dir, &out).await,
         Command::Serve { listen, proof_dir } => {
             let routes = load().map(|config| config.routes).unwrap_or_default();
-            let api =
-                tee_coprocessor::api::Api::new(commands::expand_home(&proof_dir), routes);
+            let api = tee_coprocessor::api::Api::new(commands::expand_home(&proof_dir), routes);
             tee_coprocessor::api::serve(api, &listen).await
         }
-        Command::ServeUi { listen, dir, api, celestia_rest } => {
-            tee_coprocessor::ui::serve(dir.into(), api, celestia_rest, &listen).await
-        }
+        Command::ServeUi {
+            listen,
+            dir,
+            api,
+            celestia_rest,
+        } => tee_coprocessor::ui::serve(dir.into(), api, celestia_rest, &listen).await,
         Command::Status => {
             let config = load()?;
             for route in &config.routes {
@@ -381,4 +407,3 @@ async fn main() -> Result<()> {
         }
     }
 }
-

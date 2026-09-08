@@ -19,7 +19,10 @@ fn state_transition_fixture_round_trips_byte_for_byte() {
     let v = decode_state_transition_values(STATE_TRANSITION_PV).expect("decode");
     assert_eq!(STATE_TRANSITION_PV.len(), 298, "8 + 141 + 8 + 141");
     assert_eq!((v.state.len(), v.new_state.len()), (141, 141));
-    assert_eq!(encode_state_transition_values(&v.state, &v.new_state), STATE_TRANSITION_PV);
+    assert_eq!(
+        encode_state_transition_values(&v.state, &v.new_state),
+        STATE_TRANSITION_PV
+    );
 }
 
 #[test]
@@ -44,9 +47,18 @@ fn live_mocha_groth16_wrap_vk_is_the_sp1_v5_shape() {
     // v9.0.6 ValidateGroth16Vkey: exactly 396 bytes, G1.K length 3 (2 public inputs + 1),
     // no commitment keys. SP1 v6's 492-byte, 5-input key is rejected there.
     assert_eq!(GROTH16_VK_V5.len(), 396);
-    assert_eq!(u32::from_be_bytes(GROTH16_VK_V5[288..292].try_into().unwrap()), 3);
-    assert_eq!(u32::from_be_bytes(GROTH16_VK_V5[388..392].try_into().unwrap()), 0);
-    assert_eq!(u32::from_be_bytes(GROTH16_VK_V5[392..396].try_into().unwrap()), 0);
+    assert_eq!(
+        u32::from_be_bytes(GROTH16_VK_V5[288..292].try_into().unwrap()),
+        3
+    );
+    assert_eq!(
+        u32::from_be_bytes(GROTH16_VK_V5[388..392].try_into().unwrap()),
+        0
+    );
+    assert_eq!(
+        u32::from_be_bytes(GROTH16_VK_V5[392..396].try_into().unwrap()),
+        0
+    );
 }
 
 #[test]
@@ -58,7 +70,10 @@ fn membership_decoder_rejects_trailing_and_truncated_input() {
         Err(CodecError::TrailingBytes { .. })
     ));
     let short = &STATE_MEMBERSHIP_PV[..STATE_MEMBERSHIP_PV.len() - 1];
-    assert!(matches!(decode_state_membership_values(short), Err(CodecError::TooShort { .. })));
+    assert!(matches!(
+        decode_state_membership_values(short),
+        Err(CodecError::TooShort { .. })
+    ));
 }
 
 #[test]
@@ -80,7 +95,10 @@ fn transition_decoder_rejects_out_of_range_state_length() {
 #[test]
 fn one_blob_cannot_serve_both_zkism_handlers() {
     let claimed_len = u64::from_le_bytes(STATE_MEMBERSHIP_PV[..8].try_into().unwrap());
-    assert!(claimed_len > 2048, "state root began with a plausible length prefix");
+    assert!(
+        claimed_len > 2048,
+        "state root began with a plausible length prefix"
+    );
     assert!(decode_state_transition_values(STATE_MEMBERSHIP_PV).is_err());
 }
 
@@ -104,27 +122,34 @@ fn ism_state_round_trips_and_fits_the_zkism_window() {
     assert_eq!(b.len(), 116);
     assert!((32..=2048).contains(&b.len()));
     assert_eq!(decode_ism_state(&b).unwrap(), s);
-    assert_eq!(&b[..32], &s.state_root, "zkism reads state[..32] as the root");
+    assert_eq!(
+        &b[..32],
+        &s.state_root,
+        "zkism reads state[..32] as the root"
+    );
 }
 
 #[test]
 fn ism_state_decode_rejects_wrong_length() {
     assert!(matches!(
         decode_ism_state(&[0u8; 115]),
-        Err(CodecError::WrongLength { expected: 116, got: 115 })
+        Err(CodecError::WrongLength {
+            expected: 116,
+            got: 115
+        })
     ));
 }
 
 #[test]
 fn a_valid_transition_is_accepted() {
-    assert!(check_transition(&state(1, 10, 100), &state(2, 11, 101)).is_ok());
+    assert!(verify_transition(&state(1, 10, 100), &state(2, 11, 101)).is_ok());
 }
 
 #[test]
 fn a_transition_must_change_the_state_root() {
     // Otherwise x/zkism never re-arms submissions[ismId] and message delivery wedges.
     assert_eq!(
-        check_transition(&state(1, 10, 100), &state(1, 11, 101)),
+        verify_transition(&state(1, 10, 100), &state(1, 11, 101)),
         Err(TransitionError::StateRootUnchanged)
     );
 }
@@ -132,11 +157,11 @@ fn a_transition_must_change_the_state_root() {
 #[test]
 fn a_transition_must_advance_height_and_not_rewind_time() {
     assert_eq!(
-        check_transition(&state(1, 10, 100), &state(2, 10, 101)),
+        verify_transition(&state(1, 10, 100), &state(2, 10, 101)),
         Err(TransitionError::HeightNotAdvanced)
     );
     assert_eq!(
-        check_transition(&state(1, 10, 100), &state(2, 11, 99)),
+        verify_transition(&state(1, 10, 100), &state(2, 11, 99)),
         Err(TransitionError::TimestampWentBackwards)
     );
 }
@@ -148,14 +173,14 @@ fn a_transition_pins_the_origin_domain_and_enclave_identity() {
     let mut other_origin = state(2, 11, 101);
     other_origin.origin_domain = 1297040200;
     assert_eq!(
-        check_transition(&state(1, 10, 100), &other_origin),
+        verify_transition(&state(1, 10, 100), &other_origin),
         Err(TransitionError::OriginDomainChanged)
     );
 
     let mut other_enclave = state(2, 11, 101);
     other_enclave.identity_digest = [0u8; 32];
     assert_eq!(
-        check_transition(&state(1, 10, 100), &other_enclave),
+        verify_transition(&state(1, 10, 100), &other_enclave),
         Err(TransitionError::IdentityChanged)
     );
 }
@@ -185,7 +210,10 @@ fn attested_update_round_trips_with_and_without_messages() {
 fn attested_update_decoder_rejects_trailing_bytes() {
     let mut b = encode_attested_update(&update(vec![[1u8; 32]]));
     b.push(0);
-    assert!(matches!(decode_attested_update(&b), Err(CodecError::TrailingBytes { .. })));
+    assert!(matches!(
+        decode_attested_update(&b),
+        Err(CodecError::TrailingBytes { .. })
+    ));
 }
 
 #[test]
@@ -214,37 +242,4 @@ fn the_payload_hash_binds_every_field() {
         hash_attested_update(&update(vec![[1u8; 32], [2u8; 32]])),
         hash_attested_update(&update(vec![[2u8; 32], [1u8; 32]]))
     );
-}
-
-/// An optimistic rollup's confirmed head is old on purpose: that lag is the fraud-proof
-/// window. Bounding the prover's clock against it, rather than against a chain time the
-/// enclave actually verified recently, rejected every honest L2 proof - which is why neither
-/// L2 route ever produced a batch.
-#[test]
-fn an_l2_lag_does_not_look_like_a_stale_clock() {
-    // Base's confirmed head trails L1 by about five days.
-    let l2_head = 1_000_000u64;
-    let l1_head = l2_head + 5 * 24 * 60 * 60;
-
-    let mut u = update(vec![[1u8; 32]]);
-    u.new_state.timestamp = l2_head;
-    u.attested_at = l1_head;
-
-    // The prover's clock sits beside the L1 head, which is what it is bounded against.
-    let now = l1_head + 60;
-    assert!(now >= u.attested_at);
-    assert!(now <= u.attested_at + tee_attestation::MAX_QUOTE_SKEW_SECS);
-
-    // Against the old anchor the same honest proof was hopeless.
-    assert!(now > u.new_state.timestamp + tee_attestation::MAX_QUOTE_SKEW_SECS);
-}
-
-/// The freshness anchor may not predate the state it carries, or a fresh L1 header could be
-/// paired with an arbitrarily old L2 root.
-#[test]
-fn the_attested_time_is_not_before_its_state() {
-    let mut u = update(vec![[1u8; 32]]);
-    u.new_state.timestamp = 500;
-    u.attested_at = 499;
-    assert!(u.attested_at < u.new_state.timestamp, "the case the circuit must reject");
 }

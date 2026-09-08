@@ -1,6 +1,6 @@
 //! The identity and platform checks `evolve-tee` omits.
 
-mod common;
+mod fixtures;
 
 /// Locate dcap-qvl's sample quotes, if this machine has the crate vendored.
 pub fn sample_dir_for_tests() -> Option<std::path::PathBuf> {
@@ -14,13 +14,13 @@ pub fn sample_dir_for_tests() -> Option<std::path::PathBuf> {
     })
 }
 
-use common::*;
 use dcap_qvl::tcb_info::TcbStatus;
+use fixtures::*;
 use tee_attestation::attestation::{event_preimage_v2, sha384, APPLICATION_IMR};
 use tee_attestation::*;
 
 fn check(log: &[EventLog], report: &dcap_qvl::verify::VerifiedReport) -> Result<(), IdentityError> {
-    check_enclave_identity(&policy(), report, log, &replay_event_logs(log))
+    verify_enclave_identity(&policy(), report, log, &replay_event_logs(log))
 }
 
 fn ok_report(log: &[EventLog]) -> dcap_qvl::verify::VerifiedReport {
@@ -33,26 +33,31 @@ fn our_enclave_is_accepted() {
     assert_eq!(check(&log, &ok_report(&log)), Ok(()));
 }
 
+/// The whole point: another TDX machine running other code must not pass. Every pinned
+/// event gets the same treatment, so adding a field to the policy without extending this
+/// leaves a hole the table makes obvious.
 #[test]
-fn a_different_container_image_is_rejected() {
-    // The whole point: another TDX machine running other code must not pass.
-    let mut log = good_log();
-    log[2] = ev(APPLICATION_IMR, "compose-hash", &[0xde; 32]);
-    assert_eq!(check(&log, &ok_report(&log)), Err(IdentityError::EventMismatch("compose-hash")));
-}
-
-#[test]
-fn a_different_os_image_is_rejected() {
-    let mut log = good_log();
-    log[1] = ev(APPLICATION_IMR, "os-image-hash", &[0xde; 32]);
-    assert_eq!(check(&log, &ok_report(&log)), Err(IdentityError::EventMismatch("os-image-hash")));
+fn any_changed_pinned_event_is_rejected() {
+    for name in ["os-image-hash", "compose-hash", "mr-kms", "key-provider"] {
+        let mut log = good_log();
+        let at = log.iter().position(|e| e.event == name).expect(name);
+        log[at] = ev(APPLICATION_IMR, name, &[0xde; 32]);
+        assert_eq!(
+            check(&log, &ok_report(&log)),
+            Err(IdentityError::EventMismatch(name)),
+            "{name} was not pinned"
+        );
+    }
 }
 
 #[test]
 fn a_different_platform_measurement_is_rejected() {
     let log = good_log();
     let r = report(&log, [0x22; 48], TcbStatus::UpToDate, [0u8; 64]);
-    assert_eq!(check(&log, &r), Err(IdentityError::PlatformMeasurementMismatch));
+    assert_eq!(
+        check(&log, &r),
+        Err(IdentityError::PlatformMeasurementMismatch)
+    );
 }
 
 #[test]
@@ -62,7 +67,7 @@ fn an_event_log_that_does_not_replay_to_the_quote_is_rejected() {
     let mut tampered = log.clone();
     tampered.push(ev(APPLICATION_IMR, "extra", b"junk"));
     assert_eq!(
-        check_enclave_identity(&policy(), &r, &tampered, &replay_event_logs(&tampered)),
+        verify_enclave_identity(&policy(), &r, &tampered, &replay_event_logs(&tampered)),
         Err(IdentityError::EventLogNotBoundToQuote)
     );
 }
@@ -82,7 +87,10 @@ fn platforms_intel_has_flagged_are_rejected() {
             matches!(check(&log, &r), Err(IdentityError::TcbNotAcceptable { .. })),
             "{status:?} should not be accepted"
         );
-        assert!(matches!(check_platform_tcb(&r), Err(IdentityError::TcbNotAcceptable { .. })));
+        assert!(matches!(
+            verify_platform_tcb(&r),
+            Err(IdentityError::TcbNotAcceptable { .. })
+        ));
     }
 }
 
@@ -104,22 +112,35 @@ fn relabelled_event_text_is_rejected_even_though_the_rtmrs_still_match() {
     forged[5].event = "compose-hash".to_string();
     forged[5].event_payload = vec![0xde; 32];
 
-    assert_eq!(replay_event_logs(&forged), replay_event_logs(&log), "RTMRs must still match");
-    assert_eq!(check(&forged, &r), Err(IdentityError::EventUnusable("compose-hash")));
+    assert_eq!(
+        replay_event_logs(&forged),
+        replay_event_logs(&log),
+        "RTMRs must still match"
+    );
+    assert_eq!(
+        check(&forged, &r),
+        Err(IdentityError::EventUnusable("compose-hash"))
+    );
 }
 
 #[test]
 fn an_event_whose_digest_does_not_commit_to_its_text_is_unusable() {
     let mut log = good_log();
     log[2].event_payload = vec![0xde; 32]; // digest still belongs to the old payload
-    assert_eq!(check(&log, &ok_report(&log)), Err(IdentityError::EventUnusable("compose-hash")));
+    assert_eq!(
+        check(&log, &ok_report(&log)),
+        Err(IdentityError::EventUnusable("compose-hash"))
+    );
 }
 
 #[test]
 fn duplicated_keys_never_resolve() {
     let mut log = good_log();
     log.push(ev(APPLICATION_IMR, "compose-hash", &[0xde; 32]));
-    assert_eq!(check(&log, &ok_report(&log)), Err(IdentityError::EventUnusable("compose-hash")));
+    assert_eq!(
+        check(&log, &ok_report(&log)),
+        Err(IdentityError::EventUnusable("compose-hash"))
+    );
 }
 
 #[test]
@@ -150,12 +171,15 @@ fn development_mode_accepts_any_enclave_but_still_enforces_the_platform() {
     let r = ok_report(&log);
     let replay = replay_event_logs(&log);
 
-    assert_eq!(check_enclave_identity(&IdentityPolicy::Any, &r, &log, &replay), Ok(()));
+    assert_eq!(
+        verify_enclave_identity(&IdentityPolicy::Any, &r, &log, &replay),
+        Ok(())
+    );
 
     // ...but a bad TCB level is still refused.
     let revoked = report(&log, MR_TD, TcbStatus::Revoked, [0u8; 64]);
     assert!(matches!(
-        check_enclave_identity(&IdentityPolicy::Any, &revoked, &log, &replay),
+        verify_enclave_identity(&IdentityPolicy::Any, &revoked, &log, &replay),
         Err(IdentityError::TcbNotAcceptable { .. })
     ));
 
@@ -163,7 +187,12 @@ fn development_mode_accepts_any_enclave_but_still_enforces_the_platform() {
     let mut tampered = log.clone();
     tampered.push(ev(APPLICATION_IMR, "extra", b"junk"));
     assert_eq!(
-        check_enclave_identity(&IdentityPolicy::Any, &r, &tampered, &replay_event_logs(&tampered)),
+        verify_enclave_identity(
+            &IdentityPolicy::Any,
+            &r,
+            &tampered,
+            &replay_event_logs(&tampered)
+        ),
         Err(IdentityError::EventLogNotBoundToQuote)
     );
 }
@@ -220,7 +249,11 @@ fn the_build_mode_and_the_identity_digest_agree() {
         policy.requires_specific_enclave()
     );
     if enclave_identity::REQUIRES_SPECIFIC_ENCLAVE {
-        assert_ne!(*policy, IdentityPolicy::Any, "a pinned build must not accept any enclave");
+        assert_ne!(
+            *policy,
+            IdentityPolicy::Any,
+            "a pinned build must not accept any enclave"
+        );
     } else {
         assert_eq!(*policy, IdentityPolicy::Any);
     }
@@ -275,7 +308,7 @@ mod real_hardware {
         policy: &IdentityPolicy,
         (report, events): &(VerifiedReport, Vec<EventLog>),
     ) -> Result<(), IdentityError> {
-        check_enclave_identity(policy, report, events, &replay_event_logs(events))
+        verify_enclave_identity(policy, report, events, &replay_event_logs(events))
     }
 
     #[test]
@@ -318,7 +351,7 @@ mod real_hardware {
         // must be enough.
         let (_, events) = ours();
         let replay = replay_event_logs(&events);
-        let verdict = check_enclave_identity(build_identity_policy(), &foreign, &events, &replay);
+        let verdict = verify_enclave_identity(build_identity_policy(), &foreign, &events, &replay);
 
         if enclave_identity::REQUIRES_SPECIFIC_ENCLAVE {
             assert!(

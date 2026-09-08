@@ -13,19 +13,11 @@
 //! Proving is minutes of CPU, so all routes share one permit. Two routes competing for cores
 //! would only make both slower.
 //!
-//! ## Why a message cannot be skipped
-//!
-//! The enclave replays the origin's merkle tree from the ISM's trusted height using the ids
-//! in the batch, and checks the result against the tree it just proved at the new height. A
-//! batch that omits, reorders or invents a leaf produces a different root, and the
-//! attestation fails. So within one attestation, completeness is cryptographic rather than a
-//! property of this loop.
-//!
-//! That leaves exactly one way to lose a message: abandon a batch *after* `updateState` has
-//! advanced the trusted height past it. The next attestation would start from a snapshot
-//! that already contains those leaves, so they would never appear in any batch again. This
-//! loop therefore finishes an in-flight batch before it starts a new one, and the submit
-//! scripts skip whatever already happened on chain, so resuming is always safe.
+//! A batch being complete is the enclave's guarantee, not this loop's - see
+//! `tee_node::attest::build_attested_update`. What is this loop's job is not stranding one:
+//! abandoning a batch after `updateState` has advanced the trusted height past it would put
+//! those leaves behind the next snapshot for good. So an in-flight batch is finished before a
+//! new one starts, and the submit scripts skip whatever already landed on chain.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -143,7 +135,12 @@ async fn advance(
 
     let attestation = store.staging(&route.name, "attestation.json");
     let attested = match &route.origin {
-        ChainConfig::Celestia { rpc, archive_rpc, merkle_tree_hook_id, .. } => {
+        ChainConfig::Celestia {
+            rpc,
+            archive_rpc,
+            merkle_tree_hook_id,
+            ..
+        } => {
             commands::attest_celestia(
                 rpc,
                 archive_rpc.as_deref(),
@@ -164,13 +161,16 @@ async fn advance(
             merkle_tree_base_slot,
             ..
         } => {
-            let origin_field = |name: &str| format!("an Ethereum origin needs `{name}` in its route config");
-            let beacon_rpc = beacon_rpc.as_deref().with_context(|| origin_field("beacon_rpc"))?;
+            let origin_field =
+                |name: &str| format!("an Ethereum origin needs `{name}` in its route config");
+            let beacon_rpc = beacon_rpc
+                .as_deref()
+                .with_context(|| origin_field("beacon_rpc"))?;
             let merkle_tree_hook = merkle_tree_hook
                 .as_deref()
                 .with_context(|| origin_field("merkle_tree_hook"))?;
-            let merkle_tree_base_slot = merkle_tree_base_slot
-                .with_context(|| origin_field("merkle_tree_base_slot"))?;
+            let merkle_tree_base_slot =
+                merkle_tree_base_slot.with_context(|| origin_field("merkle_tree_base_slot"))?;
             commands::attest_ethereum(
                 beacon_rpc,
                 execution_rpc,
@@ -198,7 +198,12 @@ async fn advance(
             merkle_tree_base_slot,
             ..
         } => {
-            let ChainConfig::Ethereum { execution_rpc, beacon_rpc, archive_rpc, .. } = &**l1
+            let ChainConfig::Ethereum {
+                execution_rpc,
+                beacon_rpc,
+                archive_rpc,
+                ..
+            } = &**l1
             else {
                 anyhow::bail!("an L2 origin's `l1` must be an Ethereum chain")
             };
@@ -209,7 +214,7 @@ async fn advance(
             // outside a public node's window.
             let l1_execution = archive_rpc.as_deref().unwrap_or(execution_rpc);
             commands::attest_l2(
-                commands::L2Kind::parse(rollup)?,
+                rollup.parse()?,
                 beacon_rpc,
                 l1_execution,
                 l2_rpc,
@@ -285,8 +290,7 @@ fn finish_staged_batch(route: &RouteConfig, store: &ProofStore) -> Result<Option
 const DEFAULT_LAG: u64 = 8;
 
 fn elf_dir() -> String {
-    std::env::var("TEE_HYPERLANE_ELF_DIR")
-        .unwrap_or_else(|_| "../tee-circuit/elf".to_string())
+    std::env::var("TEE_HYPERLANE_ELF_DIR").unwrap_or_else(|_| "../tee-circuit/elf".to_string())
 }
 
 fn path_string(path: &std::path::Path) -> String {
@@ -300,7 +304,11 @@ mod tests {
     #[test]
     fn backoff_grows_then_stops() {
         let tick = Duration::from_secs(120);
-        assert_eq!(backoff(tick, 0), tick, "a healthy route keeps its normal cadence");
+        assert_eq!(
+            backoff(tick, 0),
+            tick,
+            "a healthy route keeps its normal cadence"
+        );
         assert_eq!(backoff(tick, 1), Duration::from_secs(240));
         assert_eq!(backoff(tick, 3), Duration::from_secs(960));
 

@@ -61,7 +61,10 @@ pub fn encode_ism_state(s: &IsmState) -> [u8; ISM_STATE_BYTES] {
 
 pub fn decode_ism_state(b: &[u8]) -> Result<IsmState, CodecError> {
     if b.len() != ISM_STATE_BYTES {
-        return Err(CodecError::WrongLength { expected: ISM_STATE_BYTES, got: b.len() });
+        return Err(CodecError::WrongLength {
+            expected: ISM_STATE_BYTES,
+            got: b.len(),
+        });
     }
     let at32 = |o: usize| -> [u8; 32] { b[o..o + 32].try_into().unwrap() };
     let be = |o: usize, n: usize| -> u64 {
@@ -99,7 +102,7 @@ pub enum TransitionError {
 /// one-message-batch-per-root flag only when `state[..32]` differs
 /// (`keeper/msg_server.go:97-100`), so a transition that leaves the root alone would stop
 /// message submission permanently.
-pub fn check_transition(prev: &IsmState, next: &IsmState) -> Result<(), TransitionError> {
+pub fn verify_transition(prev: &IsmState, next: &IsmState) -> Result<(), TransitionError> {
     if prev.origin_domain != next.origin_domain {
         return Err(TransitionError::OriginDomainChanged);
     }
@@ -160,7 +163,9 @@ pub fn encode_attested_update(u: &AttestedUpdate) -> Vec<u8> {
 
 pub fn decode_attested_update(b: &[u8]) -> Result<AttestedUpdate, CodecError> {
     if b.len() < ATTESTED_UPDATE_HEAD {
-        return Err(CodecError::TooShort { needed: ATTESTED_UPDATE_HEAD - b.len() });
+        return Err(CodecError::TooShort {
+            needed: ATTESTED_UPDATE_HEAD - b.len(),
+        });
     }
     let prev_state = decode_ism_state(&b[..ISM_STATE_BYTES])?;
     let new_state = decode_ism_state(&b[ISM_STATE_BYTES..2 * ISM_STATE_BYTES])?;
@@ -172,7 +177,13 @@ pub fn decode_attested_update(b: &[u8]) -> Result<AttestedUpdate, CodecError> {
     let count = u64::from_be_bytes(b[o..o + 8].try_into().unwrap());
     o += 8;
     let message_ids = read_ids(&b[o..], count)?;
-    Ok(AttestedUpdate { prev_state, new_state, merkle_tree_address, attested_at, message_ids })
+    Ok(AttestedUpdate {
+        prev_state,
+        new_state,
+        merkle_tree_address,
+        attested_at,
+        message_ids,
+    })
 }
 
 /// The value the enclave puts in the first 32 bytes of `report_data`.
@@ -233,7 +244,9 @@ pub fn decode_state_transition_values(data: &[u8]) -> Result<StateTransitionValu
 /// Mirrors the Go decoder, including its strict rejection of trailing bytes.
 pub fn decode_state_membership_values(data: &[u8]) -> Result<StateMembershipValues, CodecError> {
     if data.len() < 72 {
-        return Err(CodecError::TooShort { needed: 72 - data.len() });
+        return Err(CodecError::TooShort {
+            needed: 72 - data.len(),
+        });
     }
     let state_root: [u8; 32] = data[..32].try_into().unwrap();
     let merkle_tree_address: [u8; 32] = data[32..64].try_into().unwrap();
@@ -242,12 +255,18 @@ pub fn decode_state_membership_values(data: &[u8]) -> Result<StateMembershipValu
         return Err(CodecError::MessageIdCountTooLarge(count));
     }
     let message_ids = read_ids(&data[72..], count)?;
-    Ok(StateMembershipValues { state_root, merkle_tree_address, message_ids })
+    Ok(StateMembershipValues {
+        state_root,
+        merkle_tree_address,
+        message_ids,
+    })
 }
 
 fn read_length_prefixed(data: &[u8]) -> Result<(Vec<u8>, &[u8]), CodecError> {
     if data.len() < 8 {
-        return Err(CodecError::TooShort { needed: 8 - data.len() });
+        return Err(CodecError::TooShort {
+            needed: 8 - data.len(),
+        });
     }
     let len = u64::from_le_bytes(data[..8].try_into().unwrap());
     if len < MIN_STATE_BYTES as u64 || len > MAX_STATE_BYTES as u64 {
@@ -255,7 +274,9 @@ fn read_length_prefixed(data: &[u8]) -> Result<(Vec<u8>, &[u8]), CodecError> {
     }
     let end = 8 + len as usize;
     if data.len() < end {
-        return Err(CodecError::TooShort { needed: end - data.len() });
+        return Err(CodecError::TooShort {
+            needed: end - data.len(),
+        });
     }
     Ok((data[8..end].to_vec(), &data[end..]))
 }
@@ -267,10 +288,17 @@ fn read_ids(rest: &[u8], count: u64) -> Result<Vec<[u8; 32]>, CodecError> {
     }
     let needed = (count as usize).saturating_mul(32);
     if rest.len() < needed {
-        return Err(CodecError::TooShort { needed: needed - rest.len() });
+        return Err(CodecError::TooShort {
+            needed: needed - rest.len(),
+        });
     }
     if rest.len() > needed {
-        return Err(CodecError::TrailingBytes { count: rest.len() - needed });
+        return Err(CodecError::TrailingBytes {
+            count: rest.len() - needed,
+        });
     }
-    Ok(rest.chunks_exact(32).map(|c| c.try_into().unwrap()).collect())
+    Ok(rest
+        .chunks_exact(32)
+        .map(|c| c.try_into().unwrap())
+        .collect())
 }
