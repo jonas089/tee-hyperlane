@@ -127,6 +127,11 @@ enum Command {
         /// Deployment-specific: Arbitrum Sepolia's hook uses 151, Sepolia's canonical one 103.
         #[arg(long, default_value_t = 151)]
         base_slot: u64,
+        /// The L1 checkpoint this ISM was bootstrapped from. Effectively required: an
+        /// L2-origin ISM cannot derive it, and the fallback search only reaches back about
+        /// fifty minutes.
+        #[arg(long)]
+        checkpoint: Option<String>,
         #[arg(long)]
         out: Option<String>,
     },
@@ -328,6 +333,7 @@ async fn main() -> Result<()> {
             merkle_tree_hook,
             mailbox,
             base_slot,
+            checkpoint,
             out,
         } => {
             commands::attest_l2(
@@ -342,6 +348,7 @@ async fn main() -> Result<()> {
                 &merkle_tree_hook,
                 &mailbox,
                 base_slot,
+                checkpoint.as_deref(),
                 out,
             )
             .await

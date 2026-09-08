@@ -157,6 +157,14 @@ pub async fn bootstrap_l2(
 /// behind head - that lag is the rollup's challenge window, not something to tune - and no
 /// public node keeps state that far back.
 
+/// Gather one L2 step and hand it to the enclave.
+///
+/// `checkpoint` is not optional in practice. An L2-origin ISM cannot derive which L1
+/// checkpoint its store was built from, because the trusted timestamp is the *L2's* and says
+/// nothing about L1, so `rebuild_ethereum_store` falls back to walking the last eight
+/// finalized epochs. That covers roughly fifty minutes: a route bootstrapped longer ago than
+/// that silently stops resuming, and the error it raises tells you to set the very field this
+/// argument carries. Passing `None` here is what made that advice impossible to follow.
 pub async fn attest_l2(
     kind: L2Kind,
     beacon: &str,
@@ -169,6 +177,7 @@ pub async fn attest_l2(
     merkle_tree_hook: &str,
     mailbox: &str,
     base_slot: u64,
+    checkpoint: Option<&str>,
     out: Option<String>,
 ) -> Result<()> {
     use crate::enclave::EnclaveClient;
@@ -180,7 +189,7 @@ pub async fn attest_l2(
     let beacon_reader = EthereumReader::new(beacon);
     let config = beacon_reader.chain_config().await?;
     let (store, _checkpoint) =
-        rebuild_ethereum_store(&beacon_reader, &config, &trusted, None).await?;
+        rebuild_ethereum_store(&beacon_reader, &config, &trusted, checkpoint).await?;
 
     let finality = beacon_reader.finality_update().await?;
     let l1_block = *finality

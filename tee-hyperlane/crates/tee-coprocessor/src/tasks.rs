@@ -225,6 +225,7 @@ async fn advance(
                 merkle_tree_hook,
                 mailbox,
                 *merkle_tree_base_slot,
+                route.checkpoint.as_deref(),
                 Some(path_string(&attestation)),
             )
             .await
