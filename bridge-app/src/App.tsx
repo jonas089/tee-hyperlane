@@ -13,6 +13,8 @@ import {
   fetchBalance,
   fetchRouteStatus,
   formatAmount,
+  formatFee,
+  quoteBridgeFee,
   messageIdFromReceipt,
   refresh,
   sendFromEvm,
@@ -20,7 +22,7 @@ import {
   toBaseUnits,
   toRecipientBytes32,
 } from "./bridge";
-import type { RouteStatus, Step, Transfer } from "./bridge";
+import type { BridgeFee, RouteStatus, Step, Transfer } from "./bridge";
 import { messageIdFromCelestiaTx, sendFromCelestia } from "./celestia";
 import { connectKeplr, connectMetaMask, walletFor } from "./wallets";
 import type { Account } from "./wallets";
@@ -51,6 +53,7 @@ export default function App() {
   const [transfers, setTransfers] = useState<Transfer[]>(loadTransfers);
   const [balances, setBalances] = useState<Record<string, bigint>>({});
   const [routes, setRoutes] = useState<RouteStatus[] | null>(null);
+  const [fee, setFee] = useState<BridgeFee | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
 
@@ -94,6 +97,19 @@ export default function App() {
   useEffect(() => {
     loadBalances();
   }, [loadBalances]);
+
+  // Quoted from chain on every route change: the oracle moves it hourly, so a number baked
+  // into the page would drift out of date within the hour.
+  useEffect(() => {
+    let current = true;
+    setFee(null);
+    quoteBridgeFee(from, to)
+      .then((quoted) => current && setFee(quoted))
+      .catch(() => current && setFee(null));
+    return () => {
+      current = false;
+    };
+  }, [from, to]);
 
   const loadRoutes = useCallback(async () => {
     try {
@@ -148,6 +164,8 @@ export default function App() {
         if (!cosmos) throw new Error("Connect Keplr first");
         const tokenId = routerFor(token, "celestia");
         if (!tokenId) throw new Error(`${token} is not deployed on Celestia`);
+        // Re-quoted rather than reusing what the page showed, which may be minutes old.
+        const quoted = await quoteBridgeFee(from, to);
         tx = await sendFromCelestia({
           chain: source as CosmosChain,
           tokenId,
@@ -156,6 +174,7 @@ export default function App() {
           recipient: toRecipientBytes32(target),
           amount: toBaseUnits(amount, token),
           sender: cosmos.address,
+          quotedFee: quoted.amount,
         });
         messageId = await waitForCelestiaMessageId(source as CosmosChain, tx);
       }
@@ -337,6 +356,13 @@ export default function App() {
                 with its expected arrival, and you can close this page.
               </p>
             )}
+
+            <dl className="quote">
+              <dt>Delivery fee</dt>
+              <dd>{fee ? formatFee(fee) : "quoting…"}</dd>
+              <dt>Arrives</dt>
+              <dd>{describeDuration(expectedSeconds(from))} from now</dd>
+            </dl>
 
             {!live && <p className="note">{token} is not deployed on this route yet.</p>}
             {error && <p className="error">{error}</p>}

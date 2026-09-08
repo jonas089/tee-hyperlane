@@ -28,6 +28,9 @@ Q="--node $NODE -o json"
 
 jqv() { python3 -c "import sys,json;print(json.load(open('$PROVED'))$1)"; }
 
+# The reason a tx failed, for the one case that is not a failure. Set by `send`.
+LAST_LOG=""
+
 # A tx that reports code 0 in CheckTx can still fail in DeliverTx, so wait for the result.
 send() {
   local hash
@@ -37,6 +40,9 @@ send() {
   for _ in $(seq 1 20); do
     sleep 3
     if out=$("$APPD" query tx "$hash" $Q 2>/dev/null); then
+      LAST_LOG=$(python3 -c "
+import sys, json
+print(json.loads(sys.argv[1]).get('raw_log', ''))" "$out")
       python3 -c "
 import sys, json
 d = json.loads(sys.argv[1])
@@ -71,12 +77,20 @@ else
 fi
 
 echo "== submit messages =="
-FIRST=$(jqv "['batch'][0]")
-if "$APPD" query zkism messages "$ISM" $Q 2>/dev/null | grep -qi "${FIRST#0x}"; then
-  echo "  batch already authorised, skipping"
-else
-  send zkism submit-messages "$ISM" "$(jqv "['proofs']['state_membership']['proof']")" \
-                                    "$(jqv "['proofs']['state_membership']['public_values']")"
+# There is no queryable "already submitted for this root" flag here, and the obvious test -
+# "is some id still authorised" - is wrong, because verifying a message consumes its id. So
+# module's own rejection is the check: resubmitting the same batch is a no-op, not a failure.
+if ! send zkism submit-messages "$ISM" "$(jqv "['proofs']['state_membership']['proof']")" \
+                                       "$(jqv "['proofs']['state_membership']['public_values']")"
+then
+  case "$LAST_LOG" in
+    *"already submitted"*|*"already been submitted"*)
+      echo "  already submitted for this root, continuing"
+      ;;
+    *)
+      exit 1
+      ;;
+  esac
 fi
 
 echo "== deliver messages addressed to domain $LOCAL_DOMAIN =="

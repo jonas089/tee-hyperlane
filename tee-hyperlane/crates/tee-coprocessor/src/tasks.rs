@@ -79,18 +79,50 @@ pub async fn run_route(
     tick: Duration,
 ) {
     store.prepare(&route.name).ok();
+    let mut failures: u32 = 0;
+
     loop {
         match advance(&route, &store, &cpu).await {
-            Ok(Some(height)) => info!(route = %route.name, height, "batch delivered"),
-            Ok(None) => {}
-            // A failed tick is normal: the head may not have moved, an RPC may be down, or
-            // finality may not have caught up. The next tick re-reads the ISM state and
-            // starts over, so nothing accumulates.
-            Err(e) => warn!(route = %route.name, error = %e, "tick failed"),
+            Ok(Some(height)) => {
+                failures = 0;
+                info!(route = %route.name, height, "batch delivered");
+            }
+            Ok(None) => failures = 0,
+            // Most failures are transient: the head has not moved, an RPC is down, finality
+            // has not caught up. A few are not, and a batch that can never succeed would
+            // otherwise retry every tick forever. Backing off keeps the log readable and the
+            // gas estimation calls rare, while still reporting every attempt.
+            Err(e) => {
+                failures = failures.saturating_add(1);
+                warn!(
+                    route = %route.name,
+                    error = %e,
+                    consecutive_failures = failures,
+                    retry_in_secs = backoff(tick, failures).as_secs(),
+                    "tick failed"
+                );
+            }
         }
-        tokio::time::sleep(tick).await;
+        tokio::time::sleep(backoff(tick, failures)).await;
     }
 }
+
+/// Wait before the next attempt: the normal tick while healthy, doubling per consecutive
+/// failure up to a ceiling. The ceiling matters more than the curve - a route that is broken
+/// should still notice within the hour when whatever broke it is fixed.
+fn backoff(tick: Duration, failures: u32) -> Duration {
+    if failures == 0 {
+        return tick;
+    }
+    let doublings = failures.min(MAX_BACKOFF_DOUBLINGS);
+    // The ceiling is never below the normal cadence: backing off must not make a route retry
+    // sooner than it would have while healthy.
+    let ceiling = MAX_BACKOFF.max(tick);
+    tick.saturating_mul(1 << doublings).min(ceiling)
+}
+
+const MAX_BACKOFF_DOUBLINGS: u32 = 8;
+const MAX_BACKOFF: Duration = Duration::from_secs(30 * 60);
 
 /// One pass. Returns the height delivered, or `None` when there was nothing to do.
 ///
@@ -250,4 +282,26 @@ fn elf_dir() -> String {
 
 fn path_string(path: &std::path::Path) -> String {
     path.to_string_lossy().into_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn backoff_grows_then_stops() {
+        let tick = Duration::from_secs(120);
+        assert_eq!(backoff(tick, 0), tick, "a healthy route keeps its normal cadence");
+        assert_eq!(backoff(tick, 1), Duration::from_secs(240));
+        assert_eq!(backoff(tick, 3), Duration::from_secs(960));
+
+        // Capped, so a route broken overnight still retries within the hour once it is fixed.
+        assert_eq!(backoff(tick, 20), MAX_BACKOFF);
+    }
+
+    #[test]
+    fn a_long_tick_is_never_shortened_by_backing_off() {
+        let tick = Duration::from_secs(45 * 60);
+        assert_eq!(backoff(tick, 5), tick.max(MAX_BACKOFF));
+    }
 }

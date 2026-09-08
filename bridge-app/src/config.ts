@@ -29,6 +29,7 @@ export interface CosmosChain {
   bech32Prefix: string;
   denom: string;
   mailboxId: string;
+  igpId: string;
   ismId: string;
 }
 
@@ -82,6 +83,8 @@ export const CHAINS: Record<ChainId, Chain> = {
     bech32Prefix: "celestia",
     denom: "utia",
     mailboxId: "0x68797065726c616e650000000000000000000000000000000000000000000000",
+    /// The paymaster a Celestia-origin transfer pays, quoted live before sending.
+    igpId: "0x726f757465725f706f73745f6469737061746368000000040000000000000002",
     ismId: "0x726f757465725f69736d000000000000000000000000002a0000000000000001",
   },
 };
@@ -103,6 +106,9 @@ export const ROUTERS: Record<TokenId, Partial<Record<ChainId, string>>> = {
 };
 
 export const DECIMALS: Record<TokenId, number> = { TIA: 6, USDC: 6 };
+
+/// Gas each warp router is enrolled with, and therefore what the paymaster quotes against.
+export const REMOTE_ROUTER_GAS = 50000;
 
 /// What each token is called in Celestia's bank module. On the EVM side the router *is* the
 /// ERC20, so its address is enough and there is nothing to name here.

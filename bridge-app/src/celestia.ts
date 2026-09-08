@@ -90,6 +90,8 @@ export async function sendFromCelestia(opts: {
   recipient: string;
   amount: bigint;
   sender: string;
+  /// The live quote, so the ceiling is set against what delivery actually costs today.
+  quotedFee: bigint;
 }): Promise<string> {
   if (!window.keplr) throw new Error("Keplr is not installed");
   const signer = window.getOfflineSigner!(opts.chain.chainId);
@@ -108,7 +110,10 @@ export async function sendFromCelestia(opts: {
       amount: opts.amount.toString(),
       // The IGP quote is paid out of this, so it has to cover the destination's gas. The
       // relayer refunds nothing, so quoting high only costs the sender.
-      maxFee: { denom: opts.chain.denom, amount: MAX_INTERCHAIN_FEE_UTIA },
+      maxFee: {
+        denom: opts.chain.denom,
+        amount: (opts.quotedFee * FEE_CEILING_MULTIPLE).toString(),
+      },
     } satisfies RemoteTransfer,
   };
 
@@ -142,8 +147,12 @@ export async function messageIdFromCelestiaTx(
   return null;
 }
 
-/// What a sender is willing to pay the IGP. The oracle keeps the real quote near 1 TIA for
-/// Sepolia and well under that for the L2s; this is the ceiling, not the price.
-const MAX_INTERCHAIN_FEE_UTIA = "2000000";
+/// What a sender is willing to pay the IGP, as a multiple of the live quote.
+///
+/// A ceiling, not the price: the module charges the quote and this only bounds it. It has to
+/// leave real headroom, because the oracle repushes hourly and gas can move between the quote
+/// the page showed and the block the transfer lands in. A fixed number is the wrong shape -
+/// 2 TIA looked generous against a 1.27 TIA Sepolia quote until gas rose.
+const FEE_CEILING_MULTIPLE = 4n;
 
 export { DECIMALS };

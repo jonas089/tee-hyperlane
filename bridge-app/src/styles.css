@@ -112,13 +112,20 @@ body {
   font-weight: 600;
 }
 
+/* The native dropdown arrow is drawn outside the padding box, so on a pill it sits past the
+   rounded edge. Suppressing it and painting our own keeps the glyph inside the shape. */
 .token-select, .chain-select {
+  appearance: none;
+  -webkit-appearance: none;
   border: none;
-  background: var(--field);
+  background-color: var(--field);
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' fill='none' stroke='%237d7d7d' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 0.8rem center;
   color: var(--ink);
   font: inherit;
   font-weight: 500;
-  padding: 0.5rem 0.75rem;
+  padding: 0.5rem 2.1rem 0.5rem 0.9rem;
   border-radius: 999px;
   cursor: pointer;
 }
@@ -320,3 +327,18 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0
 }
 
 .wait strong { color: var(--ink); }
+
+/* What the transfer costs and when it lands, before the sender commits to it. */
+.quote {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.3rem 1rem;
+  margin: 0.9rem 0 0;
+  padding: 0.7rem 0.85rem;
+  background: var(--field);
+  border-radius: 14px;
+  font-size: 0.83rem;
+}
+
+.quote dt { color: var(--muted); }
+.quote dd { margin: 0; text-align: right; font-weight: 500; font-variant-numeric: tabular-nums; }

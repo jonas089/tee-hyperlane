@@ -64,9 +64,11 @@ else
 fi
 
 echo "== submitMessages =="
-FIRST=$(jqv "['batch'][0]")
-if [ "$(cast call "$ISM" "authorizedMessages(bytes32)(bool)" "$FIRST" --rpc-url "$RPC")" = "true" ]; then
-  echo "  batch already authorised, skipping"
+# Ask whether a batch was submitted for this root, not whether some id is still authorised:
+# `verify` deletes each id as it is consumed, so a delivered batch looks unsubmitted and the
+# retry reverts with MessagesAlreadySubmitted.
+if [ "$(cast call "$ISM" "messagesSubmittedForRoot()(bool)" --rpc-url "$RPC")" = "true" ]; then
+  echo "  batch already submitted for this root, skipping"
 else
   send "$ISM" "submitMessages(bytes,bytes)" \
     "0x$(jqv "['proofs']['state_membership']['proof']")" \

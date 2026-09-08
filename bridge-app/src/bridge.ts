@@ -9,7 +9,14 @@
 // "Attested" is the step that distinguishes this bridge, so it carries the quote.
 
 import { encodeFunctionData, parseAbi, toHex } from "viem";
-import { CELESTIA_DENOM, CHAINS, DECIMALS, RELAYER_API, routerFor } from "./config";
+import {
+  CELESTIA_DENOM,
+  CHAINS,
+  DECIMALS,
+  RELAYER_API,
+  REMOTE_ROUTER_GAS,
+  routerFor,
+} from "./config";
 import type { Chain, ChainId, EvmChain, TokenId } from "./config";
 
 export type Step = "dispatched" | "attested" | "authorised" | "delivered";
@@ -189,6 +196,52 @@ export async function isDelivered(destination: ChainId, messageId: string): Prom
   if (!response.ok) return false;
   const body = await response.json();
   return Boolean(body.delivered);
+}
+
+/** What the sender pays the paymaster for delivery on the far side. */
+export interface BridgeFee {
+  amount: bigint;
+  symbol: string;
+  decimals: number;
+}
+
+/// Quoted from the chain rather than estimated, because the oracle moves it hourly and a
+/// stale number is the difference between a transfer that lands and one that reverts.
+export async function quoteBridgeFee(from: ChainId, to: ChainId): Promise<BridgeFee> {
+  const origin = CHAINS[from];
+  const destination = CHAINS[to];
+
+  if (origin.kind === "cosmos") {
+    const response = await fetch(
+      `${origin.rest}/hyperlane/v1/igps/${origin.igpId}/quote_gas_payment` +
+        `?destination_domain=${destination.domain}&gas_limit=${REMOTE_ROUTER_GAS}`,
+    );
+    if (!response.ok) throw new Error(`fee quote returned ${response.status}`);
+    const body = await response.json();
+    const amount = body?.gas_payment?.[0]?.amount ?? "0";
+    return { amount: BigInt(amount), symbol: "TIA", decimals: 6 };
+  }
+
+  const router = routerFor("TIA", origin.id) ?? routerFor("USDC", origin.id);
+  if (!router) throw new Error(`no router on ${origin.name}`);
+  const data = encodeFunctionData({
+    abi: ROUTER_ABI,
+    functionName: "quoteGasPayment",
+    args: [destination.domain],
+  });
+  const result = await ethCall(origin, router, data);
+  return { amount: BigInt(result), symbol: "ETH", decimals: 18 };
+}
+
+export function formatFee(fee: BridgeFee): string {
+  const unit = 10n ** BigInt(fee.decimals);
+  const whole = fee.amount / unit;
+  const fraction = (fee.amount % unit)
+    .toString()
+    .padStart(fee.decimals, "0")
+    .slice(0, 6)
+    .replace(/0+$/, "");
+  return `${fraction ? `${whole}.${fraction}` : whole} ${fee.symbol}`;
 }
 
 /** One route as the coprocessor currently sees it. */
