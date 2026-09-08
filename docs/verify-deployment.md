@@ -17,20 +17,20 @@ tar -xOf result manifest.json | jq -r '.[0].Config' # the image config digest
 That must print:
 
 ```
-15ae82b3a3bc02efa789fa573a1b5b749b5f2b35d589a8b4f608397a40d006ca.json
+8090132e21034d204b3ea9ecea7797d572d5aff558383e1a1b8c2ca1ac4b00fa.json
 ```
 
 **Two different digests are involved here and confusing them wastes an afternoon.** The
 number above is the *config* digest, which is content-addressed over the image itself. What
 `deploy/docker-compose.yml` pins is the *manifest* digest,
-`sha256:c092d13bb58e7342db73c0459e3592cbc71e4aa34147712019a93fc0baa20a36`, which covers the
+`sha256:77283ad03dd5f2dfbbbb718e4b08f63397ce829c48a4e3cc7b3635d18fe3e0d8`, which covers the
 manifest document the registry stores. They are not equal, and a `docker inspect --format
 '{{.Id}}'` will report one or the other depending on whether your Docker uses the containerd
 image store. Compare the config digest, which does not vary by client:
 
 ```sh
 docker manifest inspect \
-  ghcr.io/jonas089/tee-node@sha256:c092d13bb58e7342db73c0459e3592cbc71e4aa34147712019a93fc0baa20a36 \
+  ghcr.io/jonas089/tee-node@sha256:77283ad03dd5f2dfbbbb718e4b08f63397ce829c48a4e3cc7b3635d18fe3e0d8 \
   | jq -r .config.digest
 ```
 
@@ -76,13 +76,13 @@ what is pinned", which closes the same loop without reimplementing their encodin
 
 ```sh
 cd tee-circuit
-for app in 53989de9c1b33c19f108443e293689b0276b0dcd 9e28bfa7c27a463f2d420e3fcbe269fccb231d57; do
+for app in 16882cc467b8d243f0a98ba686d214b910902e02 f6231f5329c6c70a8236045504ab28a9b7e782bb; do
   cargo run -q -p circuit-tool -- identity \
     --url https://$app-8080.dstack-pha-prod9.phala.network | grep -v '^#' > /tmp/live-$app
 done
-diff /tmp/live-53989de9c1b33c19f108443e293689b0276b0dcd \
-     /tmp/live-9e28bfa7c27a463f2d420e3fcbe269fccb231d57
-diff /tmp/live-53989de9c1b33c19f108443e293689b0276b0dcd \
+diff /tmp/live-16882cc467b8d243f0a98ba686d214b910902e02 \
+     /tmp/live-f6231f5329c6c70a8236045504ab28a9b7e782bb
+diff /tmp/live-16882cc467b8d243f0a98ba686d214b910902e02 \
      <(grep -v '^#' tee-attestation/enclave-identity.toml)
 ```
 
@@ -91,7 +91,7 @@ Both diffs are empty today. The values are:
 ```
 mr_td         f06dfda6dce1cf904d4e2bab1dc370634cf95cefa2ceb2de2eee127c93826980…
 os_image_hash bd369a8c2f9edb2b52dad48ac8e0b32dde5f1337c423a506b48d07403a7d8033
-compose_hash  6650012606d4061e397c35ac8a835fdc2fe00fe13645673beee575e0bfbd5ce7
+compose_hash  47194353c4d3916c9127cf76b56b4fc37c89f86ae9e2c804b06b6d323727cdb3
 mr_kms        92a4bf40c88734b0e56f54b09b1f0fe4b8d3e230047e9298f491968ada8dedf8
 ```
 
@@ -117,9 +117,9 @@ cd tee-circuit && cargo run -p circuit-tool -- vkeys
 ```
 
 ```
-tee-state-transition  0x00bf2e770c4110122d5f716333961d2fa7be3924d42e13f202a6fac70075b267
-tee-state-membership  0x009ff5ec25d15fd0b010bc9586fb6980c47d905f6449fc8c1e8635c1db9abed0
-identity digest       1f59fa2255b98994abaf49f45bc2d95bd59789560edb9263f7e90976aa1c65f5
+tee-state-transition  0x00e5e40e1719333e8cad9517eb6c85ab1493318afaa8f49c4e857db125f357f5
+tee-state-membership  0x0063a92cdb6d180669c2534e2209a4c7cd77ed2b73c732e805e3f92d930e6df3
+identity digest       4d9d26b8b30cd1dcd0f56cb8df71465d2236abcae57723fd37691e4dc80d09e0
 ```
 
 The identity is compiled into the guests, so a stale ELF yields stale vkeys with no error
