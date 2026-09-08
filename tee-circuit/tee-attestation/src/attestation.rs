@@ -31,7 +31,22 @@ use dcap_qvl::QuoteCollateralV3;
 /// The anchor is `attested_at`, not the origin head. An optimistic rollup's confirmed head is
 /// old by design, so bounding against it would reject every honest L2 proof while doing
 /// nothing extra for safety.
-pub const MAX_QUOTE_SKEW_SECS: u64 = 30 * 60;
+///
+/// A day, not the half hour this used to be. The rewind this guards against is bounded by
+/// `now >= attested_at`, which is a separate check and unaffected by the size of this window;
+/// widening it only allows more time to pass between minting a quote and proving it. Two
+/// things made half an hour unworkable. `attested_at` is a *finalized* block's timestamp, so
+/// it already trails wall clock by twelve to fifteen minutes before any work starts, and a
+/// Groth16 proof on CPU takes an hour and a half while routes share one prover - so every
+/// route queued behind another expired before it could be proved, and the guest's assertion
+/// took the whole process down with it.
+///
+/// Staleness is better bounded where it can be changed without new vkeys: `TeeIsm` refuses a
+/// state older than `maxStateAge`, which is set to a day. Celestia's `x/zkism` has no such
+/// check, so for that destination this is the only bound, which is why it is a day rather
+/// than simply removed. An old quote cannot rewind a chain that moved on regardless: the
+/// transition rules require the height to advance and the root to change.
+pub const MAX_QUOTE_SKEW_SECS: u64 = 24 * 60 * 60;
 
 /// dstack's own runtime event type, outside the TCG-defined range.
 pub const DSTACK_RUNTIME_EVENT_TYPE: u32 = 0x0800_0001;
