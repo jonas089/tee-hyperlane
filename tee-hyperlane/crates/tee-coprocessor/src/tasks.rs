@@ -189,6 +189,7 @@ async fn advance(
         // Ethereum has confirmed.
         ChainConfig::EthereumL2 {
             l2_rpc,
+            logs_rpc,
             l1,
             rollup,
             l1_anchor_contract,
@@ -212,6 +213,7 @@ async fn advance(
                 beacon_rpc,
                 l1_execution,
                 l2_rpc,
+                logs_rpc.as_deref(),
                 &route.tee_node_url,
                 &trusted,
                 l1_anchor_contract,

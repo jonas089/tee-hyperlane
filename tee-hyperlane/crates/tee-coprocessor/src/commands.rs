@@ -143,6 +143,19 @@ async fn bootstrap_store(
     })
 }
 
+/// Wrap an EVM tree proof as the enclave's internally-tagged `TreeInput`, whose variant
+/// fields sit alongside `kind`.
+fn evm_tree_input(
+    proof: &tee_node::hyperlane_state::EvmTreeProof,
+) -> Result<serde_json::Value> {
+    let mut value = serde_json::to_value(proof)?;
+    value
+        .as_object_mut()
+        .context("tree proof must be an object")?
+        .insert("kind".into(), serde_json::json!("evm"));
+    Ok(value)
+}
+
 /// How far back to look for the checkpoint an L2-origin ISM's store was built from. Eight
 /// epochs is about 51 minutes, far longer than a tick.
 const SLOTS_PER_EPOCH: u64 = 32;
@@ -194,15 +207,12 @@ pub async fn attest_ethereum(
     );
 
     let tree_proof = exec.merkle_tree_proof(hook, base_slot, target_block).await?;
+    // Sent as a proof, not as a decoded tree: the enclave re-reads it under the ISM's own
+    // `state_root`, so it is the ISM that decides where the replay starts.
     let snapshot_proof = history
         .merkle_tree_proof(hook, base_slot, trusted.height)
         .await
         .context("reading the merkle tree at the trusted height; set `archive_rpc` if pruned")?;
-    let snapshot = tee_node::hyperlane_state::get_evm_merkle_tree(
-        alloy_primitives::B256::from(trusted.state_root),
-        base_slot,
-        &snapshot_proof,
-    )?;
 
     let dispatched = history
         .dispatched_messages(mailbox_address, hook, trusted.height + 1, target_block)
@@ -219,11 +229,8 @@ pub async fn attest_ethereum(
     tree_address[12..].copy_from_slice(hook.as_slice());
 
     // TreeInput is an internally-tagged enum, so the variant's fields sit alongside `kind`.
-    let mut tree_input = serde_json::to_value(&tree_proof)?;
-    tree_input
-        .as_object_mut()
-        .context("tree proof must be an object")?
-        .insert("kind".into(), serde_json::json!("evm"));
+    let tree_input = evm_tree_input(&tree_proof)?;
+    let snapshot_input = evm_tree_input(&snapshot_proof)?;
 
     let request = serde_json::json!({
         "protocol": tee_node::attest::PROTOCOL_VERSION,
@@ -234,7 +241,7 @@ pub async fn attest_ethereum(
             "updates": { "committee_updates": [], "finality_update": finality },
         },
         "tree": tree_input,
-        "tree_snapshot": snapshot,
+        "tree_snapshot": snapshot_input,
         "message_ids": dispatched.iter().map(|d| d.message_id).collect::<Vec<_>>(),
         "merkle_tree_address": tree_address,
     });
@@ -403,6 +410,7 @@ pub async fn attest_l2(
     beacon: &str,
     l1_execution: &str,
     l2_archive: &str,
+    logs_rpc: Option<&str>,
     enclave_url: &str,
     trusted_state_hex: &str,
     anchor: &str,
@@ -430,7 +438,7 @@ pub async fn attest_l2(
         .block_number();
 
     let l1 = ExecutionReader::new(l1_execution);
-    let l2 = ExecutionReader::new(l2_archive);
+    let l2 = ExecutionReader::new(l2_archive).with_logs_rpc(logs_rpc);
 
     let l1_state_root: alloy_primitives::B256 = l1
         .call(
@@ -459,12 +467,10 @@ pub async fn attest_l2(
     let mailbox_address: alloy_primitives::Address = mailbox.parse()?;
 
     let tree_proof = l2.merkle_tree_proof(hook, base_slot, l2_root.height).await?;
-    let snapshot_proof = l2.merkle_tree_proof(hook, base_slot, trusted.height).await?;
-    let snapshot = tee_node::hyperlane_state::get_evm_merkle_tree(
-        alloy_primitives::B256::from(trusted.state_root),
-        base_slot,
-        &snapshot_proof,
-    )?;
+    let snapshot_proof = l2
+        .merkle_tree_proof(hook, base_slot, trusted.height)
+        .await
+        .context("reading the merkle tree at the trusted height; set `archive_rpc` if pruned")?;
 
     let dispatched = l2
         .dispatched_messages(mailbox_address, hook, trusted.height + 1, l2_root.height)
@@ -482,11 +488,8 @@ pub async fn attest_l2(
     let mut tree_address = [0u8; 32];
     tree_address[12..].copy_from_slice(hook.as_slice());
 
-    let mut tree_input = serde_json::to_value(&tree_proof)?;
-    tree_input
-        .as_object_mut()
-        .context("tree proof must be an object")?
-        .insert("kind".into(), serde_json::json!("evm"));
+    let tree_input = evm_tree_input(&tree_proof)?;
+    let snapshot_input = evm_tree_input(&snapshot_proof)?;
 
     let request = serde_json::json!({
         "protocol": tee_node::attest::PROTOCOL_VERSION,
@@ -501,7 +504,7 @@ pub async fn attest_l2(
             "proof": root_proof,
         },
         "tree": tree_input,
-        "tree_snapshot": snapshot,
+        "tree_snapshot": snapshot_input,
         "message_ids": dispatched.iter().map(|d| d.message_id).collect::<Vec<_>>(),
         "merkle_tree_address": tree_address,
     });
@@ -573,7 +576,7 @@ pub async fn attest_celestia(
     // The tree as it stood at the ISM's trusted height, proven rather than assumed. The
     // enclave replays the new leaves onto it and checks the result against the tree it just
     // proved at the head, so a wrong snapshot cannot pass.
-    let (snapshot_bytes, _) = history
+    let (snapshot_bytes, snapshot_proof) = history
         .merkle_tree_hook_proof(hook_id, trusted.height)
         .await
         .context("reading the merkle tree at the trusted height; set `archive_rpc` if pruned")?;
@@ -585,6 +588,12 @@ pub async fn attest_celestia(
         inserted.len(),
         onchain.count
     );
+    let snapshot_input = serde_json::json!({
+        "kind": "celestia",
+        "hook_id": hook_id,
+        "hook_bytes": snapshot_bytes,
+        "proof": snapshot_proof,
+    });
 
     let request = serde_json::json!({
         "protocol": tee_node::attest::PROTOCOL_VERSION,
@@ -600,7 +609,7 @@ pub async fn attest_celestia(
             "hook_bytes": hook_bytes,
             "proof": proof,
         },
-        "tree_snapshot": snapshot,
+        "tree_snapshot": snapshot_input,
         "message_ids": inserted.iter().map(|m| m.message_id).collect::<Vec<_>>(),
         "merkle_tree_address": hook_id,
     });

@@ -90,6 +90,13 @@ pub enum ChainConfig {
         /// Must serve state at the *confirmed* L2 block, which is thousands of blocks behind
         /// head. Public nodes have pruned it, so this is an archive endpoint.
         l2_rpc: String,
+        /// Where to read this L2's dispatch logs, when `l2_rpc` will not serve the span.
+        ///
+        /// The archive endpoints available to us on a free plan cap `eth_getLogs` at ten
+        /// blocks, and a confirmed L2 head moves thousands at a time, so the two reads want
+        /// different providers. Both are untrusted, so mixing them costs nothing.
+        #[serde(default)]
+        logs_rpc: Option<String>,
         /// The Ethereum chain whose light client secures this one.
         l1: Box<ChainConfig>,
         /// Which rollup this is: `arbitrum` or `base`. They prove different things.

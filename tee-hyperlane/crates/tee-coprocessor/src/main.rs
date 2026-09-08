@@ -104,6 +104,9 @@ enum Command {
         /// Arbitrum Sepolia, archive.
         #[arg(long)]
         l2_archive: String,
+        /// Where to read dispatch logs, when the archive endpoint caps the range.
+        #[arg(long)]
+        logs_rpc: Option<String>,
         #[arg(long)]
         enclave: String,
         #[arg(long)]
@@ -299,6 +302,7 @@ async fn main() -> Result<()> {
             beacon,
             l1_execution,
             l2_archive,
+            logs_rpc,
             enclave,
             trusted_state,
             anchor,
@@ -312,6 +316,7 @@ async fn main() -> Result<()> {
                 &beacon,
                 &l1_execution,
                 &l2_archive,
+                logs_rpc.as_deref(),
                 &enclave,
                 &trusted_state,
                 &anchor,

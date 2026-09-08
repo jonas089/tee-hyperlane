@@ -40,7 +40,9 @@ use hyperlane_types::MerkleTree;
 /// the L2 anchor and its layout, the clock - and a caller still sending those would otherwise
 /// have them silently ignored, which looks like working. Requiring the version turns that
 /// into a refusal.
-pub const PROTOCOL_VERSION: u32 = 2;
+///
+/// 3 turns `tree_snapshot` from a decoded tree into a proof of one.
+pub const PROTOCOL_VERSION: u32 = 3;
 
 /// How the enclave is asked to advance one ISM by one step.
 #[derive(Serialize, Deserialize)]
@@ -54,8 +56,8 @@ pub struct AttestRequest {
     pub origin: OriginInput,
     /// Where the origin's Hyperlane tree lives, and the proof of its current contents.
     pub tree: TreeInput,
-    /// The tree as of `trusted_state`, replayed onto rather than trusted.
-    pub tree_snapshot: MerkleTree,
+    /// Proof of the same tree as of `trusted_state`, read under that state's own root.
+    pub tree_snapshot: TreeInput,
     /// Message ids claimed to be the new leaves, in insert order.
     pub message_ids: Vec<[u8; 32]>,
     /// Origin merkle tree hook, as the ISM records it.
@@ -156,17 +158,19 @@ pub fn build_attested_update(
     }
     let expected = request.trusted_state.origin_domain;
 
-    // Where the tree was read must be the address being attested. Both are supplied by the
-    // caller, and proving a tree is not enough on its own: anyone can deploy a merkle tree
-    // hook, fill it with ids of their choosing, and prove it honestly under the real state
-    // root. Only tying the proven address to the attested one makes that useless, because
-    // the destination ISM pins the address it will accept.
-    let proven_at = tree_address_of(&request.tree);
-    if proven_at != request.merkle_tree_address {
-        return Err(AttestError::WrongMerkleTree {
-            proven: hex::encode(proven_at),
-            attested: hex::encode(request.merkle_tree_address),
-        });
+    // Where a tree was read must be the address being attested. All three are supplied by
+    // the caller, and proving a tree is not enough on its own: anyone can deploy a merkle
+    // tree hook, fill it with ids of their choosing, and prove it honestly under the real
+    // state root. Only tying the proven address to the attested one makes that useless,
+    // because the destination ISM pins the address it will accept.
+    for tree in [&request.tree, &request.tree_snapshot] {
+        let proven_at = tree_address_of(tree);
+        if proven_at != request.merkle_tree_address {
+            return Err(AttestError::WrongMerkleTree {
+                proven: hex::encode(proven_at),
+                attested: hex::encode(request.merkle_tree_address),
+            });
+        }
     }
 
     let (root, store_commit, attested_at) =
@@ -177,17 +181,21 @@ pub fn build_attested_update(
         return Err(AttestError::WrongOrigin { got: origin.domain(), expected });
     }
 
-    let onchain_tree = match &request.tree {
-        TreeInput::Evm(proof) => {
-            let base_slot = crate::hyperlane_state::merkle_tree_base_slot(expected)
-                .ok_or(AttestError::NoTreeLayout { domain: expected })?;
-            get_evm_merkle_tree(root.state_root, base_slot, proof)?
-        }
-        TreeInput::Celestia { hook_id, hook_bytes, proof } => {
-            get_celestia_merkle_tree(root.state_root.0, *hook_id, hook_bytes, proof)?
-        }
-    };
-    verify_message_batch(request.tree_snapshot, &request.message_ids, &onchain_tree)?;
+    // Both ends of the replay are read from state the ISM already trusts: the snapshot under
+    // the root the ISM last accepted, the head under the root this update is about to move
+    // it to. Taking the snapshot on the caller's word instead would let it be chosen, and a
+    // Hyperlane tree is incremental, so every intermediate tree the origin ever held is a
+    // well-formed snapshot whose leaves are all public. A caller free to pick one picks the
+    // head minus one leaf, replays a single id, reproduces the head's count and root exactly,
+    // and every message in between is skipped for good - the root advances, that root's one
+    // batch slot is spent, and those ids are never attested by any later batch either. That
+    // is targeted censorship of one transfer with the bridge still looking healthy. Anchoring
+    // the snapshot to `prev_state` removes the choice: the replay now spans exactly the
+    // distance the ISM is moving.
+    let snapshot =
+        read_tree(&request.tree_snapshot, request.trusted_state.state_root, expected)?;
+    let onchain_tree = read_tree(&request.tree, root.state_root.0, expected)?;
+    verify_message_batch(snapshot, &request.message_ids, &onchain_tree)?;
 
     let new_state = IsmState {
         state_root: root.state_root.0,
@@ -211,6 +219,24 @@ pub fn build_attested_update(
 /// The 32 bytes the enclave asks dstack to sign into the quote.
 pub fn report_data_for(update: &AttestedUpdate) -> [u8; 32] {
     hash_attested_update(update)
+}
+
+/// Read a Hyperlane merkle tree out of a proof, under the state root it must verify against.
+fn read_tree(
+    tree: &TreeInput,
+    state_root: [u8; 32],
+    origin_domain: u32,
+) -> Result<MerkleTree, AttestError> {
+    match tree {
+        TreeInput::Evm(proof) => {
+            let base_slot = crate::hyperlane_state::merkle_tree_base_slot(origin_domain)
+                .ok_or(AttestError::NoTreeLayout { domain: origin_domain })?;
+            Ok(get_evm_merkle_tree(state_root.into(), base_slot, proof)?)
+        }
+        TreeInput::Celestia { hook_id, hook_bytes, proof } => {
+            Ok(get_celestia_merkle_tree(state_root, *hook_id, hook_bytes, proof)?)
+        }
+    }
 }
 
 /// The address a tree proof actually reads, as a Hyperlane 32-byte address.

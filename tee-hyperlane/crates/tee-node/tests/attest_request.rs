@@ -103,7 +103,7 @@ fn a_request_without_the_current_protocol_is_refused() {
         serde_json::from_value::<AttestRequest>(missing).is_err(),
         "a request with no protocol field must not parse"
     );
-    assert_eq!(PROTOCOL_VERSION, 2, "bump this when the request shape changes");
+    assert_eq!(PROTOCOL_VERSION, 3, "bump this when the request shape changes");
 }
 
 /// Each origin's tree layout is fixed, and an unknown origin gets no default: guessing would
@@ -130,9 +130,7 @@ fn an_empty_batch_is_refused() {
     assert!(matches!(err, HyperlaneStateError::EmptyBatch), "got {err}");
 }
 
-/// The counterpart: a batch has to be exactly the leaves added since the snapshot, so there
-/// is no partial batch to censor with either. Anything that verifies authorises the real
-/// messages, which is the relayer's job done for free.
+/// A batch has to be exactly the leaves added since the snapshot it was given.
 #[test]
 fn a_batch_must_reproduce_the_onchain_tree() {
     use hyperlane_types::{insert_leaf, MerkleTree};
@@ -147,4 +145,48 @@ fn a_batch_must_reproduce_the_onchain_tree() {
 
     let partial = verify_message_batch(snapshot, &[[1u8; 32]], &onchain).unwrap_err();
     assert!(matches!(partial, HyperlaneStateError::CountMismatch { .. }), "got {partial}");
+}
+
+/// The span check does not pin where a batch starts, and reading it as though it did was the
+/// hole that outlived the empty-batch fix.
+///
+/// A Hyperlane tree is incremental and every leaf that ever entered it is public, so anyone
+/// can rebuild the exact tree the origin held at any past count. Hand this function the head
+/// minus one leaf plus the single id that closes the gap and it passes - correctly, because
+/// that really is the distance between the two trees it was handed. What it cannot see is
+/// that the ISM stands at count 5, not 8, and that three transfers in between were dropped.
+/// Worse than the empty batch, because it is aimed: drop one victim, let the rest through,
+/// and the bridge looks healthy while that root's one batch slot is spent and those ids are
+/// never attested by any later batch either.
+///
+/// Nothing here can catch it, and the fix is not to try. `build_attested_update` reads the
+/// snapshot out of `prev_state.state_root` rather than accepting one, so by the time the span
+/// is checked its start is the ISM's own position.
+#[test]
+fn the_span_check_alone_does_not_pin_where_a_batch_starts() {
+    use hyperlane_types::{insert_leaf, MerkleTree};
+    use tee_node::hyperlane_state::verify_message_batch;
+
+    let mut ism_stands_at = MerkleTree::default();
+    for i in 0..5u8 {
+        insert_leaf(&mut ism_stands_at, [i; 32]).unwrap();
+    }
+    let mut head = ism_stands_at;
+    let mut skipped = Vec::new();
+    for i in 5..8u8 {
+        insert_leaf(&mut head, [i; 32]).unwrap();
+        skipped.push([i; 32]);
+    }
+    let attacker_picks = head;
+    insert_leaf(&mut head, [8u8; 32]).unwrap();
+
+    assert!(
+        verify_message_batch(attacker_picks, &[[8u8; 32]], &head).is_ok(),
+        "the span check is satisfied by any real intermediate tree"
+    );
+    assert_eq!(skipped.len(), 3, "and those three ids are the ones nobody ever attests");
+
+    // The honest span from where the ISM actually stands carries all four.
+    let honest = [[5u8; 32], [6u8; 32], [7u8; 32], [8u8; 32]];
+    assert!(verify_message_batch(ism_stands_at, &honest, &head).is_ok());
 }

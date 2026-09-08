@@ -9,6 +9,7 @@ use anyhow::{Context, Result};
 use helios_consensus_core::consensus_spec::MainnetConsensusSpec;
 use helios_consensus_core::types::{Bootstrap, FinalityUpdate, Fork, Forks, Update};
 use serde::Deserialize;
+use tracing::debug;
 
 pub type Spec = MainnetConsensusSpec;
 
@@ -166,8 +167,21 @@ pub fn expected_current_slot(genesis_time: u64) -> u64 {
 /// fails the replay.
 pub struct ExecutionReader {
     rpc: String,
+    /// Where `eth_getLogs` goes, which is not always where everything else goes.
+    ///
+    /// State proofs at a confirmed L2 block need an archive node, and the archive nodes we
+    /// have free access to cap log queries far below the span a route has to sweep - Alchemy's
+    /// free tier allows ten blocks, and an L2 confirms thousands at a time. Splitting the two
+    /// lets each endpoint do the thing it is good at. Both are untrusted either way: logs only
+    /// say which messages to ask about, and the enclave rejects the batch if they are wrong.
+    logs_rpc: String,
     http: reqwest::Client,
 }
+
+/// Log-window bounds. The wide end is what a generous endpoint serves in one call; the narrow
+/// end is Alchemy's free tier, below which no provider we have seen goes.
+const MAX_LOG_WINDOW: u64 = 10_000;
+const MIN_LOG_WINDOW: u64 = 10;
 
 /// Hyperlane's `Dispatch(address,uint32,bytes32,bytes)`.
 const DISPATCH_TOPIC: &str =
@@ -186,19 +200,82 @@ pub struct EvmDispatch {
 
 impl ExecutionReader {
     pub fn new(rpc: &str) -> Self {
-        Self { rpc: rpc.to_string(), http: reqwest::Client::new() }
+        Self { rpc: rpc.to_string(), logs_rpc: rpc.to_string(), http: reqwest::Client::new() }
+    }
+
+    /// Send `eth_getLogs` somewhere other than the main endpoint.
+    pub fn with_logs_rpc(mut self, logs_rpc: Option<&str>) -> Self {
+        if let Some(url) = logs_rpc {
+            self.logs_rpc = url.to_string();
+        }
+        self
     }
 
     pub async fn call(&self, method: &str, params: serde_json::Value) -> Result<serde_json::Value> {
+        self.call_at(&self.rpc, method, params).await
+    }
+
+    async fn call_at(
+        &self,
+        rpc: &str,
+        method: &str,
+        params: serde_json::Value,
+    ) -> Result<serde_json::Value> {
         let body = serde_json::json!({
             "jsonrpc": "2.0", "id": 1, "method": method, "params": params
         });
         let response: serde_json::Value =
-            self.http.post(&self.rpc).json(&body).send().await?.json().await?;
+            self.http.post(rpc).json(&body).send().await?.json().await?;
         if let Some(err) = response.get("error") {
             anyhow::bail!("{method}: {err}");
         }
         Ok(response["result"].clone())
+    }
+
+    /// `eth_getLogs` over a span no endpoint will serve in one call.
+    ///
+    /// Providers cap the range and each states its own limit in prose, so the window is
+    /// discovered rather than configured: start wide, halve on any failure, and once a window
+    /// succeeds keep it for the rest of the sweep. A route resuming after an outage, or an L2
+    /// route whose confirmed head jumps thousands of blocks, has to cross the whole span or it
+    /// silently drops the messages in the part it skipped - so a range that will not narrow
+    /// far enough is an error, never a short result.
+    async fn get_logs(
+        &self,
+        address: alloy_primitives::Address,
+        topic: &str,
+        from_block: u64,
+        to_block: u64,
+    ) -> Result<Vec<serde_json::Value>> {
+        let mut window = MAX_LOG_WINDOW;
+        let mut out = Vec::new();
+        let mut cursor = from_block;
+        while cursor <= to_block {
+            let end = (cursor + window - 1).min(to_block);
+            let params = serde_json::json!([{
+                "address": address,
+                "topics": [topic],
+                "fromBlock": format!("0x{cursor:x}"),
+                "toBlock": format!("0x{end:x}"),
+            }]);
+            match self.call_at(&self.logs_rpc, "eth_getLogs", params).await {
+                Ok(result) => {
+                    out.extend(
+                        result.as_array().context("eth_getLogs did not return an array")?.clone(),
+                    );
+                    cursor = end + 1;
+                }
+                Err(e) => {
+                    anyhow::ensure!(
+                        window > MIN_LOG_WINDOW,
+                        "eth_getLogs refuses even {MIN_LOG_WINDOW} blocks at {cursor}: {e}"
+                    );
+                    window = (window / 4).max(MIN_LOG_WINDOW);
+                    debug!(window, block = cursor, "narrowing the log window");
+                }
+            }
+        }
+        Ok(out)
     }
 
     /// Prove the merkle tree hook's 33 storage slots at `block`.
@@ -251,21 +328,12 @@ impl ExecutionReader {
         from_block: u64,
         to_block: u64,
     ) -> Result<Vec<EvmDispatch>> {
-        let range = |address, topic| {
-            serde_json::json!([{
-                "address": address,
-                "topics": [topic],
-                "fromBlock": format!("0x{from_block:x}"),
-                "toBlock": format!("0x{to_block:x}"),
-            }])
-        };
-
-        let dispatches = self.call("eth_getLogs", range(mailbox, DISPATCH_TOPIC)).await?;
-        let inserts = self.call("eth_getLogs", range(hook, INSERTED_TOPIC)).await?;
+        let dispatches = self.get_logs(mailbox, DISPATCH_TOPIC, from_block, to_block).await?;
+        let inserts = self.get_logs(hook, INSERTED_TOPIC, from_block, to_block).await?;
 
         // Dispatch carries the message as an ABI-encoded `bytes`: offset, length, payload.
         let mut messages: Vec<Vec<u8>> = Vec::new();
-        for log in dispatches.as_array().context("dispatch logs")? {
+        for log in &dispatches {
             let data = hex::decode(log["data"].as_str().context("data")?.trim_start_matches("0x"))?;
             anyhow::ensure!(data.len() >= 64, "dispatch log too short");
             let len = u64::from_be_bytes(data[56..64].try_into()?) as usize;
@@ -273,7 +341,7 @@ impl ExecutionReader {
         }
 
         let mut out = Vec::new();
-        for log in inserts.as_array().context("insert logs")? {
+        for log in &inserts {
             let data = hex::decode(log["data"].as_str().context("data")?.trim_start_matches("0x"))?;
             anyhow::ensure!(data.len() >= 64, "insert log too short");
             let message_id: [u8; 32] = data[..32].try_into()?;
