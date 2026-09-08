@@ -24,7 +24,13 @@ import {
 } from "./bridge";
 import type { BridgeFee, RouteStatus, Step, Transfer } from "./bridge";
 import { messageIdFromCelestiaTx, sendFromCelestia } from "./celestia";
-import { connectKeplr, connectMetaMask, walletFor } from "./wallets";
+import {
+  connectKeplr,
+  connectMetaMask,
+  restoreKeplr,
+  restoreMetaMask,
+  walletFor,
+} from "./wallets";
 import type { Account } from "./wallets";
 
 /// Every route has Celestia on one side. The bridge is a hub, not a mesh: each EVM chain's
@@ -58,6 +64,21 @@ export default function App() {
   const [sending, setSending] = useState(false);
 
   useEffect(() => saveTransfers(transfers), [transfers]);
+
+  // Pick up wallets this browser already authorised, so a reload does not look logged out.
+  // Silent by construction: neither call prompts, and both return nothing if never connected.
+  useEffect(() => {
+    let current = true;
+    restoreMetaMask(CHAINS.sepolia as EvmChain).then((account) => {
+      if (current && account) setEvm(account);
+    });
+    restoreKeplr(CHAINS.celestia as CosmosChain).then((account) => {
+      if (current && account) setCosmos(account);
+    });
+    return () => {
+      current = false;
+    };
+  }, []);
 
   const from: ChainId = outbound ? "celestia" : counterparty;
   const to: ChainId = outbound ? counterparty : "celestia";

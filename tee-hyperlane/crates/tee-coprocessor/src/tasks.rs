@@ -243,12 +243,15 @@ async fn advance(
     .await?;
 
     let height = submit_and_file(route, store, &proved)?;
-    let _ = std::fs::remove_file(&attestation);
-
     Ok(Some(height))
 }
 
-/// Submit a proved batch and move it into the finished directory, where the API serves it.
+/// Submit a proved batch, move it into the finished directory where the API serves it, and
+/// clear the staging area.
+///
+/// Clearing matters for more than tidiness: a leftover `attestation.json` is what the status
+/// endpoint reads to say a route is proving, so one left behind reports a finished batch as
+/// still in flight.
 fn submit_and_file(route: &RouteConfig, store: &ProofStore, proved: &Path) -> Result<u64> {
     Destination::new(route.destination.clone(), route.ism_id.clone()).submit(proved)?;
 
@@ -259,6 +262,7 @@ fn submit_and_file(route: &RouteConfig, store: &ProofStore, proved: &Path) -> Re
         .unwrap_or_default();
 
     std::fs::rename(proved, store.path_for(&route.name, height))?;
+    let _ = std::fs::remove_file(store.staging(&route.name, "attestation.json"));
     Ok(height)
 }
 

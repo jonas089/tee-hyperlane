@@ -23,7 +23,65 @@ export async function connectMetaMask(chain: EvmChain): Promise<Account> {
   if (!window.ethereum) throw new Error("MetaMask is not installed");
   const [address] = await window.ethereum.request({ method: "eth_requestAccounts" });
   await switchEvmChain(chain);
+  remember(EVM_CONNECTED);
   return { address, chain };
+}
+
+/// Reconnect a wallet the browser has already authorised, without prompting.
+///
+/// `eth_requestAccounts` opens the wallet; `eth_accounts` does not, and returns empty unless
+/// this origin is already approved. So a reload restores the session silently, and someone
+/// who never connected is left alone.
+export async function restoreMetaMask(chain: EvmChain): Promise<Account | null> {
+  if (!window.ethereum || !recalled(EVM_CONNECTED)) return null;
+  try {
+    const accounts: string[] = await window.ethereum.request({ method: "eth_accounts" });
+    if (!accounts?.length) return null;
+    return { address: accounts[0], chain };
+  } catch {
+    return null;
+  }
+}
+
+export async function restoreKeplr(chain: CosmosChain): Promise<Account | null> {
+  if (!window.keplr || !recalled(COSMOS_CONNECTED)) return null;
+  try {
+    // Already-granted permission makes this silent; a revoked one throws and we stay logged out.
+    await window.keplr.enable(chain.chainId);
+    const signer = window.getOfflineSigner!(chain.chainId);
+    const [account] = await signer.getAccounts();
+    return account ? { address: account.address, chain } : null;
+  } catch {
+    return null;
+  }
+}
+
+export function forget(): void {
+  try {
+    localStorage.removeItem(EVM_CONNECTED);
+    localStorage.removeItem(COSMOS_CONNECTED);
+  } catch {
+    // A browser that refuses storage simply asks to connect again next time.
+  }
+}
+
+const EVM_CONNECTED = "tee-bridge-evm-connected";
+const COSMOS_CONNECTED = "tee-bridge-cosmos-connected";
+
+function remember(key: string): void {
+  try {
+    localStorage.setItem(key, "1");
+  } catch {
+    // Not fatal: the wallet still works, it just asks again after a reload.
+  }
+}
+
+function recalled(key: string): boolean {
+  try {
+    return localStorage.getItem(key) === "1";
+  } catch {
+    return false;
+  }
 }
 
 /** Switch, adding the network first if MetaMask does not know it (error 4902). */
@@ -62,6 +120,7 @@ export async function connectKeplr(chain: CosmosChain): Promise<Account> {
   }
   const signer = window.getOfflineSigner!(chain.chainId);
   const [account] = await signer.getAccounts();
+  remember(COSMOS_CONNECTED);
   return { address: account.address, chain };
 }
 

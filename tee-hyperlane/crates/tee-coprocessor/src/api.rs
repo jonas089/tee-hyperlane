@@ -198,6 +198,13 @@ async fn status(State(api): State<Api>) -> Json<Vec<RouteStatus>> {
 }
 
 fn read_route(api: &Api, route: &RouteConfig) -> RouteStatus {
+    let batches = api.recent_batches(&route.name);
+    // A staged attestation at a height already filed is a leftover from a finished batch, not
+    // work in progress. Reporting it would show the same block as both proven and proving.
+    let proving = api
+        .in_flight(&route.name)
+        .filter(|staged| !batches.iter().any(|done| done.height == staged.height));
+
     let mut status = RouteStatus {
         name: route.name.clone(),
         origin: route.origin.domain(),
@@ -206,8 +213,8 @@ fn read_route(api: &Api, route: &RouteConfig) -> RouteStatus {
         height: None,
         timestamp: None,
         state_root: None,
-        batches: api.recent_batches(&route.name),
-        proving: api.in_flight(&route.name),
+        batches,
+        proving,
         origin_head: read_origin_head(&route.origin),
         error: None,
     };
