@@ -9,7 +9,7 @@ license = "Apache-2.0"
 
 [workspace.dependencies]
 hyperlane-types = { path = "crates/hyperlane-types" }
-tee-attestation = { path = "../tee-circuit/crates/tee-attestation" }
+tee-attestation = { path = "../tee-circuit/tee-attestation" }
 tee-node = { path = "crates/tee-node" }
 tee-coprocessor = { path = "crates/tee-coprocessor" }
 

@@ -119,6 +119,8 @@ pub enum AttestError {
     CelestiaState(#[from] CelestiaStateError),
     #[error("an L2 origin must be derived from an Ethereum light client")]
     L2NeedsEthereum,
+    #[error("tree proven at 0x{proven} but 0x{attested} was attested")]
+    WrongMerkleTree { proven: String, attested: String },
 }
 
 /// Verify everything in the request and produce the update to be attested.
@@ -134,6 +136,19 @@ pub fn build_attested_update(
     let origin = origin_of(&request.origin);
     if origin.domain() != expected {
         return Err(AttestError::WrongOrigin { got: origin.domain(), expected });
+    }
+
+    // Where the tree was read must be the address being attested. Both are supplied by the
+    // caller, and proving a tree is not enough on its own: anyone can deploy a merkle tree
+    // hook, fill it with ids of their choosing, and prove it honestly under the real state
+    // root. Only tying the proven address to the attested one makes that useless, because
+    // the destination ISM pins the address it will accept.
+    let proven_at = tree_address_of(&request.tree);
+    if proven_at != request.merkle_tree_address {
+        return Err(AttestError::WrongMerkleTree {
+            proven: hex::encode(proven_at),
+            attested: hex::encode(request.merkle_tree_address),
+        });
     }
 
     let onchain_tree = match &request.tree {
@@ -165,6 +180,21 @@ pub fn build_attested_update(
 /// The 32 bytes the enclave asks dstack to sign into the quote.
 pub fn report_data_for(update: &AttestedUpdate) -> [u8; 32] {
     hash_attested_update(update)
+}
+
+/// The address a tree proof actually reads, as a Hyperlane 32-byte address.
+///
+/// EVM addresses are 20 bytes and Hyperlane left-pads them; Celestia's hook ids are already
+/// 32 bytes.
+pub fn tree_address_of(tree: &TreeInput) -> [u8; 32] {
+    match tree {
+        TreeInput::Evm(proof) => {
+            let mut padded = [0u8; 32];
+            padded[12..].copy_from_slice(proof.merkle_tree_hook.as_slice());
+            padded
+        }
+        TreeInput::Celestia { hook_id, .. } => *hook_id,
+    }
 }
 
 fn origin_of(input: &OriginInput) -> Origin {

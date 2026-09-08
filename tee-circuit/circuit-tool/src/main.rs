@@ -249,7 +249,7 @@ fn identity(url: &str, write: bool) -> Result<()> {
 
     if write {
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../crates/tee-attestation/enclave-identity.toml");
+            .join("../tee-attestation/enclave-identity.toml");
         std::fs::write(&path, &toml)?;
         println!("wrote {}", path.display());
         println!(

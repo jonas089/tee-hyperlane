@@ -160,7 +160,7 @@ enclave exists.
 1. Build and publish the `tee-node` image; pin its digest in `docker-compose.yml`.
 2. Deploy two CVMs (`tdx.small` is enough - the enclave is a verifier, not a prover).
 3. `GET /policy` on one of them, write the measurements into
-   `tee-circuit/crates/tee-attestation/enclave-identity.toml`, set
+   `tee-circuit/tee-attestation/enclave-identity.toml`, set
    `require_enclave = true`, rebuild the circuits.
 4. Deploy Hyperlane core on Mocha, then the warp routes.
 5. Deploy `TeeIsm.sol` on Sepolia and point the warp routers at it.

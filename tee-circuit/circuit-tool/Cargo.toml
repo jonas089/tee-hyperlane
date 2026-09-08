@@ -5,7 +5,7 @@ edition.workspace = true
 publish = false
 
 [dependencies]
-tee-attestation = { path = "../crates/tee-attestation" }
+tee-attestation = { path = "../tee-attestation" }
 anyhow = "1.0"
 clap = { version = "4", features = ["derive"] }
 dcap-qvl.workspace = true

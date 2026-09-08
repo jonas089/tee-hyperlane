@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/tee-attestation", "circuit-tool"]
+members = ["tee-attestation", "circuit-tool"]
 
 [workspace.package]
 version = "0.1.0"
@@ -8,7 +8,7 @@ edition = "2021"
 license = "Apache-2.0"
 
 [workspace.dependencies]
-tee-attestation = { path = "crates/tee-attestation" }
+tee-attestation = { path = "tee-attestation" }
 
 sha2 = "0.10.9"
 serde = { version = "1.0", features = ["derive"] }
