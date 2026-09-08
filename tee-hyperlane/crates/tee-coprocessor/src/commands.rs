@@ -7,7 +7,7 @@
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use tracing::info;
+use tracing::{debug, info};
 
 use crate::config::Config;
 use crate::ethereum::SECONDS_PER_SLOT;
@@ -253,7 +253,7 @@ pub async fn attest_ethereum(
             "messages": dispatched.iter().map(|d| hex::encode(&d.message)).collect::<Vec<_>>(),
         });
         std::fs::write(&path, serde_json::to_vec_pretty(&record)?)?;
-        println!("wrote {path}");
+        debug!(path, "wrote attestation");
     }
     Ok(())
 }
@@ -520,7 +520,7 @@ pub async fn attest_l2(
             "messages": dispatched.iter().map(|d| hex::encode(&d.message)).collect::<Vec<_>>(),
         });
         std::fs::write(&path, serde_json::to_vec_pretty(&record)?)?;
-        println!("wrote {path}");
+        debug!(path, "wrote attestation");
     }
     Ok(())
 }
@@ -620,7 +620,7 @@ pub async fn attest_celestia(
             "messages": inserted.iter().map(|m| hex::encode(&m.message)).collect::<Vec<_>>(),
         });
         std::fs::write(&path, serde_json::to_vec_pretty(&record)?)?;
-        println!("wrote {path}");
+        debug!(path, "wrote attestation");
     }
     Ok(())
 }
@@ -800,7 +800,7 @@ pub async fn prove_for_route(
         .into();
 
     std::fs::write(out, serde_json::to_vec_pretty(&record)?)?;
-    println!("wrote {out}");
+    info!(route, height = update.new_state.height, "batch proved and written");
     Ok(())
 }
 

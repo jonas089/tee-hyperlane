@@ -226,7 +226,14 @@ enum Command {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt::init();
+    // Default to info, not the ERROR that `fmt::init()` picks when RUST_LOG is unset - which
+    // silently drops every line this service logs about what it is doing.
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
+        .init();
     let cli = Cli::parse();
     // Bootstrapping happens before any routes exist, so it must not need a route file.
     let load = || Config::load(&cli.config);
