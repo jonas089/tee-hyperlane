@@ -17,6 +17,10 @@ pub struct Config {
     pub routes: Vec<RouteConfig>,
 }
 
+fn default_l2_base_slot() -> u64 {
+    151
+}
+
 fn default_tick_secs() -> u64 {
     60
 }
@@ -83,11 +87,18 @@ pub enum ChainConfig {
     /// Rides on an Ethereum light client rather than its own.
     EthereumL2 {
         domain: u32,
+        /// Must serve state at the *confirmed* L2 block, which is thousands of blocks behind
+        /// head. Public nodes have pruned it, so this is an archive endpoint.
         l2_rpc: String,
         /// The Ethereum chain whose light client secures this one.
         l1: Box<ChainConfig>,
-        /// Arbitrum RollupCore or Base AnchorStateRegistry.
+        /// Arbitrum's BoLD RollupCore, or Base's AnchorStateRegistry.
         l1_anchor_contract: String,
+        mailbox: String,
+        merkle_tree_hook: String,
+        /// Both L2s' hooks use 151; Sepolia's canonical one uses 103.
+        #[serde(default = "default_l2_base_slot")]
+        merkle_tree_base_slot: u64,
     },
 }
 

@@ -13,3 +13,4 @@ pub mod enclave;
 pub mod ethereum;
 pub mod config;
 pub mod tasks;
+pub mod ui;

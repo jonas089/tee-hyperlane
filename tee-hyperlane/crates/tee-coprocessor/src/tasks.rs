@@ -153,8 +153,40 @@ async fn advance(
             )
             .await
         }
-        ChainConfig::EthereumL2 { .. } => {
-            anyhow::bail!("L2 origins are not relayed yet; their ISMs are not deployed")
+        // An L2 origin is Ethereum's flow plus the storage proof that says which L2 block
+        // Ethereum has confirmed. Only Arbitrum is wired; Base's gatherer is the same shape.
+        ChainConfig::EthereumL2 {
+            l2_rpc,
+            l1,
+            l1_anchor_contract,
+            mailbox,
+            merkle_tree_hook,
+            merkle_tree_base_slot,
+            ..
+        } => {
+            let ChainConfig::Ethereum { execution_rpc, beacon_rpc, archive_rpc, .. } = &**l1
+            else {
+                anyhow::bail!("an L2 origin's `l1` must be an Ethereum chain")
+            };
+            let beacon_rpc = beacon_rpc
+                .as_deref()
+                .context("an L2 origin's `l1` needs `beacon_rpc`")?;
+            // The rollup's storage is proven at the finalized L1 block, which is already
+            // outside a public node's window.
+            let l1_execution = archive_rpc.as_deref().unwrap_or(execution_rpc);
+            commands::attest_arbitrum(
+                beacon_rpc,
+                l1_execution,
+                l2_rpc,
+                &route.tee_node_url,
+                &trusted,
+                l1_anchor_contract,
+                merkle_tree_hook,
+                mailbox,
+                *merkle_tree_base_slot,
+                Some(path_string(&attestation)),
+            )
+            .await
         }
     };
 

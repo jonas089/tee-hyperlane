@@ -243,8 +243,6 @@ pub struct BaseOutputRootPreimage {
     pub state_root: B256,
     pub message_passer_storage_root: B256,
     pub latest_block_hash: B256,
-    pub l2_block_number: u64,
-    pub l2_timestamp: u64,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -256,10 +254,20 @@ pub struct BaseRootProof {
     pub account_proof: Vec<Bytes>,
     pub anchor_root_proof: Vec<Bytes>,
     pub preimage: BaseOutputRootPreimage,
+    /// RLP of the L2 block header, whose keccak is `preimage.latest_block_hash`.
+    ///
+    /// The output root commits to the block *hash*, not to its height or its time, so those
+    /// two cannot be read out of the preimage - a caller could put anything there and the
+    /// hash would still match. They come from the header the hash actually binds.
+    pub l2_header_rlp: Bytes,
 }
 
 #[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
 pub enum BaseError {
+    #[error("L2 header RLP hashes to {got}, but the output root committed to {expected}")]
+    HeaderHashMismatch { got: B256, expected: B256 },
+    #[error("L2 header RLP is malformed")]
+    MalformedHeader,
     #[error(transparent)]
     Mpt(#[from] MptError),
     #[error("output root preimage hashes to {got}, which L1 does not store at this slot")]
@@ -296,9 +304,18 @@ pub fn get_base_root(
     )
     .map_err(|_| BaseError::OutputRootMismatch { got: output_root })?;
 
+    let header = decode_l2_header(&proof.l2_header_rlp).map_err(|_| BaseError::MalformedHeader)?;
+    let got = keccak256(&proof.l2_header_rlp);
+    if got != proof.preimage.latest_block_hash {
+        return Err(BaseError::HeaderHashMismatch {
+            got,
+            expected: proof.preimage.latest_block_hash,
+        });
+    }
+
     Ok(AttestedRoot {
         state_root: proof.preimage.state_root,
-        height: proof.preimage.l2_block_number,
-        timestamp: proof.preimage.l2_timestamp,
+        height: header.number,
+        timestamp: header.timestamp,
     })
 }

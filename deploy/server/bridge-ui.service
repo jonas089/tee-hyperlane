@@ -1,0 +1,27 @@
+# The bridge UI, with the attestation API and Celestia's REST proxied onto one origin.
+#
+# Serving this in-process rather than behind nginx keeps a deployment to three binaries and
+# avoids fighting whatever else the host already serves on :80.
+[Unit]
+Description=TEE Bridge UI
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=bridge
+ExecStart=/opt/tee-hyperlane/bin/tee-hyperlane serve-ui \
+  --listen 0.0.0.0:3000 \
+  --dir /opt/bridge-app \
+  --api http://127.0.0.1:3001 \
+  --celestia-rest https://api-mocha.pops.one
+Restart=always
+RestartSec=10
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

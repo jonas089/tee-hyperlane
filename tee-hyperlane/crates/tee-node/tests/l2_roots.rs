@@ -147,6 +147,7 @@ struct BaseFixture {
     state_root: String,
     message_passer_storage_root: String,
     latest_block_hash: String,
+    header_rlp: String,
 }
 
 fn base_fixture() -> BaseFixture {
@@ -159,8 +160,6 @@ fn preimage(f: &BaseFixture) -> BaseOutputRootPreimage {
         state_root: h(&f.state_root),
         message_passer_storage_root: h(&f.message_passer_storage_root),
         latest_block_hash: h(&f.latest_block_hash),
-        l2_block_number: f.l2_block_number,
-        l2_timestamp: f.l2_timestamp,
     }
 }
 
@@ -204,14 +203,33 @@ fn the_output_root_binds_every_component() {
     assert_ne!(base, hash_output_root(&p), "version");
 }
 
-/// The block number and timestamp travel alongside the root rather than inside it, so they
-/// must not silently change what the root commits to.
+/// The output root commits to the block *hash* and not to its height or its time, which is
+/// exactly why neither may be taken from the preimage: a caller could put anything there and
+/// the root would still match. `get_base_root` reads both out of the header instead, and the
+/// header is bound by that hash.
+///
 #[test]
-fn block_metadata_is_not_part_of_the_output_root() {
+fn the_l2_header_supplies_base_height_and_time() {
     let f = base_fixture();
-    let base = hash_output_root(&preimage(&f));
-    let mut p = preimage(&f);
-    p.l2_block_number += 1;
-    p.l2_timestamp += 12;
-    assert_eq!(base, hash_output_root(&p));
+    let rlp = hex::decode(f.header_rlp.trim_start_matches("0x")).unwrap();
+
+    // The link that makes them trustworthy: this header is the one the root committed to.
+    assert_eq!(keccak256(&rlp), h(&f.latest_block_hash));
+
+    let header = decode_l2_header(&rlp).unwrap();
+    assert_eq!(header.number, f.l2_block_number);
+    assert_eq!(header.timestamp, f.l2_timestamp);
+    assert_eq!(header.state_root, h(&f.state_root));
+}
+
+/// A header from a different block cannot be substituted, even though the four values the
+/// output root commits to are unchanged - which is the whole reason height and time are read
+/// from the header rather than from the preimage.
+#[test]
+fn a_header_that_does_not_match_the_committed_hash_is_useless() {
+    let f = base_fixture();
+    let mut rlp = hex::decode(f.header_rlp.trim_start_matches("0x")).unwrap();
+    let last = rlp.len() - 1;
+    rlp[last] ^= 0x01;
+    assert_ne!(keccak256(&rlp), h(&f.latest_block_hash));
 }

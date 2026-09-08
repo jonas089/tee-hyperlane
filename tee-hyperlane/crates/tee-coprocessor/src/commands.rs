@@ -258,6 +258,222 @@ pub async fn attest_ethereum(
     Ok(())
 }
 
+/// Produce the genesis ISM state for an Arbitrum-origin ISM.
+///
+/// The anchor is the same weak-subjectivity checkpoint an Ethereum-origin ISM uses, because
+/// an L2 origin rides Ethereum's light client: the state carries *Ethereum's* store
+/// commitment, and the height and timestamp of the L2 block Ethereum has confirmed.
+pub async fn bootstrap_arbitrum(
+    beacon: &str,
+    l1_execution: &str,
+    l2_archive: &str,
+    rollup: &str,
+    checkpoint: Option<String>,
+    identity_digest: &str,
+) -> Result<()> {
+    use crate::arbitrum::get_arbitrum_root_proof;
+    use crate::ethereum::{EthereumReader, ExecutionReader};
+    use tee_node::origins::ethereum::{commit_ethereum_store, get_ethereum_root};
+    use tee_node::origins::ethereum_l2::{get_arbitrum_root, RollupLayout};
+
+    let beacon_reader = EthereumReader::new(beacon);
+    let config = beacon_reader.chain_config().await?;
+    let checkpoint = match checkpoint {
+        Some(explicit) => explicit,
+        None => beacon_reader.finalized_root().await?,
+    };
+    let store = bootstrap_store(&beacon_reader, &config, &checkpoint).await?;
+
+    let l1_block = get_ethereum_root(&store)?.height;
+    let l1 = ExecutionReader::new(l1_execution);
+    let l2 = ExecutionReader::new(l2_archive);
+    let proof = get_arbitrum_root_proof(
+        &l1,
+        &l2,
+        rollup.parse()?,
+        RollupLayout::ARBITRUM_SEPOLIA,
+        l1_block,
+    )
+    .await?;
+
+    let l1_state_root: alloy_primitives::B256 = l1
+        .call(
+            "eth_getBlockByNumber",
+            serde_json::json!([format!("0x{l1_block:x}"), false]),
+        )
+        .await?["stateRoot"]
+        .as_str()
+        .context("L1 block has no state root")?
+        .parse()?;
+    let head = get_arbitrum_root(l1_state_root, &proof)?;
+
+    let digest = hex::decode(identity_digest.trim_start_matches("0x"))?;
+    let state = tee_attestation::IsmState {
+        state_root: head.state_root.0,
+        origin_domain: tee_node::origins::Origin::Arbitrum.domain(),
+        height: head.height,
+        timestamp: head.timestamp,
+        lc_store_commit: commit_ethereum_store(&store),
+        identity_digest: digest
+            .as_slice()
+            .try_into()
+            .map_err(|_| anyhow::anyhow!("identity digest must be 32 bytes"))?,
+    };
+
+    println!("checkpoint         {checkpoint}");
+    println!("L1 block           {l1_block}");
+    println!("confirmed L2 block {}", state.height);
+    println!("timestamp          {}", state.timestamp);
+    println!("state root         0x{}", hex::encode(state.state_root));
+    println!();
+    println!("genesis state      0x{}", hex::encode(tee_attestation::encode_ism_state(&state)));
+    Ok(())
+}
+
+/// Gather one Arbitrum step and hand it to the enclave.
+///
+/// An L2 origin is Ethereum's flow with two extra links: the L1 storage proof that says which
+/// assertion Ethereum confirmed, and the L2 header that assertion commits to. The tree is
+/// then read under the L2 state root exactly as it is under Ethereum's.
+///
+/// The L2 reads need an archive endpoint. The confirmed assertion is thousands of L2 blocks
+/// behind head - that lag is the rollup's challenge window, not something to tune - and no
+/// public node keeps state that far back.
+#[allow(clippy::too_many_arguments)]
+pub async fn attest_arbitrum(
+    beacon: &str,
+    l1_execution: &str,
+    l2_archive: &str,
+    enclave_url: &str,
+    trusted_state_hex: &str,
+    rollup: &str,
+    merkle_tree_hook: &str,
+    mailbox: &str,
+    base_slot: u64,
+    out: Option<String>,
+) -> Result<()> {
+    use crate::arbitrum::get_arbitrum_root_proof;
+    use crate::enclave::EnclaveClient;
+    use crate::ethereum::{expected_current_slot, EthereumReader, ExecutionReader};
+    use tee_node::origins::ethereum_l2::{get_arbitrum_root, RollupLayout};
+
+    let trusted_raw = hex::decode(trusted_state_hex.trim_start_matches("0x"))?;
+    let trusted = tee_attestation::decode_ism_state(&trusted_raw)?;
+
+    let beacon_reader = EthereumReader::new(beacon);
+    let config = beacon_reader.chain_config().await?;
+    let (store, _checkpoint) =
+        rebuild_ethereum_store(&beacon_reader, &config, &trusted, None).await?;
+
+    let finality = beacon_reader.finality_update().await?;
+    let slot = expected_current_slot(config.genesis_time);
+    let l1_block = *finality
+        .finalized_header()
+        .execution()
+        .map_err(|_| anyhow::anyhow!("finalized header has no execution payload"))?
+        .block_number();
+
+    let l1 = ExecutionReader::new(l1_execution);
+    let l2 = ExecutionReader::new(l2_archive);
+
+    // Which L2 block Ethereum has confirmed, proven rather than asked for.
+    let root_proof = get_arbitrum_root_proof(
+        &l1,
+        &l2,
+        rollup.parse()?,
+        RollupLayout::ARBITRUM_SEPOLIA,
+        l1_block,
+    )
+    .await?;
+
+    // Deriving it here as well is not redundant: it is how this knows which L2 block to read
+    // the tree at, and a mismatch surfaces before minutes of proving rather than after.
+    let l1_state_root: alloy_primitives::B256 = l1
+        .call(
+            "eth_getBlockByNumber",
+            serde_json::json!([format!("0x{l1_block:x}"), false]),
+        )
+        .await?["stateRoot"]
+        .as_str()
+        .context("L1 block has no state root")?
+        .parse()?;
+    let l2_root = get_arbitrum_root(l1_state_root, &root_proof)?;
+
+    anyhow::ensure!(
+        l2_root.height > trusted.height,
+        "the confirmed L2 head {} has not passed the trusted height {}",
+        l2_root.height,
+        trusted.height
+    );
+
+    let hook: alloy_primitives::Address = merkle_tree_hook.parse()?;
+    let mailbox_address: alloy_primitives::Address = mailbox.parse()?;
+
+    let tree_proof = l2.merkle_tree_proof(hook, base_slot, l2_root.height).await?;
+    let snapshot_proof = l2.merkle_tree_proof(hook, base_slot, trusted.height).await?;
+    let snapshot = tee_node::hyperlane_state::get_evm_merkle_tree(
+        alloy_primitives::B256::from(trusted.state_root),
+        &snapshot_proof,
+    )?;
+
+    let dispatched = l2
+        .dispatched_messages(mailbox_address, hook, trusted.height + 1, l2_root.height)
+        .await?;
+    println!(
+        "confirmed L2 block {} | trusted {} | {} new leaves",
+        l2_root.height,
+        trusted.height,
+        dispatched.len()
+    );
+    anyhow::ensure!(!dispatched.is_empty(), "nothing to attest");
+
+    let mut tree_address = [0u8; 32];
+    tree_address[12..].copy_from_slice(hook.as_slice());
+
+    let mut tree_input = serde_json::to_value(&tree_proof)?;
+    tree_input
+        .as_object_mut()
+        .context("tree proof must be an object")?
+        .insert("kind".into(), serde_json::json!("evm"));
+
+    let request = serde_json::json!({
+        "trusted_state": hex::encode(&trusted_raw),
+        "origin": {
+            "chain": "arbitrum",
+            "ethereum": {
+                "chain": "ethereum",
+                "store": store,
+                "updates": { "committee_updates": [], "finality_update": finality },
+                "expected_current_slot": slot,
+            },
+            "proof": root_proof,
+        },
+        "tree": tree_input,
+        "tree_snapshot": snapshot,
+        "message_ids": dispatched.iter().map(|d| d.message_id).collect::<Vec<_>>(),
+        "merkle_tree_address": tree_address,
+    });
+
+    let attestation = EnclaveClient::new(enclave_url).attest(&request).await?;
+    println!("attested new state 0x{}", attestation.new_state);
+    println!("messages           {}", attestation.message_ids.len());
+
+    if let Some(path) = out {
+        let record = serde_json::json!({
+            "attestation": {
+                "quote": attestation.quote,
+                "event_log": attestation.event_log,
+                "payload": attestation.payload,
+                "new_state": attestation.new_state,
+            },
+            "messages": dispatched.iter().map(|d| hex::encode(&d.message)).collect::<Vec<_>>(),
+        });
+        std::fs::write(&path, serde_json::to_vec_pretty(&record)?)?;
+        println!("wrote {path}");
+    }
+    Ok(())
+}
+
 /// Gather one Celestia step and hand it to the enclave.
 pub async fn attest_celestia(
     rpc: &str,

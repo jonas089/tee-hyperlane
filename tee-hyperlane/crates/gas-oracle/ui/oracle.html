@@ -1,0 +1,186 @@
+<!doctype html>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Gas Oracle</title>
+<style>
+  :root {
+    --ink: #131313; --muted: #7d7d7d; --line: #e8e8e8;
+    --bg: #f4f4f5; --surface: #fff; --field: #f4f4f6; --accent: #fc42a0;
+    --track: #e6e6ea; --warn: #b25e00;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ink: #f5f5f5; --muted: #9b9b9b; --line: #2a2a2e;
+      --bg: #0d0d0f; --surface: #18181b; --field: #202024; --track: #2c2c31;
+      --warn: #e8a33d;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 15px/1.5 "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  main { max-width: 820px; margin: 0 auto; padding: 1.5rem 1rem 4rem; }
+  header { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; }
+  h1 { font-size: 1.1rem; margin: 0 0 0.2rem; letter-spacing: -0.01em; }
+  .lede { color: var(--muted); font-size: 0.84rem; margin: 0 0 1rem; }
+  .when { color: var(--muted); font-size: 0.8rem; text-align: right; font-variant-numeric: tabular-nums; }
+
+  /* How much of the interval has elapsed. The oracle pushes on a fixed clock, so this is a
+     real measurement rather than decoration. */
+  .countdown { margin-top: 0.4rem; width: 150px; }
+  .bar { height: 4px; border-radius: 999px; background: var(--track); overflow: hidden; }
+  .bar span {
+    display: block; height: 100%; border-radius: 999px; background: var(--accent);
+    width: 0; transition: width 1s linear;
+  }
+
+  h2.section { font-size: 0.95rem; margin: 1.6rem 0 0.2rem; }
+  .card {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 20px;
+    overflow: hidden; margin-bottom: 0.5rem;
+    opacity: 0; transform: translateY(6px);
+    animation: rise 0.45s cubic-bezier(0.22, 0.61, 0.36, 1) forwards;
+  }
+  @keyframes rise { to { opacity: 1; transform: none; } }
+
+  table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+  th, td { text-align: left; padding: 0.65rem 0.9rem; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 500; font-size: 0.78rem; }
+  tr:last-child td { border-bottom: none; }
+  td.num { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-variant-numeric: tabular-nums; }
+  tbody tr { transition: background 0.4s ease; }
+  tbody tr.changed { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+
+  .low { color: var(--warn); font-weight: 600; }
+  .err { color: #b42318; font-size: 0.82rem; }
+  .note { color: var(--muted); font-size: 0.8rem; }
+  .wrap { overflow-x: auto; }
+</style>
+<main>
+  <header>
+    <div>
+      <h1>Gas Oracle</h1>
+      <p class="lede">What a transfer is charged for gas on the other side.</p>
+    </div>
+    <div>
+      <div class="when" id="when"></div>
+      <div class="countdown"><div class="bar"><span id="tick"></span></div></div>
+    </div>
+  </header>
+
+  <h2 class="section">Funding</h2>
+  <p class="note">The accounts that pay for pushes and relaying.</p>
+  <div class="card wrap">
+    <table id="funds"><thead><tr>
+      <th>Chain</th><th>Account</th><th>Balance</th>
+    </tr></thead><tbody></tbody></table>
+  </div>
+
+  <h2 class="section">Live on chain</h2>
+  <p class="note">Read back from each chain, not remembered.</p>
+  <div class="card wrap">
+    <table id="onchain"><thead><tr>
+      <th>Paymaster</th><th>Quoting</th><th>Exchange rate</th><th>Gas price</th><th>Overhead</th>
+    </tr></thead><tbody></tbody></table>
+  </div>
+
+  <h2 class="section">Last round</h2>
+  <p class="note">The prices and gas those values were derived from.</p>
+  <div class="card wrap">
+    <table id="readings"><thead><tr>
+      <th>Route</th><th>Gas price</th><th>Local</th><th>Remote</th><th>Pushed</th>
+    </tr></thead><tbody></tbody></table>
+  </div>
+
+  <p class="note">
+    fee = gas &times; gas price &times; exchange rate / 10<sup>10</sup>, in the origin's own
+    token. The exchange rate folds in the decimal gap between the two chains' tokens.
+  </p>
+</main>
+<script>
+  const DOMAINS = {
+    1297040200: "Celestia mocha-5",
+    11155111: "Ethereum Sepolia",
+    421614: "Arbitrum Sepolia",
+    84532: "Base Sepolia",
+  };
+  const at = (t) =>
+    t ? new Date(t * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—";
+  const gwei = (wei) => (Number(wei) / 1e9).toFixed(4) + " gwei";
+  const usd = (n) => "$" + Number(n).toLocaleString(undefined, { maximumFractionDigits: 2 });
+  const short = (a) => (a ? a.slice(0, 10) + "…" + a.slice(-8) : "—");
+
+  // Anything under this is worth a second look before it stops the bridge.
+  const LOW = { TIA: 0.2, ETH: 0.005 };
+  const previous = {};
+
+  function fill(id, rows) {
+    const body = document.querySelector(`#${id} tbody`);
+    body.innerHTML = rows.join("") || `<tr><td colspan="6" class="note">Nothing yet.</td></tr>`;
+  }
+
+  // Flag a row whose numbers moved since the last poll, so a push is visible as it happens.
+  function mark(id, key, value) {
+    const changed = previous[key] !== undefined && previous[key] !== value;
+    previous[key] = value;
+    return changed ? "changed" : "";
+  }
+
+  let last = null, next = null;
+
+  async function refresh() {
+    let d;
+    try {
+      d = await (await fetch("/api/readings")).json();
+    } catch {
+      document.getElementById("when").textContent = "unreachable";
+      return;
+    }
+    last = d.lastRound;
+    next = d.nextRound;
+
+    fill("funds", (d.funds || []).map((f) => {
+      const low = !f.error && parseFloat(f.balance) < (LOW[f.symbol] ?? 0);
+      return `<tr class="${mark("funds", f.chain, f.balance)}">
+        <td>${f.chain}</td>
+        <td class="num">${short(f.address)}</td>
+        <td class="num ${low ? "low" : ""}">${f.error ? `<span class="err">${f.error}</span>` : `${f.balance} ${f.symbol}`}</td>
+      </tr>`;
+    }));
+
+    fill("onchain", (d.onchain || []).map((c) => `
+      <tr class="${mark("chain", c.chain + c.remote_domain, c.gas_price)}">
+        <td>${c.chain}</td>
+        <td>${DOMAINS[c.remote_domain] || c.remote_domain}</td>
+        <td class="num">${c.error ? "—" : c.token_exchange_rate}</td>
+        <td class="num">${c.error ? "—" : c.gas_price}</td>
+        <td class="num">${c.gas_overhead ?? "—"}</td>
+      </tr>${c.error ? `<tr><td colspan="5" class="err">${c.error}</td></tr>` : ""}`));
+
+    fill("readings", (d.readings || []).map((r) => `
+      <tr>
+        <td>${r.name}</td>
+        <td class="num">${gwei(r.gas_price_wei)}</td>
+        <td class="num">${usd(r.local_price_usd)}</td>
+        <td class="num">${usd(r.remote_price_usd)}</td>
+        <td class="num">${r.error ? `<span class="err">${r.error}</span>` : at(r.updated_at)}</td>
+      </tr>`));
+
+    document.getElementById("when").textContent = last
+      ? `last ${at(last)} · next ${at(next)}`
+      : "no round yet";
+  }
+
+  // The countdown moves every second; the data only needs polling occasionally.
+  function tick() {
+    if (!last || !next || next <= last) return;
+    const now = Date.now() / 1000;
+    const done = Math.min(1, Math.max(0, (now - last) / (next - last)));
+    document.getElementById("tick").style.width = (done * 100).toFixed(1) + "%";
+  }
+
+  refresh();
+  setInterval(refresh, 30000);
+  setInterval(tick, 1000);
+</script>

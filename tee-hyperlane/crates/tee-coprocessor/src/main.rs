@@ -88,6 +88,51 @@ enum Command {
         #[arg(long)]
         out: Option<String>,
     },
+    /// Attest one Arbitrum -> Celestia step.
+    ///
+    /// Needs an L2 archive endpoint: the confirmed assertion is thousands of L2 blocks behind
+    /// head - that is the rollup's challenge window - and no public node keeps state there.
+    AttestArbitrum {
+        #[arg(long, default_value = "https://ethereum-sepolia-beacon-api.publicnode.com")]
+        beacon: String,
+        /// L1 execution, archive: the rollup's storage is proven at the finalized L1 block.
+        #[arg(long, default_value = "https://rpc.sepolia.ethpandaops.io")]
+        l1_execution: String,
+        /// Arbitrum Sepolia, archive.
+        #[arg(long)]
+        l2_archive: String,
+        #[arg(long)]
+        enclave: String,
+        #[arg(long)]
+        trusted_state: String,
+        /// The live BoLD rollup, not the pre-BoLD one the canonical addresses lead to.
+        #[arg(long, default_value = "0x042B2E6C5E99d4c521bd49beeD5E99651D9B0Cf4")]
+        rollup: String,
+        #[arg(long, default_value = "0xAD34A66Bf6dB18E858F6B686557075568c6E031C")]
+        merkle_tree_hook: String,
+        #[arg(long, default_value = "0x598facE78a4302f11E3de0bee1894Da0b2Cb71F8")]
+        mailbox: String,
+        /// Deployment-specific: Arbitrum Sepolia's hook uses 151, Sepolia's canonical one 103.
+        #[arg(long, default_value_t = 151)]
+        base_slot: u64,
+        #[arg(long)]
+        out: Option<String>,
+    },
+    /// Produce the genesis ISM state for an Arbitrum-origin ISM.
+    BootstrapArbitrum {
+        #[arg(long, default_value = "https://ethereum-sepolia-beacon-api.publicnode.com")]
+        beacon: String,
+        #[arg(long, default_value = "https://rpc.sepolia.ethpandaops.io")]
+        l1_execution: String,
+        #[arg(long)]
+        l2_archive: String,
+        #[arg(long, default_value = "0x042B2E6C5E99d4c521bd49beeD5E99651D9B0Cf4")]
+        rollup: String,
+        #[arg(long)]
+        checkpoint: Option<String>,
+        #[arg(long)]
+        identity_digest: String,
+    },
     /// Attest one Celestia -> EVM step: gather, ask the enclave, print the result.
     ///
     /// Everything gathered here is untrusted; the enclave re-verifies all of it, so a
@@ -150,6 +195,18 @@ enum Command {
         listen: String,
         #[arg(long, default_value = "~/.tee-hyperlane/proofs")]
         proof_dir: String,
+    },
+    /// Serve the bridge UI, with the API and Celestia's REST proxied to one origin.
+    ServeUi {
+        #[arg(long, default_value = "0.0.0.0:3000")]
+        listen: String,
+        /// The built UI, as `npm run build` leaves it.
+        #[arg(long, default_value = "/opt/bridge-app")]
+        dir: String,
+        #[arg(long, default_value = "http://127.0.0.1:3001")]
+        api: String,
+        #[arg(long, default_value = "https://api-mocha.pops.one")]
+        celestia_rest: String,
     },
     /// Show each route's trusted state and how far behind the origin head it is.
     Status,
@@ -223,6 +280,50 @@ async fn main() -> Result<()> {
             )
             .await
         }
+        Command::AttestArbitrum {
+            beacon,
+            l1_execution,
+            l2_archive,
+            enclave,
+            trusted_state,
+            rollup,
+            merkle_tree_hook,
+            mailbox,
+            base_slot,
+            out,
+        } => {
+            commands::attest_arbitrum(
+                &beacon,
+                &l1_execution,
+                &l2_archive,
+                &enclave,
+                &trusted_state,
+                &rollup,
+                &merkle_tree_hook,
+                &mailbox,
+                base_slot,
+                out,
+            )
+            .await
+        }
+        Command::BootstrapArbitrum {
+            beacon,
+            l1_execution,
+            l2_archive,
+            rollup,
+            checkpoint,
+            identity_digest,
+        } => {
+            commands::bootstrap_arbitrum(
+                &beacon,
+                &l1_execution,
+                &l2_archive,
+                &rollup,
+                checkpoint,
+                &identity_digest,
+            )
+            .await
+        }
         Command::BootstrapEthereum { beacon, execution, checkpoint, identity_digest } => {
             commands::bootstrap_ethereum(&beacon, &execution, checkpoint, &identity_digest).await
         }
@@ -234,6 +335,9 @@ async fn main() -> Result<()> {
             let api =
                 tee_coprocessor::api::Api::new(commands::expand_home(&proof_dir), routes);
             tee_coprocessor::api::serve(api, &listen).await
+        }
+        Command::ServeUi { listen, dir, api, celestia_rest } => {
+            tee_coprocessor::ui::serve(dir.into(), api, celestia_rest, &listen).await
         }
         Command::Status => {
             let config = load()?;

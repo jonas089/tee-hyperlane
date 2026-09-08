@@ -170,7 +170,7 @@ fn read_dir(path: &std::path::Path) -> Result<Vec<PathBuf>> {
 
 /// The page this port serves. Small enough to embed, so the API ships as one binary.
 async fn dashboard() -> axum::response::Html<&'static str> {
-    axum::response::Html(include_str!("dashboard.html"))
+    axum::response::Html(include_str!("../ui/relayer.html"))
 }
 
 /// Read every route's trusted state. Chain reads shell out, so they run off the async pool.

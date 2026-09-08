@@ -86,3 +86,38 @@ rpc = "https://rpc-mocha.pops.one"
 grpc = "https://grpc-mocha.pops.one"
 mailbox_id = "0x68797065726c616e650000000000000000000000000000000000000000000000"
 merkle_tree_hook_id = "0x726f757465725f706f73745f6469737061746368000000030000000000000000"
+
+# Arbitrum back to Celestia. The enclave is Ethereum's: an L2 root is derived from the L1
+# state root that light client already verifies, so this needs no third enclave.
+#
+# Latency is the rollup's, not ours - a BoLD assertion confirms about every 31 minutes, and
+# only a confirmed one is trustless.
+[[routes]]
+name = "arbitrum-to-celestia"
+tee_node_url = "https://a1e3cd5d7fd24c2d1dc82237005316e4cd334db0-8080.dstack-pha-prod9.phala.network"
+ism_id = "0x726f757465725f69736d000000000000000000000000002a0000000000000003"
+merkle_tree_address = "0x000000000000000000000000ad34a66bf6db18e858f6b686557075568c6e031c"
+
+[routes.origin]
+kind = "ethereum_l2"
+domain = 421614
+l2_rpc = "https://arb-sepolia.g.alchemy.com/v2/D1CbidVntzlEbD4x7iyHnZZaPWzvDe9I"
+l1_anchor_contract = "0x042B2E6C5E99d4c521bd49beeD5E99651D9B0Cf4"
+mailbox = "0x598facE78a4302f11E3de0bee1894Da0b2Cb71F8"
+merkle_tree_hook = "0xAD34A66Bf6dB18E858F6B686557075568c6E031C"
+merkle_tree_base_slot = 151
+
+[routes.origin.l1]
+kind = "ethereum"
+domain = 11155111
+execution_rpc = "https://rpc.sepolia.ethpandaops.io"
+beacon_rpc = "https://ethereum-sepolia-beacon-api.publicnode.com"
+mailbox = "0xfFAEF09B3cd11D9b20d1a19bECca54EEC2884766"
+
+[routes.destination]
+kind = "celestia"
+domain = 1297040200
+rpc = "https://rpc-mocha.pops.one"
+grpc = "https://grpc-mocha.pops.one"
+mailbox_id = "0x68797065726c616e650000000000000000000000000000000000000000000000"
+merkle_tree_hook_id = "0x726f757465725f706f73745f6469737061746368000000030000000000000000"

@@ -63,7 +63,7 @@ async fn main() -> Result<()> {
     let updates = tokio::spawn(update_forever(config, http, state));
 
     let app = Router::new()
-        .route("/", get(|| async { axum::response::Html(include_str!("dashboard.html")) }))
+        .route("/", get(|| async { axum::response::Html(include_str!("../ui/oracle.html")) }))
         .route("/api/readings", get(readings))
         .with_state(shared);
 
