@@ -11,15 +11,15 @@ or its compose file changes, because the identity is measured from exactly those
 
 | | |
 |---|---|
-| image | `ghcr.io/jonas089/tee-node@sha256:0109b978faed93a63e984d6a1dc1b713bf236e14c6d7413886a04e603b1f2d2f` |
+| image | `ghcr.io/jonas089/tee-node@sha256:c092d13bb58e7342db73c0459e3592cbc71e4aa34147712019a93fc0baa20a36` |
 | built by | `nix build .#image`, reproducible |
 | OS | `dstack-0.5.9` (production; `is_dev = false`) |
 | instance | `tdx.small`, 1 vCPU / 2 GB / 20 GB |
 | cost | $0.0608/hr each, $2.92/day for both |
 
 ```
-tee-node-ethereum  f8da571c89be34182a39099d2c0684f6d46dfd75
-tee-node-celestia  d37cfd9c3598f2335cd3c6c4a1f76da46407d421
+tee-node-ethereum  53989de9c1b33c19f108443e293689b0276b0dcd   (tee-eth-v2)
+tee-node-celestia  9e28bfa7c27a463f2d420e3fcbe269fccb231d57   (tee-cel-v2)
 https://<app-id>-8080.dstack-pha-prod9.phala.network
 ```
 
@@ -31,17 +31,28 @@ deliberately not pinned.
 > `tproxy_base_domain: None`: the CVM runs, the gateway never registers it, and every request
 > terminates TLS then returns nothing. Node 26 is prod5; node 18 is prod9.
 
+> Deploy fresh, never `phala cvms upgrade`. The measured app-compose document carries a
+> `name` field: a fresh deploy leaves it empty, an upgrade rewrites it to `app_<app_id>`.
+> Since that is per-instance, upgrading gives the two enclaves different compose hashes and
+> no single identity can cover them - and it cannot be undone in place, because the field
+> derives from the app id. Both enclaves here were replaced for exactly this reason.
+
+> Pass `--image dstack-0.5.9 --no-dev-os`. If the CLI finds an SSH public key on the machine
+> you deploy from, it silently provisions `dstack-dev-0.5.9`, which permits shell access into
+> the CVM. It reports `os_image_hash de9c74f0...` instead of the `bd369a8c...` below, so the
+> identity check catches it - but only if someone looks.
+
 ## Enclave identity and circuits
 
 ```
 mr_td          f06dfda6dce1cf904d4e2bab1dc370634cf95cefa2ceb2de2eee127c93826980...
 os_image_hash  bd369a8c2f9edb2b52dad48ac8e0b32dde5f1337c423a506b48d07403a7d8033
-compose_hash   bb35e830a2ec224642e9ae963e964d5941e1d5ae1a1256eca4c9550bb2c42b6d
+compose_hash   6650012606d4061e397c35ac8a835fdc2fe00fe13645673beee575e0bfbd5ce7
 mr_kms         92a4bf40c88734b0e56f54b09b1f0fe4b8d3e230047e9298f491968ada8dedf8
-identity       5d6083a9631b6f75d20489febe15f619bd2d0953f6d9f574713230cf275d6c5a
+identity       1f59fa2255b98994abaf49f45bc2d95bd59789560edb9263f7e90976aa1c65f5
 
-state_transition_vkey  0x00350b158e64c20dc65eb4eaa2445da8e68264a6ebc092cd9104d9464d1ce458
-state_membership_vkey  0x0028f85f3f0a3d431b8b1b7804d1ca0c2024dbb70cb303e043724b63bb257c99
+state_transition_vkey  0x00bf2e770c4110122d5f716333961d2fa7be3924d42e13f202a6fac70075b267
+state_membership_vkey  0x009ff5ec25d15fd0b010bc9586fb6980c47d905f6449fc8c1e8635c1db9abed0
 groth16 wrap vk        396 bytes, sha256 a4594c59... (identical to celestia-app v9.0.6's)
 ```
 
@@ -54,9 +65,9 @@ IGP               0x726f757465725f706f73745f646973706174636800000004000000000000
 domain            1297040200
 
 routing ISM       0x726f757465725f69736d0000000000000000000000000001000000000000000c
-  11155111  ->    0x726f757465725f69736d000000000000000000000000002a0000000000000009
-  421614    ->    0x726f757465725f69736d000000000000000000000000002a000000000000000a
-  84532     ->    0x726f757465725f69736d000000000000000000000000002a000000000000000b
+  11155111  ->    0x726f757465725f69736d000000000000000000000000002a000000000000000e
+  421614    ->    0x726f757465725f69736d000000000000000000000000002a000000000000000f
+  84532     ->    0x726f757465725f69736d000000000000000000000000002a0000000000000010
 
 TIA  collateral   0x726f757465725f61707000000000000000000000000000010000000000000000
 USDC synthetic    0x726f757465725f61707000000000000000000000000000020000000000000001
@@ -65,10 +76,15 @@ USDC synthetic    0x726f757465725f6170700000000000000000000000000002000000000000
 Celestia accepts three origins, so the warp tokens point at the routing ISM rather than at one
 ISM. An ISM's state chain is one origin's history, which is why each origin needs its own.
 
+Rotating a route is **remove then set**, not set. `set-routing-ism-domain` inserts a domain
+that is absent and silently leaves an existing one alone - the transaction succeeds, emits
+`EventSetRoutingIsmDomain` naming the new ISM, and changes nothing. Verified on mocha-5 by
+setting an unused domain (which appeared) and an existing one (which did not).
+
 ## Ethereum Sepolia
 
 ```
-TeeIsm            0x6f31D79D898f86a60832Fd1caB31ceC67Bc71Fb6
+TeeIsm            0xcd08642072d2B10fB6cD2E4C6d27b13027031bFf
 synthetic TIA     0xFeA14C1444A7a8beAb7122fdE5A168212D7185bE
 collateral USDC   0xfb611B6f6CE92033960e99C2D65cee4237e64cDD
 mailbox           0xfFAEF09B3cd11D9b20d1a19bECca54EEC2884766   (Hyperlane canonical)
@@ -79,7 +95,7 @@ SP1 verifier      0x50ACFBEdecf4cbe350E1a86fC6f03a821772f1e5   (v5.0.0 groth16)
 ## Arbitrum Sepolia
 
 ```
-TeeIsm            0x21bdf13D66D3e5F0D4793B64bb4c85034B9EDc88
+TeeIsm            0xd2b98Cc846c8E07F212A93515ee68A601B6766f6
 synthetic TIA     0xFeA14C1444A7a8beAb7122fdE5A168212D7185bE
 synthetic USDC    0xb9E5E3eb926EA22B951d2fb7392F9F3D6c704054
 mailbox           0x598facE78a4302f11E3de0bee1894Da0b2Cb71F8
@@ -90,7 +106,7 @@ BoLD rollup       0x042B2E6C5E99d4c521bd49beeD5E99651D9B0Cf4   (pinned in the en
 ## Base Sepolia
 
 ```
-TeeIsm            0x1D32350f3440BEa7f7E450Aa085f63E0d7E38729
+TeeIsm            0xc09fbf8F17E96ce746D39f9d11a9dD1813F2d220
 synthetic TIA     0xf4197C55C944987E9b10e09C0A47915211769B78
 synthetic USDC    0x0ee6374a92ba4E11F920A23c6dd271b594D69A9B
 mailbox           0x6966b0E55883d49BFB24539356a2f8A673E02039
