@@ -45,14 +45,23 @@ impl Destination {
 
         // Which chain to send to comes from the route, so a second EVM destination is config.
         match &self.chain {
-            ChainConfig::Ethereum { execution_rpc, mailbox, .. } => {
-                command.env("EVM_RPC", execution_rpc).env("MAILBOX", mailbox);
+            ChainConfig::Ethereum { execution_rpc, mailbox, domain, .. } => {
+                command
+                    .env("EVM_RPC", execution_rpc)
+                    .env("MAILBOX", mailbox)
+                    .env("LOCAL_DOMAIN", domain.to_string());
             }
-            ChainConfig::EthereumL2 { l2_rpc, .. } => {
-                command.env("EVM_RPC", l2_rpc);
+            ChainConfig::EthereumL2 { l2_rpc, mailbox, domain, .. } => {
+                command
+                    .env("EVM_RPC", l2_rpc)
+                    .env("MAILBOX", mailbox)
+                    .env("LOCAL_DOMAIN", domain.to_string());
             }
-            ChainConfig::Celestia { rpc, mailbox_id, .. } => {
-                command.env("CELESTIA_RPC", rpc).env("CELESTIA_MAILBOX", mailbox_id);
+            ChainConfig::Celestia { rpc, mailbox_id, domain, .. } => {
+                command
+                    .env("CELESTIA_RPC", rpc)
+                    .env("CELESTIA_MAILBOX", mailbox_id)
+                    .env("CELESTIA_DOMAIN", domain.to_string());
             }
         }
 

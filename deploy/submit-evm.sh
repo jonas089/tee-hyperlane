@@ -4,7 +4,12 @@
 # Three transactions, in this order and no other:
 #   updateState    advances the trusted origin state
 #   submitMessages authorises the batch under the new root
-#   process        hands each message to the Mailbox, which asks the ISM
+#   process        hands each message addressed here to the Mailbox, which asks the ISM
+#
+# Only messages for this chain are processed. A batch necessarily contains every leaf in the
+# range - that is what makes the merkle replay work - so on a shared origin it carries
+# messages bound elsewhere. Handing one of those to the Mailbox reverts with "unexpected
+# destination", and because the batch then never finishes, the route retries it forever.
 #
 # The order is forced: submitMessages checks the batch against the *current* root, so the
 # state has to move first.
@@ -19,6 +24,10 @@ PROVED=${1:?usage: submit-evm.sh <proved.json>}
 ISM=${TEE_ISM:?set TEE_ISM}
 MAILBOX=${MAILBOX:?set MAILBOX}
 RPC=${EVM_RPC:?set EVM_RPC}
+# Asked of the mailbox when not supplied, so this script is correct on its own rather than
+# only when its caller remembers to pass it.
+# `cast` prints "11155111 [1.115e7]", so keep only the number.
+LOCAL_DOMAIN=${LOCAL_DOMAIN:-$(cast call "$MAILBOX" "localDomain()(uint32)" --rpc-url "$RPC" | awk '{print $1}')}
 PK=0x$(tr -d ' \n\r' < "$(dirname "$0")/../keys/SEPOLIA_PRIVATE_KEY.md")
 
 jqv() { python3 -c "import sys,json;print(json.load(open('$PROVED'))$1)"; }
@@ -64,11 +73,17 @@ else
     "0x$(jqv "['proofs']['state_membership']['public_values']")"
 fi
 
-echo "== deliver messages =="
+echo "== deliver messages addressed to domain $LOCAL_DOMAIN =="
 COUNT=$(python3 -c "import json;print(len(json.load(open('$PROVED'))['messages']))")
 for i in $(seq 0 $((COUNT-1))); do
   MSG=0x$(jqv "['messages'][$i]")
   if [ "$MSG" = "0x" ]; then echo "  [$i] no message bytes recorded, skipping"; continue; fi
+  # Hyperlane lays the destination domain at bytes 41..45, so hex characters 82..90.
+  DEST=$(python3 -c "print(int('${MSG#0x}'[82:90], 16))")
+  if [ "$DEST" != "$LOCAL_DOMAIN" ]; then
+    echo "  [$i] destination $DEST, not ours - skipping"
+    continue
+  fi
   ID=$(cast keccak "$MSG")
   if [ "$(cast call "$MAILBOX" "delivered(bytes32)(bool)" "$ID" --rpc-url "$RPC")" = "true" ]; then
     echo "  [$i] $ID already delivered"; continue
