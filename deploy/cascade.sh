@@ -29,12 +29,16 @@ CELESTIA_HOOK=0x726f757465725f706f73745f6469737061746368000000030000000000000000
 ROUTING_ISM=0x726f757465725f69736d0000000000000000000000000001000000000000000c
 CEL_NODE=https://rpc-mocha.pops.one
 CEL_CHAIN=mocha-4
+CEL_HOME=/var/lib/tee-hyperlane/celhome
 
-# domain:rpc:mailbox:tia-router:usdc-router
+# domain:rpc:mailbox:merkle-tree-hook:tia-router:usdc-router
+#
+# The Base USDC router and the Arbitrum IGP share an address. That is not a typo: both were
+# deployed by the same key at the same nonce on two chains.
 EVM_CHAINS=(
-  "11155111:https://ethereum-sepolia-rpc.publicnode.com:0xfFAEF09B3cd11D9b20d1a19bECca54EEC2884766:0xFeA14C1444A7a8beAb7122fdE5A168212D7185bE:0xfb611B6f6CE92033960e99C2D65cee4237e64cDD"
-  "421614:https://arbitrum-sepolia-rpc.publicnode.com:0x598facE78a4302f11E3de0bee1894Da0b2Cb71F8:0xFeA14C1444A7a8beAb7122fdE5A168212D7185bE:0xb9E5E3eb926EA22B951d2fb7392F9F3D6c704054"
-  "84532:https://base-sepolia-rpc.publicnode.com:0x6966b0E55883d49BFB24539356a2f8A673E02039:0xf4197C55C944987E9b10e09C0A47915211769B78:0x0ee6374a92ba4E11F920A23c6dd271b594D69A9B"
+  "11155111:https://ethereum-sepolia-rpc.publicnode.com:0xfFAEF09B3cd11D9b20d1a19bECca54EEC2884766:0x4917a9746A7B6E0A57159cCb7F5a6744247f2d0d:0xFeA14C1444A7a8beAb7122fdE5A168212D7185bE:0xfb611B6f6CE92033960e99C2D65cee4237e64cDD"
+  "421614:https://arbitrum-sepolia-rpc.publicnode.com:0x598facE78a4302f11E3de0bee1894Da0b2Cb71F8:0xAD34A66Bf6dB18E858F6B686557075568c6E031C:0xFeA14C1444A7a8beAb7122fdE5A168212D7185bE:0xb9E5E3eb926EA22B951d2fb7392F9F3D6c704054"
+  "84532:https://base-sepolia-rpc.publicnode.com:0x6966b0E55883d49BFB24539356a2f8A673E02039:0x86fb9F1c124fB20ff130C41a79a432F770f67AFD:0xf4197C55C944987E9b10e09C0A47915211769B78:0x0ee6374a92ba4E11F920A23c6dd271b594D69A9B"
 )
 
 case "$STAGE" in
@@ -77,18 +81,22 @@ isms)
   : "${IDENTITY_DIGEST:?}" "${STATE_TRANSITION_VKEY:?}" "${STATE_MEMBERSHIP_VKEY:?}"
   BIN="$ROOT/tee-hyperlane/target/release/tee-hyperlane"
   PK=0x$(tr -d ' \n\r' < "$ROOT/keys/SEPOLIA_PRIVATE_KEY.md")
-  export ORIGIN_MERKLE_TREE=$CELESTIA_HOOK MAX_STATE_AGE=${MAX_STATE_AGE:-86400}
+  export MAX_STATE_AGE=${MAX_STATE_AGE:-86400}
   export STATE_TRANSITION_VKEY STATE_MEMBERSHIP_VKEY
 
-  # Celestia-origin ISMs, one per EVM destination. Each anchors to a live Celestia header;
-  # anything dispatched before that header is outside the new ISM's history and has to be
-  # re-sent, so this is the moment to be sure nothing is mid-flight.
+  # --- Celestia -> EVM. One TeeIsm per destination, all attesting the same origin. ---
+  #
+  # Each anchors to a live Celestia header. Anything dispatched before that header is outside
+  # the new ISM's history and has to be re-sent, so this is the moment to be sure nothing is
+  # mid-flight.
+  export ORIGIN_MERKLE_TREE=$CELESTIA_HOOK
   for entry in "${EVM_CHAINS[@]}"; do
-    IFS=: read -r domain rpc mailbox tia usdc <<<"$entry"
-    echo "== domain $domain =="
-    export GENESIS_STATE MAILBOX=$mailbox
+    IFS=: read -r domain rpc mailbox hook tia usdc <<<"$entry"
+    echo "== Celestia -> $domain =="
+    export MAILBOX=$mailbox
     GENESIS_STATE=$("$BIN" bootstrap-celestia --identity-digest "$IDENTITY_DIGEST" \
       | awk '/genesis state/ {print $3}')
+    export GENESIS_STATE
     ISM=$(cd "$ROOT/tee-hyperlane/contracts" && forge script \
       script/DeployTeeIsm.s.sol:DeployTeeIsm --rpc-url "$rpc" --private-key "$PK" \
       --broadcast --slow 2>&1 | awk '/TeeIsm  /{print $2}')
@@ -96,19 +104,39 @@ isms)
     for router in "$tia" "$usdc"; do
       cast send "$router" "setInterchainSecurityModule(address)" "$ISM" \
         --rpc-url "$rpc" --private-key "$PK" >/dev/null
-      echo "   $router -> $ISM"
+      echo "   router $router -> $ISM"
     done
   done
 
-  # The other direction: one zkism instance per EVM origin, hung off the routing ISM the
-  # warp tokens already point at. Updating the routing table in place is what keeps the
-  # Celestia-side warp config untouched.
-  echo "== Celestia =="
+  # --- EVM -> Celestia. One zkism per origin, hung off the routing ISM. ---
+  #
+  # The routing ISM is owned by the same key and its table is updated in place, so the warp
+  # tokens on Celestia keep pointing at the id they already have and need no transaction.
+  VKEY_FILE=tee-isms/tee-circuit/tee-attestation/testdata/zkism/groth16_vk_v5.bin
   for entry in "${EVM_CHAINS[@]}"; do
-    IFS=: read -r domain _ <<<"$entry"
-    echo "   create a zkism for origin $domain, then:"
-    echo "   celestia-appd tx hyperlane ism set-routing-ism-domain $ROUTING_ISM $domain <new-ism-id> \\"
-    echo "     --from deployer --chain-id $CEL_CHAIN --node $CEL_NODE --fees 20000utia -y"
+    IFS=: read -r domain rpc mailbox hook tia usdc <<<"$entry"
+    echo "== $domain -> Celestia =="
+    case "$domain" in
+      11155111) GENESIS=$("$BIN" bootstrap-ethereum --identity-digest "$IDENTITY_DIGEST" \
+                  | awk '/genesis state/ {print $3}') ;;
+      421614)   GENESIS=$("$BIN" bootstrap-l2 --rollup arbitrum --identity-digest "$IDENTITY_DIGEST" \
+                  --l2-archive "$ARBITRUM_ARCHIVE" --anchor 0x042B2E6C5E99d4c521bd49beeD5E99651D9B0Cf4 \
+                  | awk '/genesis state/ {print $3}') ;;
+      84532)    GENESIS=$("$BIN" bootstrap-l2 --rollup base --identity-digest "$IDENTITY_DIGEST" \
+                  --l2-archive "$BASE_ARCHIVE" --anchor 0x2fF5cC82dBf333Ea30D8ee462178ab1707315355 \
+                  | awk '/genesis state/ {print $3}') ;;
+    esac
+    TREE=0x000000000000000000000000${hook#0x}
+    echo "   genesis $GENESIS"
+    echo "   run on the coprocessor host, where the key lives:"
+    echo "   celestia-appd tx zkism create $GENESIS $TREE $VKEY_FILE \\"
+    echo "     $STATE_TRANSITION_VKEY $STATE_MEMBERSHIP_VKEY \\"
+    echo "     --from bridge --keyring-backend test --home $CEL_HOME \\"
+    echo "     --chain-id $CEL_CHAIN --node $CEL_NODE --fees 20000utia --gas 400000 -y"
+    echo "   then point the routing ISM at it:"
+    echo "   celestia-appd tx hyperlane ism set-routing-ism-domain $ROUTING_ISM $domain <new-id> \\"
+    echo "     --from bridge --keyring-backend test --home $CEL_HOME \\"
+    echo "     --chain-id $CEL_CHAIN --node $CEL_NODE --fees 20000utia -y"
   done
   ;;
 

@@ -113,6 +113,9 @@
           postPatch = ''
             sed -i 's|^members = .*|members = ["crates/hyperlane-types", "crates/tee-node"]|' Cargo.toml
             grep -q 'members = \["crates/hyperlane-types", "crates/tee-node"\]' Cargo.toml
+            # The tree outside sourceRoot is unpacked read-only, and the file is absent
+            # rather than merely stale, so the directory has to allow creating it.
+            chmod u+w ../tee-circuit/tee-attestation
             cat > ../tee-circuit/tee-attestation/enclave-identity.toml <<'IDENTITY'
             require_enclave = true
             mr_td         = "${builtins.concatStringsSep "" (builtins.genList (_: "00") 48)}"
