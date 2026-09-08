@@ -24,6 +24,8 @@ pub struct EvmTreeProof {
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum HyperlaneStateError {
+    #[error("a batch must carry at least one message id")]
+    EmptyBatch,
     #[error(transparent)]
     Mpt(#[from] MptError),
     #[error("expected {expected} storage proofs, got {got}")]
@@ -114,6 +116,19 @@ pub fn verify_message_batch(
     message_ids: &[[u8; 32]],
     onchain: &MerkleTree,
 ) -> Result<(), HyperlaneStateError> {
+    // An empty batch attests nothing, and attesting nothing is how the bridge gets frozen.
+    // The destination allows one batch per state root and the root must change on every
+    // update, so a batch that authorises no message still burns that root's only slot. An
+    // attacker posting straight to the enclave with the head's own tree as the snapshot makes
+    // the replay below the identity function, which passes; repeat it faster than the relayer
+    // and no message is ever authorised while user funds stay locked.
+    //
+    // Only the empty batch can do this. Any non-empty one has to reproduce the on-chain count
+    // and root exactly, so it must carry precisely the leaves added since the snapshot - and
+    // submitting those is the relayer's job, done for free.
+    if message_ids.is_empty() {
+        return Err(HyperlaneStateError::EmptyBatch);
+    }
     if snapshot.count > onchain.count {
         return Err(HyperlaneStateError::SnapshotAhead {
             snapshot: snapshot.count,

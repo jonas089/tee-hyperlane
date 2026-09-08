@@ -115,3 +115,36 @@ fn the_tree_layout_is_pinned_per_origin() {
     assert_eq!(merkle_tree_base_slot(84532), Some(151), "Base Sepolia");
     assert_eq!(merkle_tree_base_slot(999), None);
 }
+
+/// A batch that authorises nothing still consumes the destination's one-batch-per-root slot,
+/// and the root must change on every update, so the slot never reopens for that root. Posted
+/// faster than the relayer, that freezes the bridge with user funds locked. The replay cannot
+/// catch it: with the head's own tree as the snapshot it is the identity function.
+#[test]
+fn an_empty_batch_is_refused() {
+    use hyperlane_types::MerkleTree;
+    use tee_node::hyperlane_state::{verify_message_batch, HyperlaneStateError};
+
+    let tree = MerkleTree { branch: [[0u8; 32]; 32], count: 0 };
+    let err = verify_message_batch(tree, &[], &tree).unwrap_err();
+    assert!(matches!(err, HyperlaneStateError::EmptyBatch), "got {err}");
+}
+
+/// The counterpart: a batch has to be exactly the leaves added since the snapshot, so there
+/// is no partial batch to censor with either. Anything that verifies authorises the real
+/// messages, which is the relayer's job done for free.
+#[test]
+fn a_batch_must_reproduce_the_onchain_tree() {
+    use hyperlane_types::{insert_leaf, MerkleTree};
+    use tee_node::hyperlane_state::{verify_message_batch, HyperlaneStateError};
+
+    let snapshot = MerkleTree { branch: [[0u8; 32]; 32], count: 0 };
+    let mut onchain = snapshot;
+    insert_leaf(&mut onchain, [1u8; 32]).unwrap();
+    insert_leaf(&mut onchain, [2u8; 32]).unwrap();
+
+    assert!(verify_message_batch(snapshot, &[[1u8; 32], [2u8; 32]], &onchain).is_ok());
+
+    let partial = verify_message_batch(snapshot, &[[1u8; 32]], &onchain).unwrap_err();
+    assert!(matches!(partial, HyperlaneStateError::CountMismatch { .. }), "got {partial}");
+}

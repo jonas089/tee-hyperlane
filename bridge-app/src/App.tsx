@@ -11,7 +11,6 @@ import {
 import type { ChainId, CosmosChain, EvmChain, TokenId } from "./config";
 import {
   fetchBalance,
-  fetchRouteStatus,
   formatAmount,
   formatFee,
   quoteBridgeFee,
@@ -22,7 +21,7 @@ import {
   toBaseUnits,
   toRecipientBytes32,
 } from "./bridge";
-import type { BridgeFee, RouteStatus, Step, Transfer } from "./bridge";
+import type { BridgeFee, Step, Transfer } from "./bridge";
 import { messageIdFromCelestiaTx, sendFromCelestia } from "./celestia";
 import {
   connectKeplr,
@@ -38,6 +37,16 @@ import type { Account } from "./wallets";
 const COUNTERPARTIES: ChainId[] = ["sepolia", "arbitrum", "base"];
 const TOKENS: TokenId[] = ["TIA", "USDC"];
 
+/// The relayer and the gas oracle serve their own dashboards beside this one. Linking out
+/// beats reimplementing them here, which is what the Prover tab was doing, worse.
+const RELAYER_PORT = 3001;
+const ORACLE_PORT = 3002;
+
+/// Same host, different port, so this keeps working wherever it is deployed.
+function service(port: number): string {
+  return `${window.location.protocol}//${window.location.hostname}:${port}/`;
+}
+
 const STEP_LABEL: Record<Step, string> = {
   dispatched: "Dispatched",
   attested: "Attested by enclave",
@@ -45,10 +54,7 @@ const STEP_LABEL: Record<Step, string> = {
   delivered: "Delivered",
 };
 
-type Tab = "bridge" | "prover";
-
 export default function App() {
-  const [tab, setTab] = useState<Tab>("bridge");
   const [evm, setEvm] = useState<Account | null>(null);
   const [cosmos, setCosmos] = useState<Account | null>(null);
   const [counterparty, setCounterparty] = useState<ChainId>("sepolia");
@@ -58,7 +64,6 @@ export default function App() {
   const [recipient, setRecipient] = useState("");
   const [transfers, setTransfers] = useState<Transfer[]>(loadTransfers);
   const [balances, setBalances] = useState<Record<string, bigint>>({});
-  const [routes, setRoutes] = useState<RouteStatus[] | null>(null);
   const [fee, setFee] = useState<BridgeFee | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
@@ -132,17 +137,7 @@ export default function App() {
     };
   }, [from, to]);
 
-  const loadRoutes = useCallback(async () => {
-    try {
-      setRoutes(await fetchRouteStatus());
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
-  }, []);
 
-  useEffect(() => {
-    if (tab === "prover") loadRoutes();
-  }, [tab, loadRoutes]);
 
   const defaultRecipient = useMemo(
     () => accountFor(to)?.address ?? "",
@@ -241,12 +236,12 @@ export default function App() {
       <header className="topbar">
         <span className="brand">TEE Bridge</span>
         <nav className="tabs">
-          <button className={tab === "bridge" ? "tab on" : "tab"} onClick={() => setTab("bridge")}>
-            Bridge
-          </button>
-          <button className={tab === "prover" ? "tab on" : "tab"} onClick={() => setTab("prover")}>
-            Prover
-          </button>
+          <a className="tab" href={service(RELAYER_PORT)} target="_blank" rel="noreferrer">
+            Relayer
+          </a>
+          <a className="tab" href={service(ORACLE_PORT)} target="_blank" rel="noreferrer">
+            Gas Oracle
+          </a>
         </nav>
         <div className="wallets">
           {evm ? (
@@ -266,8 +261,7 @@ export default function App() {
         </div>
       </header>
 
-      {tab === "bridge" ? (
-        <main className="center">
+      <main className="center">
           <section className="card">
             <div className="card-head">
               <h1>Bridge</h1>
@@ -413,65 +407,12 @@ export default function App() {
                 ))}
               </ul>
             )}
-          </section>
-        </main>
-      ) : (
-        <main className="center">
-          <section className="card list">
-            <div className="card-head">
-              <h1>Prover</h1>
-              <button className="pill action" onClick={loadRoutes}>Refresh</button>
-            </div>
-            {routes === null ? (
-              <p className="note">Loading…</p>
-            ) : (
-              <ul className="routes">
-                {routes.map((route) => (
-                  <RouteCard key={route.name} route={route} />
-                ))}
-              </ul>
-            )}
-          </section>
-        </main>
-      )}
+        </section>
+      </main>
     </div>
   );
 }
 
-function RouteCard({ route }: { route: RouteStatus }) {
-  const lastProven = route.batches[0];
-  return (
-    <li className="route-card">
-      <div className="row">
-        <strong>{route.name.replace(/-/g, " ")}</strong>
-        <span className="muted">domain {route.origin} → {route.destination}</span>
-      </div>
-      <dl className="detail">
-        <dt>Trusted origin block</dt>
-        <dd>{route.height ?? "-"}</dd>
-        <dt>Last proven batch</dt>
-        <dd>
-          {lastProven
-            ? `block ${lastProven.height}, ${lastProven.messages.length} message${
-                lastProven.messages.length === 1 ? "" : "s"
-              }`
-            : "none yet"}
-        </dd>
-        <dt>Proving now</dt>
-        <dd>
-          {route.proving
-            ? `block ${route.proving.height}, ${route.proving.messages.length} message${
-                route.proving.messages.length === 1 ? "" : "s"
-              }`
-            : "idle"}
-        </dd>
-        <dt>State root</dt>
-        <dd><code>{route.stateRoot ? shorten(route.stateRoot, 10) : "-"}</code></dd>
-      </dl>
-      {route.error && <p className="error">{route.error}</p>}
-    </li>
-  );
-}
 
 function TransferRow({
   transfer,

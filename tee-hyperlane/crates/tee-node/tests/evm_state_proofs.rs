@@ -155,9 +155,9 @@ fn the_exact_message_batch_is_accepted() {
 }
 
 #[test]
-fn an_empty_batch_is_accepted_when_nothing_was_dispatched() {
+fn an_empty_batch_is_refused_even_when_nothing_was_dispatched() {
     let (t, _) = tree_of(5);
-    assert_eq!(verify_message_batch(t, &[], &t), Ok(()));
+    assert_eq!(verify_message_batch(t, &[], &t), Err(HyperlaneStateError::EmptyBatch));
 }
 
 #[test]
@@ -199,13 +199,20 @@ fn reordering_the_batch_is_rejected() {
 /// relayer skip a batch silently.
 #[test]
 fn a_snapshot_ahead_of_chain_state_is_rejected() {
-    let (ahead, _) = tree_of(9);
+    let (ahead, ids) = tree_of(9);
     let (onchain, _) = tree_of(5);
     assert!(matches!(
-        verify_message_batch(ahead, &[], &onchain),
+        verify_message_batch(ahead, &ids[..1], &onchain),
         Err(HyperlaneStateError::SnapshotAhead { snapshot: 9, onchain: 5 })
     ));
 }
+
+/// This asserted the opposite until an audit pointed at it, and the name said why it looked
+/// reasonable: with nothing dispatched there is nothing to attest, so accepting seemed
+/// harmless. It is not. Attesting nothing still consumes the destination's one batch for that
+/// state root, and the root changes on every update, so the slot never reopens. Anyone can
+/// post that to the public enclave endpoint and, kept up faster than the relayer, no message
+/// is ever authorised.
 
 /// The tree root must be a function of the whole history, not just the new batch.
 #[test]

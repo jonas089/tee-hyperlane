@@ -32,6 +32,8 @@ pub struct CelestiaStore {
 
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum CelestiaError {
+    #[error("trusted header commits to next validators {committed} but the set hashes to {actual}")]
+    InconsistentTrustedSet { committed: String, actual: String },
     #[error("no light blocks supplied")]
     NoUpdates,
     #[error("light block at height {height} is on chain `{got}`, expected `{expected}`")]
@@ -74,6 +76,19 @@ pub fn verify_celestia_updates(
     if updates.is_empty() {
         return Err(CelestiaError::NoUpdates);
     }
+    // tendermint-rs states this as the caller's job: `verify_update_header` trusts that the
+    // trusted block's next validator set is the one its header commits to, and never checks.
+    // Committing both values separately, as the store does, is not the same as requiring them
+    // to agree.
+    let committed = store.trusted.signed_header.header.next_validators_hash;
+    let actual = store.trusted.next_validators.hash();
+    if committed != actual {
+        return Err(CelestiaError::InconsistentTrustedSet {
+            committed: committed.to_string(),
+            actual: actual.to_string(),
+        });
+    }
+
     let verifier = ProdVerifier::default();
     let opts = options();
     let chain_id = store.trusted.signed_header.header.chain_id.to_string();

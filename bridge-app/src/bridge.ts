@@ -244,26 +244,6 @@ export function formatFee(fee: BridgeFee): string {
   return `${fraction ? `${whole}.${fraction}` : whole} ${fee.symbol}`;
 }
 
-/** One route as the coprocessor currently sees it. */
-export interface RouteStatus {
-  name: string;
-  origin: number;
-  destination: number;
-  ism: string;
-  height: number | null;
-  timestamp: number | null;
-  stateRoot: string | null;
-  batches: { height: number; messages: string[] }[];
-  proving: { height: number; messages: string[] } | null;
-  error: string | null;
-}
-
-export async function fetchRouteStatus(): Promise<RouteStatus[]> {
-  const response = await fetch(`${RELAYER_API}/status`);
-  if (!response.ok) throw new Error(`relayer returned ${response.status}`);
-  return (await response.json()) as RouteStatus[];
-}
-
 /** What this account holds of one token on one chain. */
 export async function fetchBalance(
   chain: Chain,

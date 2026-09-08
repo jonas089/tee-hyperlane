@@ -10,7 +10,6 @@
 //! ISM state *is* the light client's database.
 
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use tee_attestation::{
     encode_attested_update, hash_attested_update, AttestedUpdate, IsmState,
 };
@@ -313,18 +312,6 @@ fn advance_ethereum(
         OriginInput::Ethereum { .. } => advance_origin(input, trusted),
         _ => Err(AttestError::L2NeedsEthereum),
     }
-}
-
-/// Commit to a light-client store plus the tree snapshot, for callers that want one value.
-pub fn commit_bridge_state(store_commit: [u8; 32], tree: &MerkleTree) -> [u8; 32] {
-    let mut h = Sha256::new();
-    h.update(b"tee-isms/bridge-state/v1");
-    h.update(store_commit);
-    h.update(tree.count.to_be_bytes());
-    for node in &tree.branch {
-        h.update(node);
-    }
-    h.finalize().into()
 }
 
 /// dstack's quote response, as its unix socket returns it.
