@@ -208,6 +208,7 @@ pub async fn attest_l2(
     let (l2_root, root_proof) =
         get_l2_root(kind, &l1, &l2, anchor, l1_block, l1_state_root).await?;
 
+    super::record_attestable_head(out.as_deref(), l2_root.height);
     anyhow::ensure!(
         l2_root.height > trusted.height,
         "the confirmed L2 head {} has not passed the trusted height {}",

@@ -57,8 +57,12 @@ pub struct RouteStatus {
     /// The batch currently being proved, if any. Proving is minutes of CPU, so a route
     /// spends most of its time here rather than idle.
     pub proving: Option<Batch>,
-    /// The origin's own head. Without it an idle route is indistinguishable from a stuck
-    /// one - "trusted 571870, head 573707" says which.
+    /// The highest origin block the next proof could attest, which is not the origin's own
+    /// head: Ethereum's is the finalized block, an L2's is the block Ethereum has *confirmed*,
+    /// and Celestia's trails the head by the attest lag. Showing the raw head instead would
+    /// make every route look permanently behind by an amount that is a property of the chain
+    /// rather than of this relayer. Without it an idle route is indistinguishable from a
+    /// stuck one - "trusted 571870, attestable to 573707" says which.
     #[serde(rename = "originHead")]
     pub origin_head: Option<u64>,
     /// Set when the destination chain could not be reached this request.
@@ -119,6 +123,18 @@ impl Api {
                 .map(message_id)
                 .collect(),
         })
+    }
+
+    /// The attestable head this route's prover last recorded.
+    ///
+    /// Preferred over asking the chain, because for Arbitrum there is nothing to ask: its
+    /// confirmed block is not exposed by any view, only by the `AssertionCreated` log behind
+    /// `latestConfirmed()`. The prover resolves it every tick regardless, so the dashboard
+    /// reads that rather than repeating the work on every poll.
+    fn recorded_head(&self, route: &str) -> Option<u64> {
+        let raw = std::fs::read(self.root.join(route).join("head.json")).ok()?;
+        let value: serde_json::Value = serde_json::from_slice(&raw).ok()?;
+        value["target"].as_u64()
     }
 
     /// The last few batches this route proved, newest first.
@@ -231,7 +247,9 @@ fn read_route(api: &Api, route: &RouteConfig) -> RouteStatus {
         state_root: None,
         batches,
         proving,
-        origin_head: read_origin_head(&route.origin),
+        origin_head: api
+            .recorded_head(&route.name)
+            .or_else(|| read_origin_head(&route.origin)),
         error: None,
     };
 

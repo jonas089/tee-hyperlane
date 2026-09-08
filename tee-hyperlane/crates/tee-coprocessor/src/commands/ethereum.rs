@@ -140,6 +140,7 @@ pub async fn attest_ethereum(
         .execution()
         .map_err(|_| anyhow::anyhow!("finalized header has no execution payload"))?;
     let target_block = *target.block_number();
+    super::record_attestable_head(out.as_deref(), target_block);
     anyhow::ensure!(
         target_block > trusted.height,
         "finalized head {target_block} has not passed the trusted height {}",

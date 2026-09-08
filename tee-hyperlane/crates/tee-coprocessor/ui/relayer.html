@@ -195,7 +195,7 @@
       <div class="stat"><span>Routes</span><strong>${routes.length}</strong></div>
       <div class="stat"><span>Proving</span><strong>${proving}</strong></div>
       <div class="stat"><span>Batches proven</span><strong>${proven}</strong></div>
-      <div class="stat"><span>Blocks behind</span><strong>${num(behind)}</strong></div>`;
+      <div class="stat"><span>Blocks to attest</span><strong>${num(behind)}</strong></div>`;
   }
 
   function draw(routes) {
@@ -215,13 +215,13 @@
         ${c ? `<div class="catchup">
           <div class="catchup-top">
             <span>caught up to ${num(r.height)}</span>
-            <span>${c.behind === 0 ? "at head" : num(c.behind) + " blocks behind"}</span>
+            <span>${c.behind === 0 ? "at the anchor" : num(c.behind) + " blocks to attest"}</span>
           </div>
           <div class="bar"><span data-fill="${c.percent}"></span></div>
         </div>` : ""}
 
         <div class="grid">
-          <div class="cell"><span>Origin head</span><strong>${num(r.originHead)}</strong></div>
+          <div class="cell"><span>Attestable to</span><strong>${num(r.originHead)}</strong></div>
           <div class="cell"><span>Last proven</span><strong>${batch(r.batches[0])}</strong></div>
           <div class="cell ${r.proving ? "working" : ""}">
             <span>${r.proving ? "Proving" : "Prover"}</span>

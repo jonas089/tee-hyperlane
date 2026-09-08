@@ -76,6 +76,7 @@ pub async fn attest_celestia(
     let history = CelestiaReader::new(archive.unwrap_or(rpc))?;
     let head = reader.latest_height().await?;
     let target = head.saturating_sub(lag);
+    super::record_attestable_head(out.as_deref(), target);
     anyhow::ensure!(
         target > trusted.height + 1,
         "head has not advanced past the trusted state ({} vs {})",

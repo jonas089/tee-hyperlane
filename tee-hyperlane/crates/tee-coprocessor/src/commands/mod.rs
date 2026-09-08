@@ -7,7 +7,7 @@
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use tracing::info;
+use tracing::{debug, info};
 
 use crate::config::Config;
 use crate::tasks::{cpu_prover_permit, run_route, ProofStore};
@@ -21,6 +21,35 @@ pub use ethereum::{attest_ethereum, bootstrap_ethereum};
 pub use ethereum_l2::{attest_l2, bootstrap_l2, L2Kind};
 
 use ethereum::{bootstrap_store, rebuild_ethereum_store};
+
+/// Record the highest origin block the next proof could attest, beside that route's proofs.
+///
+/// The dashboard cannot work this out for itself. For Ethereum it is the finalized block and
+/// for Base a single view call, but Arbitrum's confirmed block is only recoverable by finding
+/// the `AssertionCreated` log for `latestConfirmed()` and then resolving the L2 block hash it
+/// carries - three calls including a log search, which is too much for something polled every
+/// few seconds and would hit the same range limits the attest path already works around. The
+/// prover derives this number every tick anyway, so it writes it down instead.
+///
+/// Written before the "nothing to attest" check, because a route with nothing to do is
+/// exactly when you want to see how far it *could* go.
+pub(crate) fn record_attestable_head(out: Option<&str>, target: u64) {
+    let Some(out) = out else { return };
+    let Some(dir) = std::path::Path::new(out).parent().and_then(|p| p.parent()) else {
+        return;
+    };
+    let body = serde_json::json!({ "target": target, "updated_at": now_secs() });
+    if let Err(e) = std::fs::write(dir.join("head.json"), body.to_string()) {
+        debug!(error = %e, "could not record the attestable head");
+    }
+}
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
 
 /// Wrap an EVM tree proof as the enclave's internally-tagged `TreeInput`, whose variant
 /// fields sit alongside `kind`.
