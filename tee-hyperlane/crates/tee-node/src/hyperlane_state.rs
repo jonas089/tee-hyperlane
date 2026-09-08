@@ -16,7 +16,6 @@ use crate::state_proofs::{verify_account_proof, verify_storage_proof, ClaimedAcc
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct EvmTreeProof {
     pub merkle_tree_hook: Address,
-    pub base_slot: u64,
     pub account: ClaimedAccount,
     pub account_proof: Vec<Bytes>,
     /// One entry per slot, branch first then count, 33 in total.
@@ -49,8 +48,23 @@ pub enum HyperlaneStateError {
 }
 
 /// Prove the origin `MerkleTreeHook`'s incremental tree against an EVM state root.
+/// Base storage slot of a merkle tree hook's incremental tree, by origin domain.
+///
+/// Pinned here rather than taken from the request, for the same reason the L2 anchors are:
+/// the enclave should never accept "where to look" from whoever is asking. Deployment
+/// specific, and not guessable - Hyperlane's canonical Sepolia hook uses 103 while both L2
+/// deployments use 151.
+pub fn merkle_tree_base_slot(origin_domain: u32) -> Option<u64> {
+    match origin_domain {
+        11155111 => Some(103),
+        421614 | 84532 => Some(151),
+        _ => None,
+    }
+}
+
 pub fn get_evm_merkle_tree(
     state_root: B256,
+    base_slot: u64,
     proof: &EvmTreeProof,
 ) -> Result<MerkleTree, HyperlaneStateError> {
     let storage_root = verify_account_proof(
@@ -60,7 +74,7 @@ pub fn get_evm_merkle_tree(
         &proof.account_proof,
     )?;
 
-    let slots = MerkleTreeSlots::new(proof.base_slot);
+    let slots = MerkleTreeSlots::new(base_slot);
     let expected_keys = slots.storage_keys();
     if proof.storage_proof.len() != expected_keys.len() {
         return Err(HyperlaneStateError::WrongSlotCount {

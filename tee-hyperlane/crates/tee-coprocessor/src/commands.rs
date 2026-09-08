@@ -200,16 +200,18 @@ pub async fn attest_ethereum(
         .context("reading the merkle tree at the trusted height; set `archive_rpc` if pruned")?;
     let snapshot = tee_node::hyperlane_state::get_evm_merkle_tree(
         alloy_primitives::B256::from(trusted.state_root),
+        base_slot,
         &snapshot_proof,
     )?;
 
     let dispatched = history
         .dispatched_messages(mailbox_address, hook, trusted.height + 1, target_block)
         .await?;
-    println!(
-        "finalized {target_block} | trusted {} | {} new leaves",
-        trusted.height,
-        dispatched.len()
+    info!(
+        height = target_block,
+        trusted = trusted.height,
+        leaves = dispatched.len(),
+        "attesting ethereum"
     );
     anyhow::ensure!(!dispatched.is_empty(), "nothing to attest");
 
@@ -224,6 +226,7 @@ pub async fn attest_ethereum(
         .insert("kind".into(), serde_json::json!("evm"));
 
     let request = serde_json::json!({
+        "protocol": tee_node::attest::PROTOCOL_VERSION,
         "trusted_state": hex::encode(&trusted_raw),
         "origin": {
             "chain": "ethereum",
@@ -237,8 +240,7 @@ pub async fn attest_ethereum(
     });
 
     let attestation = EnclaveClient::new(enclave_url).attest(&request).await?;
-    println!("attested new state 0x{}", attestation.new_state);
-    println!("messages           {}", attestation.message_ids.len());
+    info!(messages = attestation.message_ids.len(), "enclave attested");
 
     if let Some(path) = out {
         let record = serde_json::json!({
@@ -460,17 +462,20 @@ pub async fn attest_l2(
     let snapshot_proof = l2.merkle_tree_proof(hook, base_slot, trusted.height).await?;
     let snapshot = tee_node::hyperlane_state::get_evm_merkle_tree(
         alloy_primitives::B256::from(trusted.state_root),
+        base_slot,
         &snapshot_proof,
     )?;
 
     let dispatched = l2
         .dispatched_messages(mailbox_address, hook, trusted.height + 1, l2_root.height)
         .await?;
-    println!(
-        "confirmed L2 block {} | trusted {} | {} new leaves",
-        l2_root.height,
-        trusted.height,
-        dispatched.len()
+    info!(
+        rollup = kind.chain_tag(),
+        height = l2_root.height,
+        trusted = trusted.height,
+        l1_block,
+        leaves = dispatched.len(),
+        "attesting l2"
     );
     anyhow::ensure!(!dispatched.is_empty(), "nothing to attest");
 
@@ -484,6 +489,7 @@ pub async fn attest_l2(
         .insert("kind".into(), serde_json::json!("evm"));
 
     let request = serde_json::json!({
+        "protocol": tee_node::attest::PROTOCOL_VERSION,
         "trusted_state": hex::encode(&trusted_raw),
         "origin": {
             "chain": kind.chain_tag(),
@@ -501,8 +507,7 @@ pub async fn attest_l2(
     });
 
     let attestation = EnclaveClient::new(enclave_url).attest(&request).await?;
-    println!("attested new state 0x{}", attestation.new_state);
-    println!("messages           {}", attestation.message_ids.len());
+    info!(messages = attestation.message_ids.len(), "enclave attested");
 
     if let Some(path) = out {
         let record = serde_json::json!({
@@ -562,7 +567,7 @@ pub async fn attest_celestia(
 
     // Everything inserted since the ISM's trusted height, in tree order.
     let inserted = history.dispatched_messages(trusted.height + 1, target).await?;
-    println!("head {head} | attesting state at {target} | {} new leaves", inserted.len());
+    info!(head, height = target, leaves = inserted.len(), "attesting celestia");
     anyhow::ensure!(!inserted.is_empty(), "nothing to attest; no messages dispatched");
 
     // The tree as it stood at the ISM's trusted height, proven rather than assumed. The
@@ -582,6 +587,7 @@ pub async fn attest_celestia(
     );
 
     let request = serde_json::json!({
+        "protocol": tee_node::attest::PROTOCOL_VERSION,
         "trusted_state": hex::encode(&trusted_raw),
         "origin": {
             "chain": "celestia",
@@ -602,9 +608,7 @@ pub async fn attest_celestia(
     let client = EnclaveClient::new(enclave_url);
     let attestation = client.attest(&request).await?;
 
-    println!("attested new state 0x{}", attestation.new_state);
-    println!("quote bytes        {}", attestation.quote.len() / 2);
-    println!("messages           {}", attestation.message_ids.len());
+    info!(messages = attestation.message_ids.len(), "enclave attested");
     if let Some(path) = out {
         let record = serde_json::json!({
             "attestation": {
@@ -683,6 +687,19 @@ pub async fn bootstrap_ethereum(
 
 /// Produce the two Groth16 proofs the destination needs.
 pub async fn prove(attestation_path: &str, elf_dir: &str, out: &str) -> Result<()> {
+    prove_for_route("", attestation_path, elf_dir, out).await
+}
+
+/// Prove one attestation, naming the route in every line.
+///
+/// A proof is tens of minutes of silence otherwise, and with several routes sharing one
+/// prover there is no way to tell from the log which one is working or how far it has got.
+pub async fn prove_for_route(
+    route: &str,
+    attestation_path: &str,
+    elf_dir: &str,
+    out: &str,
+) -> Result<()> {
     use sp1_sdk::{Prover, ProverClient, SP1Stdin};
     use std::time::Instant;
     use crate::enclave::fetch_collateral;
@@ -692,7 +709,8 @@ pub async fn prove(attestation_path: &str, elf_dir: &str, out: &str) -> Result<(
     let att = &record["attestation"];
     let quote_hex = att["quote"].as_str().context("quote")?;
 
-    println!("fetching Intel collateral from PCCS...");
+    let height = update_height(att);
+    info!(route, height, "fetching Intel collateral");
     let collateral = fetch_collateral(quote_hex).await?;
 
     let payload = hex::decode(att["payload"].as_str().context("payload")?)?;
@@ -704,7 +722,14 @@ pub async fn prove(attestation_path: &str, elf_dir: &str, out: &str) -> Result<(
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)?
         .as_secs();
-    println!("attested head {} | prover clock {now}", update.new_state.timestamp);
+    info!(
+        route,
+        height = update.new_state.height,
+        attested_at = update.attested_at,
+        prover_clock = now,
+        messages = update.message_ids.len(),
+        "proving batch"
+    );
 
     let inputs = tee_attestation::AttestationInputs {
         quote: hex::decode(quote_hex.trim_start_matches("0x"))?,
@@ -719,17 +744,33 @@ pub async fn prove(attestation_path: &str, elf_dir: &str, out: &str) -> Result<(
 
     let client = ProverClient::builder().cpu().build();
     let mut proofs = serde_json::Map::new();
+    let mut step = 0;
     for (name, elf_name) in
         [("state_transition", "tee-state-transition"), ("state_membership", "tee-state-membership")]
     {
         let elf = std::fs::read(std::path::Path::new(elf_dir).join(elf_name))
             .with_context(|| format!("{elf_name}: run `circuit-tool build` in tee-circuit"))?;
         let (pk, vk) = client.setup(&elf);
-        println!("proving {name}...");
+        step += 1;
+        info!(
+            route,
+            height = update.new_state.height,
+            proof = name,
+            step,
+            of = 2,
+            "generating groth16 proof, this takes tens of minutes on CPU"
+        );
         let started = Instant::now();
         let proof = client.prove(&pk, &stdin).groth16().run()?;
         client.verify(&proof, &vk)?;
-        println!("  {name}: {:.0}s, {} proof bytes", started.elapsed().as_secs_f64(), proof.bytes().len());
+        info!(
+            route,
+            height = update.new_state.height,
+            proof = name,
+            seconds = started.elapsed().as_secs(),
+            bytes = proof.bytes().len(),
+            "proof done"
+        );
 
         proofs.insert(
             name.to_string(),
@@ -761,6 +802,16 @@ pub async fn prove(attestation_path: &str, elf_dir: &str, out: &str) -> Result<(
     std::fs::write(out, serde_json::to_vec_pretty(&record)?)?;
     println!("wrote {out}");
     Ok(())
+}
+
+/// The origin height an attestation record advances to, for logging before it is decoded.
+fn update_height(attestation: &serde_json::Value) -> u64 {
+    attestation["new_state"]
+        .as_str()
+        .and_then(|s| hex::decode(s).ok())
+        .and_then(|raw| tee_attestation::decode_ism_state(&raw).ok())
+        .map(|state| state.height)
+        .unwrap_or_default()
 }
 
 /// Pull the measurements out of the quote and event log, for display.

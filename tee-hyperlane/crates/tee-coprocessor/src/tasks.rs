@@ -233,9 +233,11 @@ async fn advance(
     }
 
     // Proving is minutes of CPU, so routes take turns rather than competing for cores.
+    info!(route = %route.name, "waiting for the prover");
     let _permit = cpu.acquire().await?;
     let proved = store.staging(&route.name, "proved.json");
-    commands::prove(
+    commands::prove_for_route(
+        &route.name,
         &path_string(&attestation),
         &elf_dir(),
         &path_string(&proved),
@@ -253,6 +255,7 @@ async fn advance(
 /// endpoint reads to say a route is proving, so one left behind reports a finished batch as
 /// still in flight.
 fn submit_and_file(route: &RouteConfig, store: &ProofStore, proved: &Path) -> Result<u64> {
+    info!(route = %route.name, destination = route.destination.domain(), "submitting");
     Destination::new(route.destination.clone(), route.ism_id.clone()).submit(proved)?;
 
     let height = std::fs::read(proved)

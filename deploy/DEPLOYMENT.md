@@ -11,15 +11,15 @@ or its compose file changes, because the identity is measured from exactly those
 
 | | |
 |---|---|
-| image | `ghcr.io/jonas089/tee-node@sha256:55dfce65f16be7c0cb95f858f7443bfa8b3634b1227d95f569022901d59d8808` |
+| image | `ghcr.io/jonas089/tee-node@sha256:0109b978faed93a63e984d6a1dc1b713bf236e14c6d7413886a04e603b1f2d2f` |
 | built by | `nix build .#image`, reproducible |
 | OS | `dstack-0.5.9` (production; `is_dev = false`) |
 | instance | `tdx.small`, 1 vCPU / 2 GB / 20 GB |
 | cost | $0.0608/hr each, $2.92/day for both |
 
 ```
-tee-node-ethereum  a3feb765232e08e567d5f7de773db9dac55e7d5b
-tee-node-celestia  596ed37171fa16da4a9ba5afaec8f19cb8b2860d
+tee-node-ethereum  f8da571c89be34182a39099d2c0684f6d46dfd75
+tee-node-celestia  d37cfd9c3598f2335cd3c6c4a1f76da46407d421
 https://<app-id>-8080.dstack-pha-prod9.phala.network
 ```
 
@@ -36,12 +36,12 @@ deliberately not pinned.
 ```
 mr_td          f06dfda6dce1cf904d4e2bab1dc370634cf95cefa2ceb2de2eee127c93826980...
 os_image_hash  bd369a8c2f9edb2b52dad48ac8e0b32dde5f1337c423a506b48d07403a7d8033
-compose_hash   99e157b98b57729bbd6b97adc76964897356b40406ca7b0942214dc1511e64e8
+compose_hash   bb35e830a2ec224642e9ae963e964d5941e1d5ae1a1256eca4c9550bb2c42b6d
 mr_kms         92a4bf40c88734b0e56f54b09b1f0fe4b8d3e230047e9298f491968ada8dedf8
-identity       241dd0baf8e3065e22732b08ed99c286d6ec10958ca2885c26a381324dca0a95
+identity       5d6083a9631b6f75d20489febe15f619bd2d0953f6d9f574713230cf275d6c5a
 
-state_transition_vkey  0x000d223dcbccdb71106e4205f81caa8cfeefab16157898b120ca5908f47e53f7
-state_membership_vkey  0x00cb0f3e39c2f501de946600002a68409db9aab53bf1f31284231225298829df
+state_transition_vkey  0x00350b158e64c20dc65eb4eaa2445da8e68264a6ebc092cd9104d9464d1ce458
+state_membership_vkey  0x0028f85f3f0a3d431b8b1b7804d1ca0c2024dbb70cb303e043724b63bb257c99
 groth16 wrap vk        396 bytes, sha256 a4594c59... (identical to celestia-app v9.0.6's)
 ```
 
@@ -53,10 +53,10 @@ merkle tree hook  0x726f757465725f706f73745f646973706174636800000003000000000000
 IGP               0x726f757465725f706f73745f6469737061746368000000040000000000000002  (default_hook)
 domain            1297040200
 
-routing ISM       0x726f757465725f69736d00000000000000000000000000010000000000000008
-  11155111  ->    0x726f757465725f69736d000000000000000000000000002a0000000000000005
-  421614    ->    0x726f757465725f69736d000000000000000000000000002a0000000000000006
-  84532     ->    0x726f757465725f69736d000000000000000000000000002a0000000000000007
+routing ISM       0x726f757465725f69736d0000000000000000000000000001000000000000000c
+  11155111  ->    0x726f757465725f69736d000000000000000000000000002a0000000000000009
+  421614    ->    0x726f757465725f69736d000000000000000000000000002a000000000000000a
+  84532     ->    0x726f757465725f69736d000000000000000000000000002a000000000000000b
 
 TIA  collateral   0x726f757465725f61707000000000000000000000000000010000000000000000
 USDC synthetic    0x726f757465725f61707000000000000000000000000000020000000000000001
@@ -68,7 +68,7 @@ ISM. An ISM's state chain is one origin's history, which is why each origin need
 ## Ethereum Sepolia
 
 ```
-TeeIsm            0x78e86863877279631995805faf34d1D4c4A7a4D8
+TeeIsm            0x6f31D79D898f86a60832Fd1caB31ceC67Bc71Fb6
 synthetic TIA     0xFeA14C1444A7a8beAb7122fdE5A168212D7185bE
 collateral USDC   0xfb611B6f6CE92033960e99C2D65cee4237e64cDD
 mailbox           0xfFAEF09B3cd11D9b20d1a19bECca54EEC2884766   (Hyperlane canonical)
@@ -79,7 +79,7 @@ SP1 verifier      0x50ACFBEdecf4cbe350E1a86fC6f03a821772f1e5   (v5.0.0 groth16)
 ## Arbitrum Sepolia
 
 ```
-TeeIsm            0x2630c91BD1Ed46207Ddf6930934DC5827F0A988B
+TeeIsm            0x21bdf13D66D3e5F0D4793B64bb4c85034B9EDc88
 synthetic TIA     0xFeA14C1444A7a8beAb7122fdE5A168212D7185bE
 synthetic USDC    0xb9E5E3eb926EA22B951d2fb7392F9F3D6c704054
 mailbox           0x598facE78a4302f11E3de0bee1894Da0b2Cb71F8
@@ -90,7 +90,7 @@ BoLD rollup       0x042B2E6C5E99d4c521bd49beeD5E99651D9B0Cf4   (pinned in the en
 ## Base Sepolia
 
 ```
-TeeIsm            0xf3Cdd261b13A9ed182d934f6A75aF981058D1599
+TeeIsm            0x1D32350f3440BEa7f7E450Aa085f63E0d7E38729
 synthetic TIA     0xf4197C55C944987E9b10e09C0A47915211769B78
 synthetic USDC    0x0ee6374a92ba4E11F920A23c6dd271b594D69A9B
 mailbox           0x6966b0E55883d49BFB24539356a2f8A673E02039

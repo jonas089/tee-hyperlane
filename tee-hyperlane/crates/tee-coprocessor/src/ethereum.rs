@@ -225,7 +225,6 @@ impl ExecutionReader {
 
         Ok(serde_json::from_value(serde_json::json!({
             "merkle_tree_hook": hook,
-            "base_slot": base_slot,
             "account": {
                 "nonce": result["nonce"],
                 "balance": result["balance"],

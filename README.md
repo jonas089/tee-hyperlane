@@ -59,8 +59,8 @@ Enclaves - Phala Cloud `prod9`, image `ghcr.io/jonas089/tee-node`, OS `dstack-0.
 
 | node | app id |
 |---|---|
-| `tee-node-ethereum` | `a3feb765232e08e567d5f7de773db9dac55e7d5b` |
-| `tee-node-celestia` | `596ed37171fa16da4a9ba5afaec8f19cb8b2860d` |
+| `tee-node-ethereum` | `f8da571c89be34182a39099d2c0684f6d46dfd75` |
+| `tee-node-celestia` | `d37cfd9c3598f2335cd3c6c4a1f76da46407d421` |
 
 Reach them at `https://<app-id>-8080.dstack-pha-prod9.phala.network`.
 
@@ -73,15 +73,15 @@ The image is built with Nix, so its digest is reproducible rather than something
 trust. [docs/verify-deployment.md](docs/verify-deployment.md) is how to check it yourself.
 
 ```
-image          ghcr.io/jonas089/tee-node@sha256:55dfce65f16be7c0cb95f858f7443bfa8b3634b1227d95f569022901d59d8808
+image          ghcr.io/jonas089/tee-node@sha256:0109b978faed93a63e984d6a1dc1b713bf236e14c6d7413886a04e603b1f2d2f
 mr_td          f06dfda6dce1cf904d4e2bab1dc370634cf95cefa2ceb2de2eee127c93826980...
 os_image_hash  bd369a8c2f9edb2b52dad48ac8e0b32dde5f1337c423a506b48d07403a7d8033
-compose_hash   99e157b98b57729bbd6b97adc76964897356b40406ca7b0942214dc1511e64e8
+compose_hash   bb35e830a2ec224642e9ae963e964d5941e1d5ae1a1256eca4c9550bb2c42b6d
 mr_kms         92a4bf40c88734b0e56f54b09b1f0fe4b8d3e230047e9298f491968ada8dedf8
-identity       241dd0baf8e3065e22732b08ed99c286d6ec10958ca2885c26a381324dca0a95
+identity       5d6083a9631b6f75d20489febe15f619bd2d0953f6d9f574713230cf275d6c5a
 
-state_transition_vkey  0x000d223dcbccdb71106e4205f81caa8cfeefab16157898b120ca5908f47e53f7
-state_membership_vkey  0x00cb0f3e39c2f501de946600002a68409db9aab53bf1f31284231225298829df
+state_transition_vkey  0x00350b158e64c20dc65eb4eaa2445da8e68264a6ebc092cd9104d9464d1ce458
+state_membership_vkey  0x0028f85f3f0a3d431b8b1b7804d1ca0c2024dbb70cb303e043724b63bb257c99
 ```
 
 ### ISMs
@@ -91,10 +91,10 @@ use: the routers all point here, and the older ISMs are unreachable rather than 
 
 | chain | ISM | verifies messages from |
 |---|---|---|
-| Sepolia | `0x78e86863877279631995805faf34d1D4c4A7a4D8` | Celestia |
-| Arbitrum Sepolia | `0x2630c91BD1Ed46207Ddf6930934DC5827F0A988B` | Celestia |
-| Base Sepolia | `0xf3Cdd261b13A9ed182d934f6A75aF981058D1599` | Celestia |
-| Celestia mocha-5 | `0x726f757465725f69736d00000000000000000000000000010000000000000008` | routes by origin |
+| Sepolia | `0x6f31D79D898f86a60832Fd1caB31ceC67Bc71Fb6` | Celestia |
+| Arbitrum Sepolia | `0x21bdf13D66D3e5F0D4793B64bb4c85034B9EDc88` | Celestia |
+| Base Sepolia | `0x1D32350f3440BEa7f7E450Aa085f63E0d7E38729` | Celestia |
+| Celestia mocha-5 | `0x726f757465725f69736d0000000000000000000000000001000000000000000c` | routes by origin |
 
 Celestia accepts three origins, so its warp tokens point at a routing ISM rather than at one
 ISM directly. Each origin gets its own `x/zkism` behind it, because an ISM's state chain is
@@ -102,9 +102,9 @@ one origin's history and cannot be shared:
 
 | origin | ISM |
 |---|---|
-| Sepolia (11155111) | `0x726f757465725f69736d000000000000000000000000002a0000000000000005` |
-| Arbitrum (421614) | `0x726f757465725f69736d000000000000000000000000002a0000000000000006` |
-| Base (84532) | `0x726f757465725f69736d000000000000000000000000002a0000000000000007` |
+| Sepolia (11155111) | `0x726f757465725f69736d000000000000000000000000002a0000000000000009` |
+| Arbitrum (421614) | `0x726f757465725f69736d000000000000000000000000002a000000000000000a` |
+| Base (84532) | `0x726f757465725f69736d000000000000000000000000002a000000000000000b` |
 
 The EVM ISMs are `contracts/src/TeeIsm.sol`, a port of `x/zkism`, verifying against SP1's v5
 Groth16 verifier `0x50ACFBEdecf4cbe350E1a86fC6f03a821772f1e5` - the same address with

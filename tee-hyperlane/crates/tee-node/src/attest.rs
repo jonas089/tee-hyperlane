@@ -34,10 +34,21 @@ use crate::state_proofs::{
 };
 use hyperlane_types::MerkleTree;
 
+/// The request shape this enclave understands.
+///
+/// Bumped whenever a field is added, removed, or stops being honoured. Several fields have
+/// been taken out because the caller should never have chosen them - the tree's base slot,
+/// the L2 anchor and its layout, the clock - and a caller still sending those would otherwise
+/// have them silently ignored, which looks like working. Requiring the version turns that
+/// into a refusal.
+pub const PROTOCOL_VERSION: u32 = 2;
+
 /// How the enclave is asked to advance one ISM by one step.
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AttestRequest {
+    /// Must equal `PROTOCOL_VERSION`.
+    pub protocol: u32,
     /// The ISM's current state, read from the destination chain, hex-encoded.
     #[serde(with = "hex_ism_state")]
     pub trusted_state: IsmState,
@@ -70,11 +81,11 @@ mod hex_ism_state {
 
 /// Per-origin inputs. Adding a network adds one variant and one arm.
 ///
-/// Unknown fields are refused. Several fields have been taken out of this request because the
-/// caller should never have chosen them; rejecting leftovers means an old coprocessor fails
-/// loudly instead of sending a value that is now quietly ignored.
+/// `deny_unknown_fields` is deliberately absent: serde ignores it on internally tagged enums,
+/// so writing it here would look like a guard and be none. `AttestRequest::protocol` is what
+/// actually catches a stale caller.
 #[derive(Serialize, Deserialize)]
-#[serde(tag = "chain", rename_all = "snake_case", deny_unknown_fields)]
+#[serde(tag = "chain", rename_all = "snake_case")]
 pub enum OriginInput {
     Ethereum {
         store: EthereumStore,
@@ -126,6 +137,10 @@ pub enum AttestError {
     WrongMerkleTree { proven: String, attested: String },
     #[error("the enclave has no usable clock")]
     NoClock,
+    #[error("no merkle tree layout is pinned for origin domain {domain}")]
+    NoTreeLayout { domain: u32 },
+    #[error("request protocol {got}, but this enclave speaks {expected}")]
+    WrongProtocol { got: u32, expected: u32 },
 }
 
 /// Verify everything in the request and produce the update to be attested.
@@ -134,7 +149,26 @@ pub enum AttestError {
 pub fn build_attested_update(
     request: &mut AttestRequest,
 ) -> Result<(AttestedUpdate, Vec<u8>), AttestError> {
+    if request.protocol != PROTOCOL_VERSION {
+        return Err(AttestError::WrongProtocol {
+            got: request.protocol,
+            expected: PROTOCOL_VERSION,
+        });
+    }
     let expected = request.trusted_state.origin_domain;
+
+    // Where the tree was read must be the address being attested. Both are supplied by the
+    // caller, and proving a tree is not enough on its own: anyone can deploy a merkle tree
+    // hook, fill it with ids of their choosing, and prove it honestly under the real state
+    // root. Only tying the proven address to the attested one makes that useless, because
+    // the destination ISM pins the address it will accept.
+    let proven_at = tree_address_of(&request.tree);
+    if proven_at != request.merkle_tree_address {
+        return Err(AttestError::WrongMerkleTree {
+            proven: hex::encode(proven_at),
+            attested: hex::encode(request.merkle_tree_address),
+        });
+    }
 
     let (root, store_commit, attested_at) =
         advance_origin(&mut request.origin, &request.trusted_state)?;
@@ -144,26 +178,12 @@ pub fn build_attested_update(
         return Err(AttestError::WrongOrigin { got: origin.domain(), expected });
     }
 
-    // The merkle tree hook we read the message ids from must be the same one we name in the
-    // attested update. The caller supplies both, so they can differ.
-    //
-    // A valid tree proof alone proves only that some contract at some address holds these
-    // message ids. An attacker can deploy their own merkle tree hook, insert any message ids
-    // they like, and produce a perfectly valid proof of it against the real state root. What
-    // stops that is the address: the destination ISM accepts updates for one specific merkle
-    // tree hook address, so if the proof reads a different contract than the address we
-    // attest, the update is worthless to the attacker. Rejecting the mismatch here means the
-    // attested address always identifies the contract the ids were actually proven against.
-    let proven_at = tree_address_of(&request.tree);
-    if proven_at != request.merkle_tree_address {
-        return Err(AttestError::WrongMerkleTree {
-            proven: hex::encode(proven_at),
-            attested: hex::encode(request.merkle_tree_address),
-        });
-    }
-
     let onchain_tree = match &request.tree {
-        TreeInput::Evm(proof) => get_evm_merkle_tree(root.state_root, proof)?,
+        TreeInput::Evm(proof) => {
+            let base_slot = crate::hyperlane_state::merkle_tree_base_slot(expected)
+                .ok_or(AttestError::NoTreeLayout { domain: expected })?;
+            get_evm_merkle_tree(root.state_root, base_slot, proof)?
+        }
         TreeInput::Celestia { hook_id, hook_bytes, proof } => {
             get_celestia_merkle_tree(root.state_root.0, *hook_id, hook_bytes, proof)?
         }

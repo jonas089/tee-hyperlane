@@ -21,7 +21,7 @@ That id must equal the digest pinned in `deploy/docker-compose.yml`:
 grep image: deploy/docker-compose.yml
 ```
 
-Both are `sha256:55dfce65f16be7c0cb95f858f7443bfa8b3634b1227d95f569022901d59d8808`.
+Both are `sha256:0109b978faed93a63e984d6a1dc1b713bf236e14c6d7413886a04e603b1f2d2f`.
 
 To confirm the build really is reproducible rather than merely repeatable on one machine:
 
@@ -38,14 +38,14 @@ what is pinned", which closes the same loop without having to reimplement their 
 
 ```sh
 cd tee-circuit
-for app in 596ed37171fa16da4a9ba5afaec8f19cb8b2860d a3feb765232e08e567d5f7de773db9dac55e7d5b; do
+for app in d37cfd9c3598f2335cd3c6c4a1f76da46407d421 f8da571c89be34182a39099d2c0684f6d46dfd75; do
   cargo run -q -p circuit-tool -- identity \
     --url https://$app-8080.dstack-pha-prod9.phala.network \
     | grep -E 'mr_td|os_image_hash|compose_hash|mr_kms' > /tmp/live-$app
 done
 # The two enclaves must agree with each other, and with what the circuits pin.
-diff /tmp/live-596ed37171fa16da4a9ba5afaec8f19cb8b2860d /tmp/live-a3feb765232e08e567d5f7de773db9dac55e7d5b
-diff /tmp/live-596ed37171fa16da4a9ba5afaec8f19cb8b2860d \
+diff /tmp/live-d37cfd9c3598f2335cd3c6c4a1f76da46407d421 /tmp/live-f8da571c89be34182a39099d2c0684f6d46dfd75
+diff /tmp/live-d37cfd9c3598f2335cd3c6c4a1f76da46407d421 \
      <(grep -E 'mr_td|os_image_hash|compose_hash|mr_kms' tee-attestation/enclave-identity.toml)
 ```
 
@@ -54,7 +54,7 @@ Both diffs are empty today. The values are:
 ```
 mr_td         f06dfda6dce1cf904d4e2bab1dc370634cf95cefa2ceb2de2eee127c93826980…
 os_image_hash bd369a8c2f9edb2b52dad48ac8e0b32dde5f1337c423a506b48d07403a7d8033
-compose_hash  99e157b98b57729bbd6b97adc76964897356b40406ca7b0942214dc1511e64e8
+compose_hash  bb35e830a2ec224642e9ae963e964d5941e1d5ae1a1256eca4c9550bb2c42b6d
 mr_kms        92a4bf40c88734b0e56f54b09b1f0fe4b8d3e230047e9298f491968ada8dedf8
 ```
 
@@ -69,9 +69,9 @@ cd tee-circuit && cargo run -p circuit-tool -- vkeys
 ```
 
 ```
-tee-state-transition  0x000d223dcbccdb71106e4205f81caa8cfeefab16157898b120ca5908f47e53f7
-tee-state-membership  0x00cb0f3e39c2f501de946600002a68409db9aab53bf1f31284231225298829df
-identity digest       241dd0baf8e3065e22732b08ed99c286d6ec10958ca2885c26a381324dca0a95
+tee-state-transition  0x00350b158e64c20dc65eb4eaa2445da8e68264a6ebc092cd9104d9464d1ce458
+tee-state-membership  0x0028f85f3f0a3d431b8b1b7804d1ca0c2024dbb70cb303e043724b63bb257c99
+identity digest       5d6083a9631b6f75d20489febe15f619bd2d0953f6d9f574713230cf275d6c5a
 ```
 
 Read them back off any ISM and compare:

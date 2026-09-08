@@ -45,7 +45,7 @@ export const CHAINS: Record<ChainId, Chain> = {
     rpc: "https://ethereum-sepolia-rpc.publicnode.com",
     explorer: "https://sepolia.etherscan.io",
     mailbox: "0xfFAEF09B3cd11D9b20d1a19bECca54EEC2884766",
-    ism: "0x78e86863877279631995805faf34d1D4c4A7a4D8",
+    ism: "0x6f31D79D898f86a60832Fd1caB31ceC67Bc71Fb6",
   },
   arbitrum: {
     kind: "evm",
@@ -56,7 +56,7 @@ export const CHAINS: Record<ChainId, Chain> = {
     rpc: "https://arbitrum-sepolia-rpc.publicnode.com",
     explorer: "https://sepolia.arbiscan.io",
     mailbox: "0x598facE78a4302f11E3de0bee1894Da0b2Cb71F8",
-    ism: "0x2630c91BD1Ed46207Ddf6930934DC5827F0A988B",
+    ism: "0x21bdf13D66D3e5F0D4793B64bb4c85034B9EDc88",
   },
   base: {
     kind: "evm",
@@ -67,7 +67,7 @@ export const CHAINS: Record<ChainId, Chain> = {
     rpc: "https://base-sepolia-rpc.publicnode.com",
     explorer: "https://sepolia.basescan.org",
     mailbox: "0x6966b0E55883d49BFB24539356a2f8A673E02039",
-    ism: "0xf3Cdd261b13A9ed182d934f6A75aF981058D1599",
+    ism: "0x1D32350f3440BEa7f7E450Aa085f63E0d7E38729",
   },
   celestia: {
     kind: "cosmos",
@@ -85,7 +85,7 @@ export const CHAINS: Record<ChainId, Chain> = {
     mailboxId: "0x68797065726c616e650000000000000000000000000000000000000000000000",
     /// The paymaster a Celestia-origin transfer pays, quoted live before sending.
     igpId: "0x726f757465725f706f73745f6469737061746368000000040000000000000002",
-    ismId: "0x726f757465725f69736d00000000000000000000000000010000000000000008",
+    ismId: "0x726f757465725f69736d0000000000000000000000000001000000000000000c",
   },
 };
 
@@ -117,9 +117,12 @@ export const CELESTIA_DENOM: Record<TokenId, string> = {
   USDC: "hyperlane/0x726f757465725f61707000000000000000000000000000020000000000000001",
 };
 
-/// Two Groth16 proofs on the coprocessor's CPU. The same for every route, because the
-/// circuit is the same regardless of origin.
-export const PROVING_SECONDS = 15 * 60;
+/// Two Groth16 proofs on the coprocessor's CPU, plus the wait for a free prover.
+///
+/// Measured on the machine actually running this, not estimated: 2857s and 2592s for the two
+/// proofs of one batch. Routes share a single prover, so a transfer can also queue behind
+/// another route's batch, which is why this is not simply the sum.
+export const PROVING_SECONDS = 100 * 60;
 
 /// How long each origin takes to reach the finality the enclave will attest, and why.
 ///

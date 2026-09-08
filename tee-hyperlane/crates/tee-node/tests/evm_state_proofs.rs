@@ -26,7 +26,6 @@ fn fixture() -> Fixture {
 fn tree_proof(f: &Fixture) -> EvmTreeProof {
     EvmTreeProof {
         merkle_tree_hook: f.address,
-        base_slot: f.base_slot,
         account: f.account,
         account_proof: f.account_proof.clone(),
         storage_proof: f.storage_proof.clone(),
@@ -36,7 +35,7 @@ fn tree_proof(f: &Fixture) -> EvmTreeProof {
 #[test]
 fn live_sepolia_state_root_yields_the_hyperlane_merkle_root() {
     let f = fixture();
-    let tree = get_evm_merkle_tree(f.state_root, &tree_proof(&f)).expect("proof must verify");
+    let tree = get_evm_merkle_tree(f.state_root, f.base_slot, &tree_proof(&f)).expect("proof must verify");
     assert_eq!(tree.count, f.expected_count);
     assert_eq!(
         B256::from(get_merkle_root(&tree)),
@@ -69,7 +68,7 @@ fn zero_valued_branch_slots_are_proven_by_exclusion() {
 #[test]
 fn a_wrong_state_root_is_rejected() {
     let f = fixture();
-    let err = get_evm_merkle_tree(B256::repeat_byte(0xab), &tree_proof(&f)).unwrap_err();
+    let err = get_evm_merkle_tree(B256::repeat_byte(0xab), f.base_slot, &tree_proof(&f)).unwrap_err();
     assert!(matches!(err, HyperlaneStateError::Mpt(MptError::AccountProof { .. })));
 }
 
@@ -78,7 +77,7 @@ fn a_tampered_slot_value_is_rejected() {
     let f = fixture();
     let mut p = tree_proof(&f);
     p.storage_proof[0].value = U256::from(1);
-    let err = get_evm_merkle_tree(f.state_root, &p).unwrap_err();
+    let err = get_evm_merkle_tree(f.state_root, f.base_slot, &p).unwrap_err();
     assert!(matches!(err, HyperlaneStateError::Mpt(MptError::StorageProof { .. })));
 }
 
@@ -88,17 +87,28 @@ fn slots_must_arrive_in_the_expected_order() {
     let f = fixture();
     let mut p = tree_proof(&f);
     p.storage_proof.swap(0, 1);
-    let err = get_evm_merkle_tree(f.state_root, &p).unwrap_err();
+    let err = get_evm_merkle_tree(f.state_root, f.base_slot, &p).unwrap_err();
     assert!(matches!(err, HyperlaneStateError::SlotMismatch { index: 0, .. }));
 }
 
+/// 151 is the L2 deployments' layout and wrong for Hyperlane's Sepolia hook. The slot is
+/// pinned per origin rather than sent, so this is what a mis-pinned constant would do, not
+/// what a caller could choose.
 #[test]
 fn a_wrong_base_slot_is_rejected() {
     let f = fixture();
-    let mut p = tree_proof(&f);
-    p.base_slot = 151; // celestia-zkevm's layout, wrong for this deployment
-    let err = get_evm_merkle_tree(f.state_root, &p).unwrap_err();
+    let err = get_evm_merkle_tree(f.state_root, 151, &tree_proof(&f)).unwrap_err();
     assert!(matches!(err, HyperlaneStateError::SlotMismatch { index: 0, .. }));
+}
+
+/// Each origin's slot is fixed, and an unknown origin has none rather than a default.
+#[test]
+fn the_base_slot_is_pinned_per_origin() {
+    use tee_node::hyperlane_state::merkle_tree_base_slot;
+    assert_eq!(merkle_tree_base_slot(11155111), Some(103), "Sepolia's canonical hook");
+    assert_eq!(merkle_tree_base_slot(421614), Some(151), "Arbitrum Sepolia");
+    assert_eq!(merkle_tree_base_slot(84532), Some(151), "Base Sepolia");
+    assert_eq!(merkle_tree_base_slot(1), None, "no guessing for an unknown origin");
 }
 
 #[test]
@@ -107,7 +117,7 @@ fn a_short_storage_proof_is_rejected() {
     let mut p = tree_proof(&f);
     p.storage_proof.pop();
     assert!(matches!(
-        get_evm_merkle_tree(f.state_root, &p),
+        get_evm_merkle_tree(f.state_root, f.base_slot, &p),
         Err(HyperlaneStateError::WrongSlotCount { expected: 33, got: 32 })
     ));
 }

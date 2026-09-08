@@ -4,8 +4,8 @@ proof_dir = "/var/lib/tee-hyperlane/proofs"
 
 [[routes]]
 name = "celestia-to-sepolia"
-tee_node_url = "https://596ed37171fa16da4a9ba5afaec8f19cb8b2860d-8080.dstack-pha-prod9.phala.network"
-ism_id = "0x78e86863877279631995805faf34d1D4c4A7a4D8"
+tee_node_url = "https://d37cfd9c3598f2335cd3c6c4a1f76da46407d421-8080.dstack-pha-prod9.phala.network"
+ism_id = "0x6f31D79D898f86a60832Fd1caB31ceC67Bc71Fb6"
 merkle_tree_address = "0x726f757465725f706f73745f6469737061746368000000030000000000000000"
 
 [routes.origin]
@@ -24,8 +24,8 @@ mailbox = "0xfFAEF09B3cd11D9b20d1a19bECca54EEC2884766"
 
 [[routes]]
 name = "celestia-to-arbitrum"
-tee_node_url = "https://596ed37171fa16da4a9ba5afaec8f19cb8b2860d-8080.dstack-pha-prod9.phala.network"
-ism_id = "0x2630c91BD1Ed46207Ddf6930934DC5827F0A988B"
+tee_node_url = "https://d37cfd9c3598f2335cd3c6c4a1f76da46407d421-8080.dstack-pha-prod9.phala.network"
+ism_id = "0x21bdf13D66D3e5F0D4793B64bb4c85034B9EDc88"
 merkle_tree_address = "0x726f757465725f706f73745f6469737061746368000000030000000000000000"
 
 [routes.origin]
@@ -44,8 +44,8 @@ mailbox = "0x598facE78a4302f11E3de0bee1894Da0b2Cb71F8"
 
 [[routes]]
 name = "celestia-to-base"
-tee_node_url = "https://596ed37171fa16da4a9ba5afaec8f19cb8b2860d-8080.dstack-pha-prod9.phala.network"
-ism_id = "0xf3Cdd261b13A9ed182d934f6A75aF981058D1599"
+tee_node_url = "https://d37cfd9c3598f2335cd3c6c4a1f76da46407d421-8080.dstack-pha-prod9.phala.network"
+ism_id = "0x1D32350f3440BEa7f7E450Aa085f63E0d7E38729"
 merkle_tree_address = "0x726f757465725f706f73745f6469737061746368000000030000000000000000"
 
 [routes.origin]
@@ -64,8 +64,8 @@ mailbox = "0x6966b0E55883d49BFB24539356a2f8A673E02039"
 
 [[routes]]
 name = "sepolia-to-celestia"
-tee_node_url = "https://a3feb765232e08e567d5f7de773db9dac55e7d5b-8080.dstack-pha-prod9.phala.network"
-ism_id = "0x726f757465725f69736d000000000000000000000000002a0000000000000005"
+tee_node_url = "https://f8da571c89be34182a39099d2c0684f6d46dfd75-8080.dstack-pha-prod9.phala.network"
+ism_id = "0x726f757465725f69736d000000000000000000000000002a0000000000000009"
 merkle_tree_address = "0x0000000000000000000000004917a9746a7b6e0a57159ccb7f5a6744247f2d0d"
 
 [routes.origin]
@@ -94,8 +94,8 @@ merkle_tree_hook_id = "0x726f757465725f706f73745f6469737061746368000000030000000
 # only a confirmed one is trustless.
 [[routes]]
 name = "arbitrum-to-celestia"
-tee_node_url = "https://a3feb765232e08e567d5f7de773db9dac55e7d5b-8080.dstack-pha-prod9.phala.network"
-ism_id = "0x726f757465725f69736d000000000000000000000000002a0000000000000006"
+tee_node_url = "https://f8da571c89be34182a39099d2c0684f6d46dfd75-8080.dstack-pha-prod9.phala.network"
+ism_id = "0x726f757465725f69736d000000000000000000000000002a000000000000000a"
 merkle_tree_address = "0x000000000000000000000000ad34a66bf6db18e858f6b686557075568c6e031c"
 
 [routes.origin]
@@ -127,8 +127,8 @@ merkle_tree_hook_id = "0x726f757465725f706f73745f6469737061746368000000030000000
 # transfer out of Base is a multi-day trip. That is the rollup's parameter, not ours.
 [[routes]]
 name = "base-to-celestia"
-tee_node_url = "https://a3feb765232e08e567d5f7de773db9dac55e7d5b-8080.dstack-pha-prod9.phala.network"
-ism_id = "0x726f757465725f69736d000000000000000000000000002a0000000000000007"
+tee_node_url = "https://f8da571c89be34182a39099d2c0684f6d46dfd75-8080.dstack-pha-prod9.phala.network"
+ism_id = "0x726f757465725f69736d000000000000000000000000002a000000000000000b"
 merkle_tree_address = "0x00000000000000000000000086fb9f1c124fb20ff130c41a79a432f770f67afd"
 
 [routes.origin]
