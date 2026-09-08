@@ -1,5 +1,16 @@
 # Verifying what is running
 
+`deploy/check-live.sh` runs the whole chain below in one go and prints a pass or fail per
+link. `--rebuild` adds the reproducible image build, which takes about thirty-five minutes;
+without it the image leg is checked against the registry instead.
+
+```sh
+deploy/check-live.sh              # fast: registry, both enclaves, all three ISMs
+deploy/check-live.sh --rebuild    # also rebuilds the image from source and diffs the digest
+```
+
+The rest of this document explains what each link means and how to check it by hand.
+
 Four things are worth checking independently, and none of them requires trusting this repo's
 word for it.
 
