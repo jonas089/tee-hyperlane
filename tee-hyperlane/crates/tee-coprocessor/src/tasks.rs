@@ -154,10 +154,11 @@ async fn advance(
             .await
         }
         // An L2 origin is Ethereum's flow plus the storage proof that says which L2 block
-        // Ethereum has confirmed. Only Arbitrum is wired; Base's gatherer is the same shape.
+        // Ethereum has confirmed.
         ChainConfig::EthereumL2 {
             l2_rpc,
             l1,
+            rollup,
             l1_anchor_contract,
             mailbox,
             merkle_tree_hook,
@@ -174,7 +175,8 @@ async fn advance(
             // The rollup's storage is proven at the finalized L1 block, which is already
             // outside a public node's window.
             let l1_execution = archive_rpc.as_deref().unwrap_or(execution_rpc);
-            commands::attest_arbitrum(
+            commands::attest_l2(
+                commands::L2Kind::parse(rollup)?,
                 beacon_rpc,
                 l1_execution,
                 l2_rpc,

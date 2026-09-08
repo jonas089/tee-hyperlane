@@ -1,5 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CELESTIA_DENOM, CHAINS, EXPECTED_SECONDS, routeIsLive, routerFor } from "./config";
+import {
+  CELESTIA_DENOM,
+  CHAINS,
+  ORIGIN_FINALITY,
+  SLOW_ORIGIN_SECONDS,
+  expectedSeconds,
+  routeIsLive,
+  routerFor,
+} from "./config";
 import type { ChainId, CosmosChain, EvmChain, TokenId } from "./config";
 import {
   fetchBalance,
@@ -239,7 +247,7 @@ export default function App() {
                 <span>From {source.name}</span>
                 <span className="balance">
                   {sourceBalance === undefined
-                    ? "—"
+                    ? "-"
                     : `Balance ${formatAmount(sourceBalance, token)}`}
                 </span>
               </div>
@@ -272,7 +280,7 @@ export default function App() {
                 <span>To</span>
                 <span className="balance">
                   {destinationBalance === undefined
-                    ? "—"
+                    ? "-"
                     : `Balance ${formatAmount(destinationBalance, token)}`}
                 </span>
               </div>
@@ -319,6 +327,17 @@ export default function App() {
               />
             </label>
 
+            {ORIGIN_FINALITY[from].seconds >= SLOW_ORIGIN_SECONDS && (
+              <p className="wait">
+                <strong>
+                  Expected {describeWhen(Date.now() + expectedSeconds(from) * 1000)}, about{" "}
+                  {describeDuration(expectedSeconds(from))} from now.
+                </strong>{" "}
+                {ORIGIN_FINALITY[from].reason} The transfer is safe to leave. It appears below
+                with its expected arrival, and you can close this page.
+              </p>
+            )}
+
             {!live && <p className="note">{token} is not deployed on this route yet.</p>}
             {error && <p className="error">{error}</p>}
 
@@ -328,8 +347,7 @@ export default function App() {
 
             <p className="note">
               Signed in {walletFor(source)}. Arrival waits for {source.name} to finalise, then
-              for two proofs on CPU — usually about {Math.round(EXPECTED_SECONDS[from] / 60)}{" "}
-              minutes.
+              for two proofs on CPU, about {describeDuration(expectedSeconds(from))}.
             </p>
           </section>
 
@@ -383,7 +401,7 @@ function RouteCard({ route }: { route: RouteStatus }) {
       </div>
       <dl className="detail">
         <dt>Trusted origin block</dt>
-        <dd>{route.height ?? "—"}</dd>
+        <dd>{route.height ?? "-"}</dd>
         <dt>Last proven batch</dt>
         <dd>
           {lastProven
@@ -401,7 +419,7 @@ function RouteCard({ route }: { route: RouteStatus }) {
             : "idle"}
         </dd>
         <dt>State root</dt>
-        <dd><code>{route.stateRoot ? shorten(route.stateRoot, 10) : "—"}</code></dd>
+        <dd><code>{route.stateRoot ? shorten(route.stateRoot, 10) : "-"}</code></dd>
       </dl>
       {route.error && <p className="error">{route.error}</p>}
     </li>
@@ -417,7 +435,8 @@ function TransferRow({
 }) {
   const [open, setOpen] = useState(false);
   const reachedIndex = STEPS.indexOf(transfer.reached);
-  const expected = transfer.sentAt + EXPECTED_SECONDS[transfer.from] * 1000;
+  const expected = transfer.sentAt + expectedSeconds(transfer.from) * 1000;
+  const slow = ORIGIN_FINALITY[transfer.from].seconds >= SLOW_ORIGIN_SECONDS;
 
   return (
     <li>
@@ -433,8 +452,9 @@ function TransferRow({
 
       <p className="timing">
         {transfer.reached === "delivered"
-          ? `Landed ${describeTime(transfer.deliveredAt ?? Date.now())}`
-          : `In transit since ${describeTime(transfer.sentAt)} · expected ${describeTime(expected)}`}
+          ? `Landed ${describeWhen(transfer.deliveredAt ?? Date.now())}`
+          : `Sent ${describeWhen(transfer.sentAt)}, expected ${describeWhen(expected)}` +
+            (slow ? `, waiting on ${CHAINS[transfer.from].name}'s dispute window` : "")}
       </p>
 
       <ol className="steps">
@@ -492,8 +512,21 @@ function TransferRow({
   );
 }
 
-function describeTime(at: number): string {
-  return new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+/// Times within a day are a clock reading; anything further out needs the date, or a
+/// five-day wait reads as "arrives at 3pm" and looks broken.
+function describeWhen(at: number): string {
+  const withinADay = Math.abs(at - Date.now()) < 24 * 60 * 60 * 1000;
+  return new Date(at).toLocaleString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    ...(withinADay ? {} : { month: "short", day: "numeric" }),
+  });
+}
+
+function describeDuration(seconds: number): string {
+  if (seconds < 90 * 60) return `${Math.round(seconds / 60)} minutes`;
+  if (seconds < 36 * 60 * 60) return `${Math.round(seconds / 3600)} hours`;
+  return `${Math.round(seconds / 86400)} days`;
 }
 
 function shorten(value: string, keep = 6): string {

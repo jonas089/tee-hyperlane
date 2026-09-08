@@ -111,15 +111,53 @@ export const CELESTIA_DENOM: Record<TokenId, string> = {
   USDC: "hyperlane/0x726f757465725f61707000000000000000000000000000020000000000000001",
 };
 
-/// Roughly how long a transfer out of each origin takes, in seconds: how long the origin
-/// takes to reach the finality the enclave requires, plus two Groth16 proofs on CPU. Used
-/// only to show an expected arrival - the real answer is always what the destination says.
-export const EXPECTED_SECONDS: Record<ChainId, number> = {
-  celestia: 15 * 60,
-  sepolia: 28 * 60,
-  arbitrum: 45 * 60,
-  base: 45 * 60,
+/// Two Groth16 proofs on the coprocessor's CPU. The same for every route, because the
+/// circuit is the same regardless of origin.
+export const PROVING_SECONDS = 15 * 60;
+
+/// How long each origin takes to reach the finality the enclave will attest, and why.
+///
+/// Arbitrum and Base are both optimistic rollups, so both wait out a challenge window before
+/// their state root is trustless. They differ only in how long that window is configured to
+/// be - which is the difference between half an hour and most of a week.
+export interface OriginFinality {
+  seconds: number;
+  /// Shown to the sender before they commit to a transfer they cannot speed up.
+  reason: string;
+}
+
+export const ORIGIN_FINALITY: Record<ChainId, OriginFinality> = {
+  celestia: {
+    seconds: 60,
+    reason: "Celestia finalises in a single block.",
+  },
+  sepolia: {
+    seconds: 13 * 60,
+    reason: "Ethereum is attested at its finalized head, roughly two epochs behind.",
+  },
+  arbitrum: {
+    seconds: 35 * 60,
+    reason:
+      "Arbitrum is an optimistic rollup: its state root is only trustless once Ethereum " +
+      "confirms the assertion, about every half hour on Sepolia.",
+  },
+  base: {
+    // Measured on Base Sepolia: the game the anchor points at was created 120.1 hours before
+    // it resolved, and the portal adds no further delay.
+    seconds: 120 * 60 * 60,
+    reason:
+      "Base is an optimistic rollup. Its root only becomes final once a dispute game has " +
+      "run its full challenge clock, which on Sepolia takes five days.",
+  },
 };
+
+/// Total expected wait for a transfer leaving this chain.
+export function expectedSeconds(from: ChainId): number {
+  return ORIGIN_FINALITY[from].seconds + PROVING_SECONDS;
+}
+
+/// A wait long enough that a sender should be told before they commit, not after.
+export const SLOW_ORIGIN_SECONDS = 60 * 60;
 
 /** Where the coprocessor publishes attestations. Same origin in production. */
 export const RELAYER_API = import.meta.env.VITE_RELAYER_API ?? "/api";

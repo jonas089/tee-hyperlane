@@ -263,18 +263,17 @@ pub async fn attest_ethereum(
 /// The anchor is the same weak-subjectivity checkpoint an Ethereum-origin ISM uses, because
 /// an L2 origin rides Ethereum's light client: the state carries *Ethereum's* store
 /// commitment, and the height and timestamp of the L2 block Ethereum has confirmed.
-pub async fn bootstrap_arbitrum(
+pub async fn bootstrap_l2(
+    kind: L2Kind,
     beacon: &str,
     l1_execution: &str,
     l2_archive: &str,
-    rollup: &str,
+    anchor: &str,
     checkpoint: Option<String>,
     identity_digest: &str,
 ) -> Result<()> {
-    use crate::arbitrum::get_arbitrum_root_proof;
     use crate::ethereum::{EthereumReader, ExecutionReader};
     use tee_node::origins::ethereum::{commit_ethereum_store, get_ethereum_root};
-    use tee_node::origins::ethereum_l2::{get_arbitrum_root, RollupLayout};
 
     let beacon_reader = EthereumReader::new(beacon);
     let config = beacon_reader.chain_config().await?;
@@ -287,14 +286,6 @@ pub async fn bootstrap_arbitrum(
     let l1_block = get_ethereum_root(&store)?.height;
     let l1 = ExecutionReader::new(l1_execution);
     let l2 = ExecutionReader::new(l2_archive);
-    let proof = get_arbitrum_root_proof(
-        &l1,
-        &l2,
-        rollup.parse()?,
-        RollupLayout::ARBITRUM_SEPOLIA,
-        l1_block,
-    )
-    .await?;
 
     let l1_state_root: alloy_primitives::B256 = l1
         .call(
@@ -305,12 +296,12 @@ pub async fn bootstrap_arbitrum(
         .as_str()
         .context("L1 block has no state root")?
         .parse()?;
-    let head = get_arbitrum_root(l1_state_root, &proof)?;
+    let (head, _) = get_l2_root(kind, &l1, &l2, anchor, l1_block, l1_state_root).await?;
 
     let digest = hex::decode(identity_digest.trim_start_matches("0x"))?;
     let state = tee_attestation::IsmState {
         state_root: head.state_root.0,
-        origin_domain: tee_node::origins::Origin::Arbitrum.domain(),
+        origin_domain: kind.domain(),
         height: head.height,
         timestamp: head.timestamp,
         lc_store_commit: commit_ethereum_store(&store),
@@ -339,23 +330,89 @@ pub async fn bootstrap_arbitrum(
 /// The L2 reads need an archive endpoint. The confirmed assertion is thousands of L2 blocks
 /// behind head - that lag is the rollup's challenge window, not something to tune - and no
 /// public node keeps state that far back.
+/// Which rollup an L2 origin is, and what it needs to name its anchor contract.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum L2Kind {
+    Arbitrum,
+    Base,
+}
+
+impl L2Kind {
+    pub fn parse(name: &str) -> Result<Self> {
+        match name {
+            "arbitrum" => Ok(Self::Arbitrum),
+            "base" => Ok(Self::Base),
+            other => anyhow::bail!("unknown L2 `{other}`; expected arbitrum or base"),
+        }
+    }
+
+    fn domain(&self) -> u32 {
+        match self {
+            Self::Arbitrum => tee_node::origins::Origin::Arbitrum.domain(),
+            Self::Base => tee_node::origins::Origin::Base.domain(),
+        }
+    }
+
+    /// The tag the enclave's `OriginInput` is deserialised by.
+    fn chain_tag(&self) -> &'static str {
+        match self {
+            Self::Arbitrum => "arbitrum",
+            Self::Base => "base",
+        }
+    }
+}
+
+/// Derive an L2's confirmed root, and the proof of it the enclave will recheck.
+async fn get_l2_root(
+    kind: L2Kind,
+    l1: &crate::ethereum::ExecutionReader,
+    l2: &crate::ethereum::ExecutionReader,
+    anchor: &str,
+    l1_block: u64,
+    l1_state_root: alloy_primitives::B256,
+) -> Result<(tee_node::origins::AttestedRoot, serde_json::Value)> {
+    use tee_node::origins::ethereum_l2::{
+        get_arbitrum_root, get_base_root, RollupLayout,
+    };
+
+    match kind {
+        L2Kind::Arbitrum => {
+            let proof = crate::ethereum_l2::get_arbitrum_root_proof(
+                l1,
+                l2,
+                anchor.parse()?,
+                RollupLayout::ARBITRUM_SEPOLIA,
+                l1_block,
+            )
+            .await?;
+            let root = get_arbitrum_root(l1_state_root, &proof)?;
+            Ok((root, serde_json::to_value(proof)?))
+        }
+        L2Kind::Base => {
+            let proof =
+                crate::ethereum_l2::get_base_root_proof(l1, l2, anchor.parse()?, l1_block).await?;
+            let root = get_base_root(l1_state_root, &proof)?;
+            Ok((root, serde_json::to_value(proof)?))
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
-pub async fn attest_arbitrum(
+pub async fn attest_l2(
+    kind: L2Kind,
     beacon: &str,
     l1_execution: &str,
     l2_archive: &str,
     enclave_url: &str,
     trusted_state_hex: &str,
-    rollup: &str,
+    anchor: &str,
     merkle_tree_hook: &str,
     mailbox: &str,
     base_slot: u64,
     out: Option<String>,
 ) -> Result<()> {
-    use crate::arbitrum::get_arbitrum_root_proof;
     use crate::enclave::EnclaveClient;
     use crate::ethereum::{expected_current_slot, EthereumReader, ExecutionReader};
-    use tee_node::origins::ethereum_l2::{get_arbitrum_root, RollupLayout};
 
     let trusted_raw = hex::decode(trusted_state_hex.trim_start_matches("0x"))?;
     let trusted = tee_attestation::decode_ism_state(&trusted_raw)?;
@@ -376,18 +433,6 @@ pub async fn attest_arbitrum(
     let l1 = ExecutionReader::new(l1_execution);
     let l2 = ExecutionReader::new(l2_archive);
 
-    // Which L2 block Ethereum has confirmed, proven rather than asked for.
-    let root_proof = get_arbitrum_root_proof(
-        &l1,
-        &l2,
-        rollup.parse()?,
-        RollupLayout::ARBITRUM_SEPOLIA,
-        l1_block,
-    )
-    .await?;
-
-    // Deriving it here as well is not redundant: it is how this knows which L2 block to read
-    // the tree at, and a mismatch surfaces before minutes of proving rather than after.
     let l1_state_root: alloy_primitives::B256 = l1
         .call(
             "eth_getBlockByNumber",
@@ -397,7 +442,12 @@ pub async fn attest_arbitrum(
         .as_str()
         .context("L1 block has no state root")?
         .parse()?;
-    let l2_root = get_arbitrum_root(l1_state_root, &root_proof)?;
+
+    // Which L2 block Ethereum has confirmed, proven rather than asked for. Deriving the root
+    // here too is not redundant: it is how this knows which L2 block to read the tree at, and
+    // a mismatch surfaces before minutes of proving rather than after.
+    let (l2_root, root_proof) =
+        get_l2_root(kind, &l1, &l2, anchor, l1_block, l1_state_root).await?;
 
     anyhow::ensure!(
         l2_root.height > trusted.height,
@@ -439,7 +489,7 @@ pub async fn attest_arbitrum(
     let request = serde_json::json!({
         "trusted_state": hex::encode(&trusted_raw),
         "origin": {
-            "chain": "arbitrum",
+            "chain": kind.chain_tag(),
             "ethereum": {
                 "chain": "ethereum",
                 "store": store,

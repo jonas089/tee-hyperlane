@@ -173,46 +173,73 @@ async fn dashboard() -> axum::response::Html<&'static str> {
     axum::response::Html(include_str!("../ui/relayer.html"))
 }
 
-/// Read every route's trusted state. Chain reads shell out, so they run off the async pool.
+/// Read every route's trusted state.
+///
+/// Each route costs two chain reads and each shells out to `cast` or `celestia-appd`, so done
+/// in sequence a five-route page takes half a minute. They are independent, so they run at
+/// once and the page waits for the slowest rather than the sum.
 async fn status(State(api): State<Api>) -> Json<Vec<RouteStatus>> {
-    let statuses = tokio::task::spawn_blocking(move || {
-        api.routes
-            .iter()
-            .map(|route| {
-                let batches = api.recent_batches(&route.name);
-                let proving = api.in_flight(&route.name);
-                let mut status = RouteStatus {
-                    name: route.name.clone(),
-                    origin: route.origin.domain(),
-                    destination: route.destination.domain(),
-                    ism: route.ism_id.clone(),
-                    height: None,
-                    timestamp: None,
-                    state_root: None,
-                    batches,
-                    proving,
-                    origin_head: read_origin_head(&route.origin),
-                    error: None,
-                };
-                match read_trusted_state(route) {
-                    Ok((root, height, timestamp)) => {
-                        status.state_root = Some(root);
-                        status.height = Some(height);
-                        status.timestamp = Some(timestamp);
-                    }
-                    Err(error) => status.error = Some(error.to_string()),
-                }
-                status
-            })
-            .collect::<Vec<_>>()
-    })
-    .await
-    .unwrap_or_default();
-    Json(statuses)
+    let mut reads = Vec::new();
+    for (index, route) in api.routes.iter().enumerate() {
+        let route = route.clone();
+        let api = api.clone();
+        reads.push(tokio::task::spawn_blocking(move || (index, read_route(&api, &route))));
+    }
+
+    let mut statuses: Vec<(usize, RouteStatus)> = Vec::new();
+    for read in reads {
+        if let Ok(result) = read.await {
+            statuses.push(result);
+        }
+    }
+    // Keep configuration order, which is the order a reader expects.
+    statuses.sort_by_key(|(index, _)| *index);
+    Json(statuses.into_iter().map(|(_, status)| status).collect())
 }
 
-/// The origin's current head, best effort. A route that cannot reach its origin still shows
-/// everything else.
+fn read_route(api: &Api, route: &RouteConfig) -> RouteStatus {
+    let mut status = RouteStatus {
+        name: route.name.clone(),
+        origin: route.origin.domain(),
+        destination: route.destination.domain(),
+        ism: route.ism_id.clone(),
+        height: None,
+        timestamp: None,
+        state_root: None,
+        batches: api.recent_batches(&route.name),
+        proving: api.in_flight(&route.name),
+        origin_head: read_origin_head(&route.origin),
+        error: None,
+    };
+
+    match read_trusted_state(route) {
+        Ok((root, height, timestamp)) => {
+            status.state_root = Some(root);
+            status.height = Some(height);
+            status.timestamp = Some(timestamp);
+        }
+        Err(error) => status.error = Some(error.to_string()),
+    }
+    status
+}
+
+/// The newest L2 block Ethereum has confirmed, which is what an L2 route can attest up to.
+fn read_confirmed_l2_block(rollup: &str, anchor: &str, l1_rpc: &str) -> Option<u64> {
+    let (signature, line) = match rollup {
+        // Base's registry hands back the root and the block it belongs to.
+        "base" => ("getAnchorRoot()(bytes32,uint256)", 1),
+        // Arbitrum's rollup has no equivalent view; its confirmed block only falls out of the
+        // assertion preimage, which is the attestation's job rather than the dashboard's.
+        _ => return None,
+    };
+    let output = std::process::Command::new("cast")
+        .args(["call", anchor, signature, "--rpc-url", l1_rpc])
+        .output()
+        .ok()?;
+    let text = String::from_utf8(output.stdout).ok()?;
+    text.lines().nth(line)?.split_whitespace().next()?.parse().ok()
+}
+
 fn read_origin_head(origin: &ChainConfig) -> Option<u64> {
     match origin {
         ChainConfig::Celestia { rpc, .. } => {
@@ -225,13 +252,21 @@ fn read_origin_head(origin: &ChainConfig) -> Option<u64> {
         }
         // For an Ethereum origin the relevant head is the *finalized* one, because that is
         // all the enclave will attest.
-        ChainConfig::Ethereum { execution_rpc, .. }
-        | ChainConfig::EthereumL2 { l2_rpc: execution_rpc, .. } => {
+        ChainConfig::Ethereum { execution_rpc, .. } => {
             let output = std::process::Command::new("cast")
                 .args(["block", "finalized", "--field", "number", "--rpc-url", execution_rpc])
                 .output()
                 .ok()?;
             String::from_utf8(output.stdout).ok()?.trim().parse().ok()
+        }
+        // An L2's own head is not the useful number: the enclave attests the block Ethereum
+        // has *confirmed*, which trails it by a challenge window. Reporting the head would
+        // make every L2 route look permanently thousands of blocks behind.
+        ChainConfig::EthereumL2 { rollup, l1_anchor_contract, l1, .. } => {
+            let ChainConfig::Ethereum { execution_rpc, .. } = &**l1 else {
+                return None;
+            };
+            read_confirmed_l2_block(rollup, l1_anchor_contract, execution_rpc)
         }
     }
 }

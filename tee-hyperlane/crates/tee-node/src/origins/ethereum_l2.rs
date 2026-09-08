@@ -248,11 +248,23 @@ pub struct BaseOutputRootPreimage {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BaseRootProof {
     pub anchor_state_registry: Address,
-    /// Storage slot holding the anchor's output root.
-    pub anchor_root_slot: B256,
-    pub account: ClaimedAccount,
-    pub account_proof: Vec<Bytes>,
-    pub anchor_root_proof: Vec<Bytes>,
+    /// Slot holding `anchorGame`, the game the registry currently vouches for.
+    pub anchor_game_slot: u64,
+    pub registry_account: ClaimedAccount,
+    pub registry_account_proof: Vec<Bytes>,
+    pub anchor_game_proof: Vec<Bytes>,
+    /// The whole slot value; the address is its low 20 bytes.
+    pub anchor_game_slot_value: U256,
+    /// The game whose root the registry points at, proven as an account so its code hash is
+    /// known.
+    pub game_account: ClaimedAccount,
+    pub game_account_proof: Vec<Bytes>,
+    /// The game's runtime bytecode. `rootClaim` is not in storage at all: these games are
+    /// clones-with-immutable-args, so the claim is baked into the code and the only way to
+    /// read it under a state root is to prove the code hash and supply the code.
+    pub game_code: Bytes,
+    /// Byte offset of `rootClaim` within that code.
+    pub root_claim_offset: u64,
     pub preimage: BaseOutputRootPreimage,
     /// RLP of the L2 block header, whose keccak is `preimage.latest_block_hash`.
     ///
@@ -268,6 +280,10 @@ pub enum BaseError {
     HeaderHashMismatch { got: B256, expected: B256 },
     #[error("L2 header RLP is malformed")]
     MalformedHeader,
+    #[error("supplied game code hashes to {got}, but the account holds {expected}")]
+    CodeHashMismatch { got: B256, expected: B256 },
+    #[error("game code is too short to hold rootClaim at offset {offset}")]
+    CodeTooShort { offset: u64 },
     #[error(transparent)]
     Mpt(#[from] MptError),
     #[error("output root preimage hashes to {got}, which L1 does not store at this slot")]
@@ -284,31 +300,64 @@ pub fn hash_output_root(p: &BaseOutputRootPreimage) -> B256 {
 }
 
 /// Derive Base's L2 state root from a verified Ethereum L1 state root.
+///
+/// Four links, none of them assumed. L1 storage says which game the `AnchorStateRegistry`
+/// currently vouches for; that game's account says what its code hashes to; the code says
+/// what root it claims; and the claim's preimage says what L2 state that root is. The
+/// registry only ever points at a resolved game whose dispute window has closed, so trusting
+/// its choice is the same assumption the rollup itself makes.
 pub fn get_base_root(
     l1_state_root: B256,
     proof: &BaseRootProof,
 ) -> Result<AttestedRoot, BaseError> {
-    let storage_root = verify_account_proof(
+    let registry_storage = verify_account_proof(
         l1_state_root,
         proof.anchor_state_registry,
-        &proof.account,
-        &proof.account_proof,
+        &proof.registry_account,
+        &proof.registry_account_proof,
     )?;
 
-    let output_root = hash_output_root(&proof.preimage);
+    let slot = B256::from(U256::from(proof.anchor_game_slot));
     verify_storage_proof(
-        storage_root,
-        proof.anchor_root_slot,
-        output_root.into(),
-        &proof.anchor_root_proof,
-    )
-    .map_err(|_| BaseError::OutputRootMismatch { got: output_root })?;
+        registry_storage,
+        slot,
+        proof.anchor_game_slot_value,
+        &proof.anchor_game_proof,
+    )?;
+    let game = Address::from_slice(&proof.anchor_game_slot_value.to_be_bytes::<32>()[12..]);
+
+    // The account proof is what ties the supplied code to the chain; without it any bytes
+    // could claim any root.
+    verify_account_proof(
+        l1_state_root,
+        game,
+        &proof.game_account,
+        &proof.game_account_proof,
+    )?;
+    let got = keccak256(&proof.game_code);
+    if got != proof.game_account.code_hash {
+        return Err(BaseError::CodeHashMismatch {
+            got,
+            expected: proof.game_account.code_hash,
+        });
+    }
+
+    let start = proof.root_claim_offset as usize;
+    let claimed = proof
+        .game_code
+        .get(start..start + 32)
+        .ok_or(BaseError::CodeTooShort { offset: proof.root_claim_offset })?;
+
+    let output_root = hash_output_root(&proof.preimage);
+    if output_root.as_slice() != claimed {
+        return Err(BaseError::OutputRootMismatch { got: output_root });
+    }
 
     let header = decode_l2_header(&proof.l2_header_rlp).map_err(|_| BaseError::MalformedHeader)?;
-    let got = keccak256(&proof.l2_header_rlp);
-    if got != proof.preimage.latest_block_hash {
+    let hashed = keccak256(&proof.l2_header_rlp);
+    if hashed != proof.preimage.latest_block_hash {
         return Err(BaseError::HeaderHashMismatch {
-            got,
+            got: hashed,
             expected: proof.preimage.latest_block_hash,
         });
     }
@@ -319,3 +368,4 @@ pub fn get_base_root(
         timestamp: header.timestamp,
     })
 }
+

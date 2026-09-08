@@ -88,11 +88,14 @@ enum Command {
         #[arg(long)]
         out: Option<String>,
     },
-    /// Attest one Arbitrum -> Celestia step.
+    /// Attest one L2 -> Celestia step.
     ///
     /// Needs an L2 archive endpoint: the confirmed assertion is thousands of L2 blocks behind
     /// head - that is the rollup's challenge window - and no public node keeps state there.
-    AttestArbitrum {
+    AttestL2 {
+        /// `arbitrum` or `base`.
+        #[arg(long)]
+        rollup: String,
         #[arg(long, default_value = "https://ethereum-sepolia-beacon-api.publicnode.com")]
         beacon: String,
         /// L1 execution, archive: the rollup's storage is proven at the finalized L1 block.
@@ -105,9 +108,10 @@ enum Command {
         enclave: String,
         #[arg(long)]
         trusted_state: String,
-        /// The live BoLD rollup, not the pre-BoLD one the canonical addresses lead to.
-        #[arg(long, default_value = "0x042B2E6C5E99d4c521bd49beeD5E99651D9B0Cf4")]
-        rollup: String,
+        /// Arbitrum's BoLD rollup (not the pre-BoLD one the canonical addresses lead to), or
+        /// Base's AnchorStateRegistry.
+        #[arg(long)]
+        anchor: String,
         #[arg(long, default_value = "0xAD34A66Bf6dB18E858F6B686557075568c6E031C")]
         merkle_tree_hook: String,
         #[arg(long, default_value = "0x598facE78a4302f11E3de0bee1894Da0b2Cb71F8")]
@@ -118,16 +122,19 @@ enum Command {
         #[arg(long)]
         out: Option<String>,
     },
-    /// Produce the genesis ISM state for an Arbitrum-origin ISM.
-    BootstrapArbitrum {
+    /// Produce the genesis ISM state for an L2-origin ISM.
+    BootstrapL2 {
+        /// `arbitrum` or `base`.
+        #[arg(long)]
+        rollup: String,
         #[arg(long, default_value = "https://ethereum-sepolia-beacon-api.publicnode.com")]
         beacon: String,
         #[arg(long, default_value = "https://rpc.sepolia.ethpandaops.io")]
         l1_execution: String,
         #[arg(long)]
         l2_archive: String,
-        #[arg(long, default_value = "0x042B2E6C5E99d4c521bd49beeD5E99651D9B0Cf4")]
-        rollup: String,
+        #[arg(long)]
+        anchor: String,
         #[arg(long)]
         checkpoint: Option<String>,
         #[arg(long)]
@@ -280,25 +287,27 @@ async fn main() -> Result<()> {
             )
             .await
         }
-        Command::AttestArbitrum {
+        Command::AttestL2 {
+            rollup,
             beacon,
             l1_execution,
             l2_archive,
             enclave,
             trusted_state,
-            rollup,
+            anchor,
             merkle_tree_hook,
             mailbox,
             base_slot,
             out,
         } => {
-            commands::attest_arbitrum(
+            commands::attest_l2(
+                commands::L2Kind::parse(&rollup)?,
                 &beacon,
                 &l1_execution,
                 &l2_archive,
                 &enclave,
                 &trusted_state,
-                &rollup,
+                &anchor,
                 &merkle_tree_hook,
                 &mailbox,
                 base_slot,
@@ -306,19 +315,21 @@ async fn main() -> Result<()> {
             )
             .await
         }
-        Command::BootstrapArbitrum {
+        Command::BootstrapL2 {
+            rollup,
             beacon,
             l1_execution,
             l2_archive,
-            rollup,
+            anchor,
             checkpoint,
             identity_digest,
         } => {
-            commands::bootstrap_arbitrum(
+            commands::bootstrap_l2(
+                commands::L2Kind::parse(&rollup)?,
                 &beacon,
                 &l1_execution,
                 &l2_archive,
-                &rollup,
+                &anchor,
                 checkpoint,
                 &identity_digest,
             )

@@ -24,13 +24,68 @@
   h1 { font-size: 1.1rem; margin: 0 0 1.25rem; letter-spacing: -0.01em; }
   .updated { color: var(--muted); font-size: 0.8rem; font-variant-numeric: tabular-nums; }
 
+  .loading-line {
+    display: flex; align-items: center; gap: 0.6rem;
+    color: var(--muted); font-size: 0.85rem; margin-bottom: 1rem;
+  }
+  .spinner {
+    width: 15px; height: 15px; flex: 0 0 auto;
+    border: 2px solid var(--track); border-top-color: var(--accent);
+    border-radius: 50%; animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .skeleton {
+    height: 132px; border-radius: 20px; margin-bottom: 0.9rem;
+    background: linear-gradient(
+      100deg, var(--surface) 30%, var(--field) 50%, var(--surface) 70%
+    );
+    background-size: 220% 100%;
+    animation: shimmer 1.4s ease-in-out infinite;
+    border: 1px solid var(--line);
+  }
+  @keyframes shimmer {
+    0% { background-position: 120% 0; }
+    100% { background-position: -20% 0; }
+  }
+
+  /* A refresh in progress, without stealing attention from the data already on screen. */
+  .updated .spinner { width: 11px; height: 11px; border-width: 2px; display: inline-block;
+    vertical-align: -1px; margin-right: 0.35rem; }
+
+  .summary {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 0.7rem; margin-bottom: 1.1rem;
+  }
+  .stat {
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: 16px; padding: 0.75rem 0.9rem;
+  }
+  .stat span { display: block; color: var(--muted); font-size: 0.74rem; }
+  .stat strong {
+    font-size: 1.35rem; font-weight: 600; letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
+  }
+
   .route {
     background: var(--surface); border: 1px solid var(--line);
     border-radius: 20px; padding: 1.1rem 1.15rem; margin-bottom: 0.9rem;
+    transition: border-color 0.3s ease, transform 0.3s ease;
     opacity: 0; transform: translateY(6px);
     animation: rise 0.45s cubic-bezier(0.22, 0.61, 0.36, 1) forwards;
   }
   @keyframes rise { to { opacity: 1; transform: none; } }
+  .route:hover { border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); }
+  .route.busy { border-color: color-mix(in srgb, var(--accent) 30%, var(--line)); }
+
+  /* The two ends of a route, so direction reads without parsing domain numbers. */
+  .flow { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.15rem; }
+  .flow em {
+    font-style: normal; font-size: 0.82rem; color: var(--muted);
+  }
+  .flow .arrow {
+    flex: 0 0 auto; color: var(--accent); font-size: 0.9rem;
+  }
 
   .route h2 {
     font-size: 0.98rem; margin: 0; text-transform: capitalize; font-weight: 600;
@@ -88,17 +143,35 @@
     <h1>TEE Relayer</h1>
     <span class="updated" id="updated"></span>
   </header>
+  <div class="summary" id="summary"></div>
   <div id="routes"></div>
+
+  <!-- Shown until the first response lands. Every route's state is read from its chain, so
+       the first load is genuinely slow and an empty page reads as broken. -->
+  <div id="loading">
+    <div class="loading-line"><span class="spinner"></span> Reading each route's state from chain…</div>
+    <div class="skeleton"></div>
+    <div class="skeleton"></div>
+    <div class="skeleton"></div>
+  </div>
 </main>
 <script>
   const short = (s, k = 10) =>
-    !s ? "—" : s.length <= k * 2 ? s : s.slice(0, k + 2) + "…" + s.slice(-k);
+    !s ? "-" : s.length <= k * 2 ? s : s.slice(0, k + 2) + "…" + s.slice(-k);
   const plural = (n) => (n === 1 ? "" : "s");
-  const num = (n) => (n == null ? "—" : n.toLocaleString());
+  const num = (n) => (n == null ? "-" : n.toLocaleString());
+  const DOMAINS = {
+    1297040200: "Celestia",
+    11155111: "Ethereum Sepolia",
+    421614: "Arbitrum Sepolia",
+    84532: "Base Sepolia",
+  };
+  const title = (name) =>
+    name.split("-to-").map((p) => p.replace(/^./, (c) => c.toUpperCase())).join(" to ");
 
   function batch(b) {
-    if (!b) return "—";
-    return `block ${num(b.height)} · ${b.messages.length} message${plural(b.messages.length)}`;
+    if (!b) return "-";
+    return `block ${num(b.height)}, ${b.messages.length} message${plural(b.messages.length)}`;
   }
 
   // Remember the largest gap each route has shown, so the bar has something to fill against.
@@ -111,14 +184,33 @@
     return { behind, percent: Math.round((1 - behind / widest[r.name]) * 100) };
   }
 
+  function summarise(routes) {
+    const proving = routes.filter((r) => r.proving).length;
+    const behind = routes.reduce(
+      (n, r) => n + (r.originHead != null && r.height != null ? Math.max(0, r.originHead - r.height) : 0),
+      0,
+    );
+    const proven = routes.reduce((n, r) => n + r.batches.length, 0);
+    document.getElementById("summary").innerHTML = `
+      <div class="stat"><span>Routes</span><strong>${routes.length}</strong></div>
+      <div class="stat"><span>Proving</span><strong>${proving}</strong></div>
+      <div class="stat"><span>Batches proven</span><strong>${proven}</strong></div>
+      <div class="stat"><span>Blocks behind</span><strong>${num(behind)}</strong></div>`;
+  }
+
   function draw(routes) {
+    summarise(routes);
     document.getElementById("routes").innerHTML = routes
       .map((r, i) => {
         const c = catchup(r);
         return `
-      <section class="route" style="animation-delay:${i * 60}ms">
-        <h2>${r.name.replace(/-/g, " ")}</h2>
-        <div class="domains">domain ${r.origin} &rarr; ${r.destination}</div>
+      <section class="route ${r.proving ? "busy" : ""}" style="animation-delay:${i * 60}ms">
+        <h2>${title(r.name)}</h2>
+        <div class="flow">
+          <em>${DOMAINS[r.origin] || r.origin}</em>
+          <span class="arrow">&rarr;</span>
+          <em>${DOMAINS[r.destination] || r.destination}</em>
+        </div>
 
         ${c ? `<div class="catchup">
           <div class="catchup-top">
@@ -156,13 +248,30 @@
     });
   }
 
+  const stamp = () =>
+    new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+
+  let loaded = false;
+
   async function refresh() {
+    const updated = document.getElementById("updated");
+    updated.innerHTML = loaded
+      ? `<span class="spinner"></span>refreshing`
+      : "";
     try {
-      draw(await (await fetch("/api/status")).json());
-      document.getElementById("updated").textContent =
-        "updated " + new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-    } catch (e) {
-      document.getElementById("updated").textContent = "unreachable";
+      const routes = await (await fetch("/api/status")).json();
+      if (!loaded) {
+        document.getElementById("loading").remove();
+        loaded = true;
+      }
+      draw(routes);
+      updated.textContent = "updated " + stamp();
+    } catch {
+      updated.textContent = loaded ? "unreachable, retrying" : "";
+      if (!loaded) {
+        document.querySelector(".loading-line").innerHTML =
+          `<span class="spinner"></span> Relayer is not answering yet. Retrying…`;
+      }
     }
   }
 

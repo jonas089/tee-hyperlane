@@ -307,3 +307,16 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0
   padding: 0.5rem 0 0;
   cursor: pointer;
 }
+
+/* A wait the sender cannot shorten, said before they commit rather than after. */
+.wait {
+  margin: 0.85rem 0 0;
+  padding: 0.7rem 0.85rem;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.wait strong { color: var(--ink); }

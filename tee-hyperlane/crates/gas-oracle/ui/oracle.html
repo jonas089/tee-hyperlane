@@ -106,10 +106,10 @@
     84532: "Base Sepolia",
   };
   const at = (t) =>
-    t ? new Date(t * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—";
+    t ? new Date(t * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "-";
   const gwei = (wei) => (Number(wei) / 1e9).toFixed(4) + " gwei";
   const usd = (n) => "$" + Number(n).toLocaleString(undefined, { maximumFractionDigits: 2 });
-  const short = (a) => (a ? a.slice(0, 10) + "…" + a.slice(-8) : "—");
+  const short = (a) => (a ? a.slice(0, 10) + "…" + a.slice(-8) : "-");
 
   // Anything under this is worth a second look before it stops the bridge.
   const LOW = { TIA: 0.2, ETH: 0.005 };
@@ -153,9 +153,9 @@
       <tr class="${mark("chain", c.chain + c.remote_domain, c.gas_price)}">
         <td>${c.chain}</td>
         <td>${DOMAINS[c.remote_domain] || c.remote_domain}</td>
-        <td class="num">${c.error ? "—" : c.token_exchange_rate}</td>
-        <td class="num">${c.error ? "—" : c.gas_price}</td>
-        <td class="num">${c.gas_overhead ?? "—"}</td>
+        <td class="num">${c.error ? "-" : c.token_exchange_rate}</td>
+        <td class="num">${c.error ? "-" : c.gas_price}</td>
+        <td class="num">${c.gas_overhead ?? "-"}</td>
       </tr>${c.error ? `<tr><td colspan="5" class="err">${c.error}</td></tr>` : ""}`));
 
     fill("readings", (d.readings || []).map((r) => `
@@ -168,7 +168,7 @@
       </tr>`));
 
     document.getElementById("when").textContent = last
-      ? `last ${at(last)} · next ${at(next)}`
+      ? `last ${at(last)}, next ${at(next)}`
       : "no round yet";
   }
 

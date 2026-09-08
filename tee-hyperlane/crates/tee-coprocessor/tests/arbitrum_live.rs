@@ -5,7 +5,7 @@
 //!
 //!   ALCHEMY_API_KEY=... cargo test -p tee-coprocessor --test arbitrum_live -- --ignored
 
-use tee_coprocessor::arbitrum::get_arbitrum_root_proof;
+use tee_coprocessor::ethereum_l2::get_arbitrum_root_proof;
 use tee_coprocessor::ethereum::ExecutionReader;
 use tee_node::origins::ethereum_l2::{get_arbitrum_root, RollupLayout};
 

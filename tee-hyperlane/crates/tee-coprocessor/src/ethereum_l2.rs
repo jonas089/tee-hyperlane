@@ -1,4 +1,7 @@
-//! Gathering the proof that Ethereum has confirmed an Arbitrum state root.
+//! Gathering the proof that Ethereum has confirmed an L2's state root.
+//!
+//! Both rollups here are optimistic, so both publish a claim to L1 and both make it trustless
+//! only once a challenge window closes. What they store differs:
 //!
 //! Arbitrum Sepolia runs BoLD, so L1 stores the *hash* of the confirmed assertion and nothing
 //! about the L2 block it commits to. Three things therefore have to be assembled: the storage
@@ -6,14 +9,20 @@
 //! pending, the assertion's preimage, and the L2 header whose hash that preimage names. The
 //! enclave rechecks all three, so everything here is untrusted input.
 //!
-//! Note which rollup this reads. The addresses in circulation point at the pre-BoLD contract,
-//! which still answers `latestConfirmed()` with a node number and has confirmed nothing in
-//! weeks. The live one is `inbox.bridge().rollup()`.
+//! Base stores less again: its `AnchorStateRegistry` holds only the *address* of the game it
+//! currently vouches for, and that game's `rootClaim` is not in storage either - these are
+//! clones-with-immutable-args, so the claim lives in the clone's bytecode. Reaching it means
+//! proving the game's account, supplying its code, and checking the code hash.
+//!
+//! Note which Arbitrum rollup this reads. The addresses in circulation point at the pre-BoLD
+//! contract, which still answers `latestConfirmed()` with a node number and has confirmed
+//! nothing in weeks. The live one is `inbox.bridge().rollup()`.
 
-use alloy_primitives::{keccak256, Address, B256, U256};
+use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
 use anyhow::{Context, Result};
 use tee_node::origins::ethereum_l2::{
-    get_assertion_node_slot, AssertionState, ArbitrumRootProof, RollupLayout,
+    get_assertion_node_slot, ArbitrumRootProof, AssertionState, BaseOutputRootPreimage,
+    BaseRootProof, RollupLayout,
 };
 
 use crate::ethereum::ExecutionReader;
@@ -186,7 +195,7 @@ async fn get_l2_header_rlp(l2: &ExecutionReader, block_hash: B256) -> Result<Vec
         })
     };
 
-    let fields: Vec<Vec<u8>> = vec![
+    let mut fields: Vec<Vec<u8>> = vec![
         raw("parentHash")?,
         raw("sha3Uncles")?,
         raw("miner")?,
@@ -205,6 +214,22 @@ async fn get_l2_header_rlp(l2: &ExecutionReader, block_hash: B256) -> Result<Vec
         quantity("baseFeePerGas")?,
     ];
 
+    // Fields added by later forks, in order. RLP is positional, so they can only be appended
+    // and only while each is present: an OP Stack header carries all five, an Arbitrum one
+    // none. Stopping at the first absent field is what keeps one encoder correct for both.
+    for (name, is_quantity) in [
+        ("withdrawalsRoot", false),
+        ("blobGasUsed", true),
+        ("excessBlobGas", true),
+        ("parentBeaconBlockRoot", false),
+        ("requestsHash", false),
+    ] {
+        if block[name].is_null() {
+            break;
+        }
+        fields.push(if is_quantity { quantity(name)? } else { raw(name)? });
+    }
+
     let mut payload = Vec::new();
     for field in &fields {
         encode_rlp_bytes(field, &mut payload);
@@ -219,6 +244,152 @@ async fn get_l2_header_rlp(l2: &ExecutionReader, block_hash: B256) -> Result<Vec
         "re-encoded header hashes to {got}, not {block_hash}; the header layout has changed"
     );
     Ok(out)
+}
+
+/// Where Base's `AnchorStateRegistry` keeps `anchorGame`, and where a dispute game's clone
+/// keeps its `rootClaim`. Both read off the live Base Sepolia contracts.
+pub const BASE_ANCHOR_GAME_SLOT: u64 = 2;
+pub const BASE_ROOT_CLAIM_OFFSET: u64 = 118;
+
+/// The L2 predeploy whose storage root the OP Stack output root commits to.
+const L2_TO_L1_MESSAGE_PASSER: &str = "0x4200000000000000000000000000000000000016";
+
+/// Assemble everything the enclave needs to derive Base's state root from L1.
+pub async fn get_base_root_proof(
+    l1: &ExecutionReader,
+    l2: &ExecutionReader,
+    registry: Address,
+    l1_block: u64,
+) -> Result<BaseRootProof> {
+    let slot = B256::from(U256::from(BASE_ANCHOR_GAME_SLOT));
+    let registry_proof = l1
+        .call(
+            "eth_getProof",
+            serde_json::json!([registry, [slot], format!("0x{l1_block:x}")]),
+        )
+        .await
+        .context("eth_getProof on the anchor state registry")?;
+
+    let slots = registry_proof["storageProof"].as_array().context("storageProof")?;
+    let anchor_game_slot_value: U256 =
+        slots.first().context("no anchorGame slot")?["value"].as_str().context("value")?.parse()?;
+    let game = Address::from_slice(&anchor_game_slot_value.to_be_bytes::<32>()[12..]);
+
+    let game_proof = l1
+        .call("eth_getProof", serde_json::json!([game, [], format!("0x{l1_block:x}")]))
+        .await
+        .context("eth_getProof on the anchor game")?;
+
+    let code = l1
+        .call("eth_getCode", serde_json::json!([game, format!("0x{l1_block:x}")]))
+        .await?;
+    let code: Bytes = code.as_str().context("eth_getCode")?.parse()?;
+
+    let start = BASE_ROOT_CLAIM_OFFSET as usize;
+    let root_claim: B256 = B256::from_slice(
+        code.get(start..start + 32)
+            .context("game code is too short to hold rootClaim")?,
+    );
+
+    let preimage = get_output_root_preimage(l1, l2, registry, root_claim, l1_block).await?;
+    let l2_header_rlp = get_l2_header_rlp(l2, preimage.latest_block_hash).await?;
+
+    Ok(BaseRootProof {
+        anchor_state_registry: registry,
+        anchor_game_slot: BASE_ANCHOR_GAME_SLOT,
+        registry_account: serde_json::from_value(serde_json::json!({
+            "nonce": registry_proof["nonce"],
+            "balance": registry_proof["balance"],
+            "storage_root": registry_proof["storageHash"],
+            "code_hash": registry_proof["codeHash"],
+        }))?,
+        registry_account_proof: serde_json::from_value(registry_proof["accountProof"].clone())?,
+        anchor_game_proof: serde_json::from_value(slots[0]["proof"].clone())?,
+        anchor_game_slot_value,
+        game_account: serde_json::from_value(serde_json::json!({
+            "nonce": game_proof["nonce"],
+            "balance": game_proof["balance"],
+            "storage_root": game_proof["storageHash"],
+            "code_hash": game_proof["codeHash"],
+        }))?,
+        game_account_proof: serde_json::from_value(game_proof["accountProof"].clone())?,
+        game_code: code,
+        root_claim_offset: BASE_ROOT_CLAIM_OFFSET,
+        preimage,
+        l2_header_rlp: l2_header_rlp.into(),
+    })
+}
+
+/// The four values the OP Stack output root commits to, read at the block L1 confirmed.
+///
+/// Which block that is comes from the registry, and is only a hint: the root is recomputed
+/// from what the L2 reports and has to equal the claim proven out of the game's code. A wrong
+/// block number therefore fails here rather than producing a wrong root.
+async fn get_output_root_preimage(
+    l1: &ExecutionReader,
+    l2: &ExecutionReader,
+    registry: Address,
+    root_claim: B256,
+    l1_block: u64,
+) -> Result<BaseOutputRootPreimage> {
+    let block_number = get_anchor_block_number(l1, registry, l1_block).await?;
+
+    let block = l2
+        .call(
+            "eth_getBlockByNumber",
+            serde_json::json!([format!("0x{block_number:x}"), false]),
+        )
+        .await?;
+    anyhow::ensure!(!block.is_null(), "L2 has no block {block_number}");
+
+    let passer = l2
+        .call(
+            "eth_getProof",
+            serde_json::json!([L2_TO_L1_MESSAGE_PASSER, [], format!("0x{block_number:x}")]),
+        )
+        .await
+        .context("eth_getProof on the message passer; the L2 endpoint must be an archive")?;
+
+    let preimage = BaseOutputRootPreimage {
+        version: B256::ZERO,
+        state_root: block["stateRoot"].as_str().context("stateRoot")?.parse()?,
+        message_passer_storage_root: passer["storageHash"]
+            .as_str()
+            .context("storageHash")?
+            .parse()?,
+        latest_block_hash: block["hash"].as_str().context("block hash")?.parse()?,
+    };
+
+    let recomputed = tee_node::origins::ethereum_l2::hash_output_root(&preimage);
+    anyhow::ensure!(
+        recomputed == root_claim,
+        "output root for L2 block {block_number} is {recomputed}, but L1 confirmed {root_claim}"
+    );
+    Ok(preimage)
+}
+
+/// `AnchorStateRegistry.getAnchorRoot()` returns the anchor's root and its L2 block number.
+///
+/// Read at the same L1 block the anchor game was proven at, not at the head: the anchor moves
+/// every few days, and a number read later need not belong to the game just proven.
+async fn get_anchor_block_number(
+    l1: &ExecutionReader,
+    registry: Address,
+    l1_block: u64,
+) -> Result<u64> {
+    let selector = &keccak256(b"getAnchorRoot()")[..4];
+    let result = l1
+        .call(
+            "eth_call",
+            serde_json::json!([
+                { "to": registry, "data": format!("0x{}", hex::encode(selector)) },
+                format!("0x{l1_block:x}")
+            ]),
+        )
+        .await?;
+    let raw = hex::decode(result.as_str().context("eth_call")?.trim_start_matches("0x"))?;
+    anyhow::ensure!(raw.len() >= 64, "getAnchorRoot returned {} bytes", raw.len());
+    Ok(U256::from_be_slice(&raw[32..64]).to::<u64>())
 }
 
 fn encode_rlp_bytes(value: &[u8], out: &mut Vec<u8>) {

@@ -92,6 +92,8 @@ pub enum ChainConfig {
         l2_rpc: String,
         /// The Ethereum chain whose light client secures this one.
         l1: Box<ChainConfig>,
+        /// Which rollup this is: `arbitrum` or `base`. They prove different things.
+        rollup: String,
         /// Arbitrum's BoLD RollupCore, or Base's AnchorStateRegistry.
         l1_anchor_contract: String,
         mailbox: String,
