@@ -31,19 +31,25 @@ nix build .#image --rebuild                # rebuilds and diffs; silent means id
 
 ## 2. The running enclaves measure to the pinned identity
 
-The compose file's hash becomes `compose-hash` in the enclave's RTMR3, and the circuits pin
-that. So asking a live enclave what it measures to, and comparing against the checked-in
-identity, closes the loop from source to running code.
+`compose-hash` lands in the enclave's RTMR3, and the circuits pin it. It is *not* the sha256
+of `docker-compose.yml`: dstack hashes its own app-compose document, which wraps that file. So
+the check is not "hash the file" but "ask a live enclave what it measured and compare against
+what is pinned", which closes the same loop without having to reimplement their encoding.
 
 ```sh
+cd tee-circuit
 for app in 596ed37171fa16da4a9ba5afaec8f19cb8b2860d a3feb765232e08e567d5f7de773db9dac55e7d5b; do
-  cargo run -p circuit-tool -- identity \
-    --url https://$app-8080.dstack-pha-prod9.phala.network
+  cargo run -q -p circuit-tool -- identity \
+    --url https://$app-8080.dstack-pha-prod9.phala.network \
+    | grep -E 'mr_td|os_image_hash|compose_hash|mr_kms' > /tmp/live-$app
 done
-diff <(...) tee-circuit/tee-attestation/enclave-identity.toml
+# The two enclaves must agree with each other, and with what the circuits pin.
+diff /tmp/live-596ed37171fa16da4a9ba5afaec8f19cb8b2860d /tmp/live-a3feb765232e08e567d5f7de773db9dac55e7d5b
+diff /tmp/live-596ed37171fa16da4a9ba5afaec8f19cb8b2860d \
+     <(grep -E 'mr_td|os_image_hash|compose_hash|mr_kms' tee-attestation/enclave-identity.toml)
 ```
 
-Both enclaves must print the same values, and those values must match the file:
+Both diffs are empty today. The values are:
 
 ```
 mr_td         f06dfda6dce1cf904d4e2bab1dc370634cf95cefa2ceb2de2eee127c93826980…
