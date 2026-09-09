@@ -34,13 +34,23 @@ pub(super) async fn rebuild_ethereum_store(
 ) -> Result<(tee_node::origins::ethereum::EthereumStore, String)> {
     use tee_node::origins::ethereum::commit_ethereum_store;
 
+    // A configured checkpoint is a hint, not an answer, and it stops being the right one the
+    // moment the route succeeds: the ISM's commitment is to whatever store the last update
+    // left behind, while this names the store the ISM was created with. It is still worth
+    // trying first, because that genesis store is the one case the search below cannot reach
+    // - the search only walks back eight finalized epochs, and a genesis anchor is usually
+    // older than that. So try it, and fall through rather than failing when it no longer
+    // matches, which is exactly what an advanced ISM looks like.
     if let Some(checkpoint) = explicit {
-        let store = bootstrap_store(beacon, config, checkpoint).await?;
-        anyhow::ensure!(
-            commit_ethereum_store(&store) == trusted.lc_store_commit,
-            "store rebuilt from {checkpoint} does not match the ISM's commitment"
-        );
-        return Ok((store, checkpoint.to_string()));
+        if let Ok(store) = bootstrap_store(beacon, config, checkpoint).await {
+            if commit_ethereum_store(&store) == trusted.lc_store_commit {
+                return Ok((store, checkpoint.to_string()));
+            }
+            debug!(
+                checkpoint,
+                "the configured checkpoint is not this ISM's store; searching from the head"
+            );
+        }
     }
 
     if trusted.origin_domain == tee_node::origins::Origin::Ethereum.domain() {
