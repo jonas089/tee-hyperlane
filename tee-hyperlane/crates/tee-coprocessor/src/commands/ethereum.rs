@@ -96,6 +96,30 @@ pub(super) async fn rebuild_ethereum_store(
     )
 }
 
+/// Slots in a sync-committee period: 256 epochs of 32 slots.
+const SLOTS_PER_SYNC_PERIOD: u64 = 256 * 32;
+
+/// The committee updates needed to walk `store` up to the period `finality` belongs to.
+///
+/// Empty whenever both are already in the same period, which is the normal case; a route only
+/// needs these when a period boundary has passed since its last successful update.
+pub(super) async fn bridging_updates(
+    beacon: &crate::ethereum::EthereumReader,
+    store: &tee_node::origins::ethereum::EthereumStore,
+    finality: &helios_consensus_core::types::FinalityUpdate<crate::ethereum::Spec>,
+) -> Result<Vec<helios_consensus_core::types::Update<crate::ethereum::Spec>>> {
+    let store_period = store.store.finalized_header.beacon().slot / SLOTS_PER_SYNC_PERIOD;
+    let head_period = finality.finalized_header().beacon().slot / SLOTS_PER_SYNC_PERIOD;
+    if head_period <= store_period {
+        return Ok(Vec::new());
+    }
+    // From the store's own period: the first update rotates it out of that period, and each
+    // one after carries the next committee.
+    beacon
+        .updates(store_period, head_period - store_period)
+        .await
+}
+
 pub(super) async fn bootstrap_store(
     beacon: &crate::ethereum::EthereumReader,
     config: &crate::ethereum::ChainConfig,
@@ -146,6 +170,27 @@ pub async fn attest_ethereum(
         rebuild_ethereum_store(&beacon_reader, &config, &trusted, checkpoint).await?;
 
     let finality = beacon_reader.finality_update().await?;
+
+    // Sync-committee updates, without which the light client cannot cross a period boundary.
+    //
+    // This was hardcoded empty. A store follows the chain happily inside one sync-committee
+    // period and then stops: the enclave rejects the finality update with "invalid sync
+    // committee period", every tick, until the ISM is rebuilt. Sepolia's period is 256 epochs
+    // - about 27 hours - so every Ethereum-backed route wedged roughly daily, and it only
+    // looked intermittent because the cascades kept re-bootstrapping the stores.
+    //
+    // The updates that rotate the committee are what bridge the gap, and the beacon API
+    // serves them by period. Fetching only the periods actually missing keeps this a no-op in
+    // the common case.
+    let committee_updates = bridging_updates(&beacon_reader, &store, &finality)
+        .await
+        .unwrap_or_default();
+    if !committee_updates.is_empty() {
+        info!(
+            count = committee_updates.len(),
+            "carrying sync committee updates"
+        );
+    }
 
     let hook: alloy_primitives::Address = merkle_tree_hook.parse()?;
     let mailbox_address: alloy_primitives::Address = mailbox.parse()?;
@@ -209,7 +254,7 @@ pub async fn attest_ethereum(
         "origin": {
             "chain": "ethereum",
             "store": store,
-            "updates": { "committee_updates": [], "finality_update": finality },
+            "updates": { "committee_updates": committee_updates, "finality_update": finality },
         },
         "tree": tree_input,
         "tree_snapshot": snapshot_input,

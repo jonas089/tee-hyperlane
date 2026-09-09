@@ -13,7 +13,7 @@ use crate::config::Config;
 use crate::tasks::{cpu_prover_permit, run_route, ProofStore};
 
 mod celestia;
-mod ethereum;
+pub(crate) mod ethereum;
 mod ethereum_l2;
 
 pub use celestia::{attest_celestia, bootstrap_celestia};

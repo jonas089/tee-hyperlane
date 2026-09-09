@@ -258,6 +258,12 @@ pub async fn attest_l2(
     let mut tree_address = [0u8; 32];
     tree_address[12..].copy_from_slice(hook.as_slice());
 
+    // An L2 route rides Ethereum's light client, so it crosses sync-committee periods and
+    // wedges on them in exactly the same way. Same bridge, same no-op when nothing is missing.
+    let committee_updates = super::ethereum::bridging_updates(&beacon_reader, &store, &finality)
+        .await
+        .unwrap_or_default();
+
     let tree_input = evm_tree_input(&tree_proof)?;
     let snapshot_input = evm_tree_input(&snapshot_proof)?;
 
@@ -269,7 +275,7 @@ pub async fn attest_l2(
             "ethereum": {
                 "chain": "ethereum",
                 "store": store,
-                "updates": { "committee_updates": [], "finality_update": finality },
+                "updates": { "committee_updates": committee_updates, "finality_update": finality },
             },
             "proof": root_proof,
         },
