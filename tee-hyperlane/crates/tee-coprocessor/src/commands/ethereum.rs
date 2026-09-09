@@ -20,11 +20,14 @@ use super::evm_tree_input;
 /// for a store three hours old. Eight epochs is fifty-one minutes, so the search read the
 /// last hour of finalized checkpoints, found nothing, and wedged the route.
 ///
-/// Ninety-six epochs is about ten hours, which covers a full prover queue with room over.
-/// The cost is bounded and only paid when the route cannot resolve its store any other way:
-/// each step is one beacon fetch, and the loop stops at the first match.
+/// This is a recovery path now, not the mechanism. A healthy route records the checkpoint its
+/// last update produced and looks it up next tick, so the search only runs for a route that
+/// has never succeeded or has been broken across a restart. Sizing it is therefore about how
+/// far back a stuck route might need rescuing from, not about ordinary operation - five
+/// hundred and twelve epochs is a bit over two days. Each step is one beacon request and the
+/// loop stops at the first match.
 const SLOTS_PER_EPOCH: u64 = 32;
-const MAX_CHECKPOINT_SEARCH_EPOCHS: u64 = 96;
+const MAX_CHECKPOINT_SEARCH_EPOCHS: u64 = 512;
 
 /// Rebuild the exact light-client store an ISM committed to.
 ///
