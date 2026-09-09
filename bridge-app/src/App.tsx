@@ -10,6 +10,7 @@ import {
 } from "./config";
 import type { ChainId, CosmosChain, EvmChain, TokenId } from "./config";
 import {
+  describeError,
   fetchBalance,
   formatAmount,
   formatFee,
@@ -151,7 +152,7 @@ export default function App() {
       if (chain.kind === "evm") setEvm(await connectMetaMask(chain));
       else setCosmos(await connectKeplr(chain));
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(describeError(e));
     }
   }, []);
 
@@ -161,6 +162,18 @@ export default function App() {
     try {
       const target = recipient || defaultRecipient;
       if (!target) throw new Error("Enter a recipient address");
+
+      // Checked here rather than left to the chain. Sending more than you hold reverts inside
+      // transferRemote, and a revert reaches the browser as a provider object with the reason
+      // buried in it - the user sees a failed transaction and no idea they simply overdrew.
+      const wanted = toBaseUnits(amount, token);
+      if (wanted <= 0n) throw new Error("Enter an amount greater than zero");
+      if (sourceBalance !== undefined && wanted > sourceBalance) {
+        throw new Error(
+          `Not enough ${token} on ${source.name}: ` +
+            `you have ${formatAmount(sourceBalance, token)} and asked to send ${amount}`,
+        );
+      }
 
       let tx: string;
       let messageId: string;
@@ -172,7 +185,7 @@ export default function App() {
           token,
           destination: destination.domain,
           recipient: target,
-          amount: toBaseUnits(amount, token),
+          amount: wanted,
           sender: evm.address,
         });
         messageId = await waitForMessageId(source as EvmChain, tx);
@@ -188,7 +201,7 @@ export default function App() {
           token,
           destinationDomain: destination.domain,
           recipient: toRecipientBytes32(target),
-          amount: toBaseUnits(amount, token),
+          amount: wanted,
           sender: cosmos.address,
           quotedFee: quoted.amount,
         });
@@ -211,7 +224,7 @@ export default function App() {
       setAmount("");
       loadBalances();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(describeError(e));
     } finally {
       setSending(false);
     }

@@ -18,6 +18,7 @@ import {
   routerFor,
 } from "./config";
 import type { Chain, ChainId, EvmChain, TokenId } from "./config";
+import { switchEvmChain } from "./wallets";
 
 export type Step = "dispatched" | "attested" | "authorised" | "delivered";
 export const STEPS: Step[] = ["dispatched", "attested", "authorised", "delivered"];
@@ -154,6 +155,30 @@ export async function sendFromEvm(opts: {
     args: [opts.destination, toRecipientBytes32(opts.recipient), opts.amount],
   });
 
+  // The wallet follows the chain it was connected on, not the one picked in the form, and a
+  // router address means something different on every chain. Sending without this put a
+  // Base router address into a Sepolia transaction: no contract there, so MetaMask sent the
+  // delivery fee to a bare address as a plain transfer. It succeeded, it cost real money, and
+  // it bridged nothing.
+  await switchEvmChain(opts.chain);
+
+  // Switching can be declined, and a declined switch looks like success to the code above.
+  // Ask the wallet where it actually is rather than assuming it moved.
+  const current = (await window.ethereum!.request({ method: "eth_chainId" })) as string;
+  if (current.toLowerCase() !== opts.chain.chainIdHex.toLowerCase()) {
+    throw new Error(
+      `wallet is on chain ${current}, not ${opts.chain.name} (${opts.chain.chainIdHex}) - ` +
+        "approve the network switch and try again",
+    );
+  }
+
+  // Cheap last guard: on the right chain this address is a contract. If it has no code we are
+  // about to repeat the same mistake in a new disguise.
+  const code = await rpc(opts.chain, "eth_getCode", [router, "latest"]);
+  if (!code || code === "0x") {
+    throw new Error(`no router deployed at ${router} on ${opts.chain.name}`);
+  }
+
   return window.ethereum!.request({
     method: "eth_sendTransaction",
     params: [{ from: opts.sender, to: router, data, value: toHex(fee) }],
@@ -233,15 +258,55 @@ export async function quoteBridgeFee(from: ChainId, to: ChainId): Promise<Bridge
   return { amount: BigInt(result), symbol: "ETH", decimals: 18 };
 }
 
+/**
+ * Enough digits to see the number, rather than a fixed six.
+ *
+ * A Base delivery costs 0.000000508755114154 ETH. Truncated to six decimals every digit of
+ * that is a zero, so the UI said "0 ETH" for a fee it was about to charge - which reads as
+ * "free" rather than "small". Significant digits are counted from the first non-zero, so a
+ * fee is never rounded away to nothing however small it is.
+ */
 export function formatFee(fee: BridgeFee): string {
   const unit = 10n ** BigInt(fee.decimals);
   const whole = fee.amount / unit;
-  const fraction = (fee.amount % unit)
-    .toString()
-    .padStart(fee.decimals, "0")
-    .slice(0, 6)
-    .replace(/0+$/, "");
-  return `${fraction ? `${whole}.${fraction}` : whole} ${fee.symbol}`;
+  const raw = (fee.amount % unit).toString().padStart(fee.decimals, "0");
+
+  if (whole > 0n) {
+    const fraction = raw.slice(0, 6).replace(/0+$/, "");
+    return `${fraction ? `${whole}.${fraction}` : whole} ${fee.symbol}`;
+  }
+  if (fee.amount === 0n) return `0 ${fee.symbol}`;
+
+  const firstDigit = raw.search(/[1-9]/);
+  const fraction = raw.slice(0, firstDigit + 4).replace(/0+$/, "");
+  return `0.${fraction} ${fee.symbol}`;
+}
+
+/**
+ * What a wallet or node actually said went wrong.
+ *
+ * MetaMask rejects with a plain object, not an `Error`, so `String(e)` on it produces
+ * "[object Object]" and the user is told nothing at all. The useful text is in one of several
+ * places depending on whether the wallet, the node or the contract refused.
+ */
+export function describeError(e: unknown): string {
+  if (e instanceof Error && e.message) return e.message;
+  if (typeof e === "string") return e;
+  if (e && typeof e === "object") {
+    const any = e as Record<string, any>;
+    const nested =
+      any.data?.message ?? any.error?.message ?? any.cause?.message ?? any.shortMessage;
+    const text = nested ?? any.message ?? any.reason;
+    if (typeof text === "string" && text) {
+      return any.code !== undefined ? `${text} (code ${any.code})` : text;
+    }
+    try {
+      return JSON.stringify(e);
+    } catch {
+      return "the wallet refused without saying why";
+    }
+  }
+  return String(e);
 }
 
 /** What this account holds of one token on one chain. */
