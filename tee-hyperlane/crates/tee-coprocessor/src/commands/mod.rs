@@ -51,6 +51,36 @@ fn now_secs() -> u64 {
         .unwrap_or(0)
 }
 
+/// Remember which checkpoint reproduces the store this route just committed to.
+///
+/// Searching for it afterwards cannot be made to work. The search walks finalized checkpoints
+/// back from the head, so its window has to exceed the store's age - but a route that is
+/// failing does not update, so its store ages without bound and outruns any window. Widening
+/// the constant chases a target that moves away faster than the chase. The coprocessor
+/// applied the finality update itself, so it already knows the answer: the store now commits
+/// to that update's finalized header, and the checkpoint is that header's root.
+pub(crate) fn record_checkpoint(out: Option<&str>, checkpoint: &str) {
+    let Some(dir) = out
+        .and_then(|o| std::path::Path::new(o).parent())
+        .and_then(|p| p.parent())
+    else {
+        return;
+    };
+    if let Err(e) = std::fs::write(dir.join("checkpoint"), checkpoint) {
+        debug!(error = %e, "could not record the checkpoint");
+    }
+}
+
+/// What `record_checkpoint` last wrote for this route, if anything.
+pub(crate) fn recorded_checkpoint(out: Option<&str>) -> Option<String> {
+    let dir = out
+        .and_then(|o| std::path::Path::new(o).parent())
+        .and_then(|p| p.parent())?;
+    let text = std::fs::read_to_string(dir.join("checkpoint")).ok()?;
+    let text = text.trim().to_string();
+    (!text.is_empty()).then_some(text)
+}
+
 /// Is any of these messages addressed to `destination`?
 ///
 /// The gate on whether to prove, and it has to look at the destination rather than just at

@@ -7761,6 +7761,7 @@ dependencies = [
  "tower-http",
  "tracing",
  "tracing-subscriber",
+ "tree_hash",
 ]
 
 [[package]]

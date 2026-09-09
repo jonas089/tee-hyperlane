@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 hyperlane-types.workspace = true
+tree_hash = "0.10"
 tee-attestation.workspace = true
 tee-node.workspace = true
 alloy-primitives.workspace = true

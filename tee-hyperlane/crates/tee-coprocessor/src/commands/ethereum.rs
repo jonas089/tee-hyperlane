@@ -5,6 +5,7 @@
 
 use anyhow::{Context, Result};
 use tracing::{debug, info};
+use tree_hash::TreeHash;
 
 use crate::ethereum::SECONDS_PER_SLOT;
 
@@ -40,7 +41,7 @@ pub(super) async fn rebuild_ethereum_store(
     beacon: &crate::ethereum::EthereumReader,
     config: &crate::ethereum::ChainConfig,
     trusted: &tee_attestation::IsmState,
-    explicit: Option<&str>,
+    hints: &[&str],
 ) -> Result<(tee_node::origins::ethereum::EthereumStore, String)> {
     use tee_node::origins::ethereum::commit_ethereum_store;
 
@@ -51,15 +52,15 @@ pub(super) async fn rebuild_ethereum_store(
     // - the search only walks back eight finalized epochs, and a genesis anchor is usually
     // older than that. So try it, and fall through rather than failing when it no longer
     // matches, which is exactly what an advanced ISM looks like.
-    if let Some(checkpoint) = explicit {
+    // Hints in order of how likely they are to be right: what this route recorded after its
+    // last successful update, then whatever is configured. Each is tried and discarded on
+    // mismatch rather than trusted, so a stale one costs a request and nothing else.
+    for checkpoint in hints {
         if let Ok(store) = bootstrap_store(beacon, config, checkpoint).await {
             if commit_ethereum_store(&store) == trusted.lc_store_commit {
-                return Ok((store, checkpoint.to_string()));
+                return Ok((store, (*checkpoint).to_string()));
             }
-            debug!(
-                checkpoint,
-                "the configured checkpoint is not this ISM's store; searching from the head"
-            );
+            debug!(checkpoint, "hint does not reproduce this ISM's store");
         }
     }
 
@@ -166,8 +167,14 @@ pub async fn attest_ethereum(
 
     let beacon_reader = EthereumReader::new(beacon);
     let config = beacon_reader.chain_config().await?;
+    let remembered = super::recorded_checkpoint(out.as_deref());
+    let hints: Vec<&str> = remembered
+        .as_deref()
+        .into_iter()
+        .chain(checkpoint)
+        .collect();
     let (store, _checkpoint) =
-        rebuild_ethereum_store(&beacon_reader, &config, &trusted, checkpoint).await?;
+        rebuild_ethereum_store(&beacon_reader, &config, &trusted, &hints).await?;
 
     let finality = beacon_reader.finality_update().await?;
 
@@ -264,6 +271,18 @@ pub async fn attest_ethereum(
 
     let attestation = EnclaveClient::new(enclave_url).attest(&request).await?;
     info!(messages = attestation.message_ids.len(), "enclave attested");
+
+    // The store the ISM is about to commit to is the one this finality update leaves behind,
+    // and its checkpoint is that header's root. Written now so the next tick is a lookup
+    // rather than a search back through finalized checkpoints, which cannot keep up with a
+    // route that has been failing.
+    super::record_checkpoint(
+        out.as_deref(),
+        &format!(
+            "0x{}",
+            hex::encode(finality.finalized_header().beacon().tree_hash_root())
+        ),
+    );
 
     if let Some(path) = out {
         let record = serde_json::json!({
