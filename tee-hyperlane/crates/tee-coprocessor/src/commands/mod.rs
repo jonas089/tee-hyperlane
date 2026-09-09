@@ -51,6 +51,26 @@ fn now_secs() -> u64 {
         .unwrap_or(0)
 }
 
+/// Is any of these messages addressed to `destination`?
+///
+/// The gate on whether to prove, and it has to look at the destination rather than just at
+/// whether anything was dispatched. An origin has one mailbox and one merkle tree shared by
+/// every outbound message, so all three Celestia-origin routes see every Celestia dispatch.
+/// Counting messages rather than *our* messages meant one transfer to Sepolia started three
+/// proofs of ninety minutes each, two of which existed only to reach the submission step and
+/// skip the message as somebody else's.
+///
+/// This does not narrow the batch. A batch must still carry every leaf in its range or the
+/// replay cannot reproduce the on-chain root, which is what stops a caller dropping messages
+/// selectively. Only the decision to start is narrowed.
+pub fn any_for_destination(messages: &[Vec<u8>], destination: u32) -> bool {
+    messages.iter().any(|raw| {
+        hyperlane_types::decode_hyperlane_message(raw)
+            .map(|m| m.destination == destination)
+            .unwrap_or(false)
+    })
+}
+
 /// Wrap an EVM tree proof as the enclave's internally-tagged `TreeInput`, whose variant
 /// fields sit alongside `kind`.
 fn evm_tree_input(proof: &tee_node::hyperlane_state::EvmTreeProof) -> Result<serde_json::Value> {

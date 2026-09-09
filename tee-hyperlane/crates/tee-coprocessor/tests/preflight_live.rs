@@ -22,9 +22,15 @@ async fn a_live_quote_satisfies_the_pinned_identity() {
     let quote_hex = att["quote"].as_str().expect("quote");
     let quote = hex::decode(quote_hex).unwrap();
     let payload = hex::decode(att["payload"].as_str().expect("payload")).unwrap();
-    let event_log = att["event_log"].as_str().expect("event_log").as_bytes().to_vec();
+    let event_log = att["event_log"]
+        .as_str()
+        .expect("event_log")
+        .as_bytes()
+        .to_vec();
 
-    let collateral = tee_coprocessor::enclave::fetch_collateral(quote_hex).await.unwrap();
+    let collateral = tee_coprocessor::enclave::fetch_collateral(quote_hex)
+        .await
+        .unwrap();
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()

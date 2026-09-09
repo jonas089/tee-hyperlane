@@ -1,6 +1,15 @@
 // Every address the UI needs, in one place. Deployment values live here and nowhere else,
 // so pointing the app at a different deployment is a single-file change.
 
+/// Absolute URL for a path this app's own server proxies.
+///
+/// It has to be absolute rather than a bare path. CosmJS decides between HTTP and WebSocket
+/// by looking for an `http://` or `https://` prefix, and anything else is assumed to be a
+/// socket - a relative path fails with "Base URL is missing a protocol", which says nothing
+/// about the real cause. `fetch` is happy either way, so only the RPC needs this.
+const sameOrigin = (path: string): string =>
+  typeof window === "undefined" ? path : `${window.location.origin}${path}`;
+
 export type ChainId = "sepolia" | "arbitrum" | "base" | "celestia";
 export type TokenId = "TIA" | "USDC";
 
@@ -75,9 +84,14 @@ export const CHAINS: Record<ChainId, Chain> = {
     name: "Celestia Mocha",
     domain: 1297040200,
     chainId: "mocha-5",
-    rpc: "https://rpc-mocha.pops.one",
-    // Same-origin by default: Mocha's public REST sends no CORS header, so the browser
-    // cannot read it directly. nginx proxies /celestia to it.
+    // Same-origin by default, both of them, and for the same reason in two flavours.
+    //
+    // Mocha's public REST sends no CORS header at all. Its RPC is worse: it answers the
+    // preflight with `Access-Control-Allow-Origin: *` and then omits that header from the
+    // POST, so the browser waves the preflight through and refuses to read the reply. That
+    // reaches the user as "Failed to fetch" at the moment they press Bridge, with nothing in
+    // the console pointing at the cause. Both are proxied by the server that serves this app.
+    rpc: import.meta.env.VITE_CELESTIA_RPC ?? sameOrigin("/celestia-rpc"),
     rest: import.meta.env.VITE_CELESTIA_REST ?? "/celestia",
     explorer: "https://mocha.celenium.io",
     bech32Prefix: "celestia",

@@ -63,6 +63,9 @@ enum Command {
     /// walks it to the current finalized head, then proves the origin tree under that head's
     /// execution state root.
     AttestEthereum {
+        /// Only prove when the batch carries a message for this domain.
+        #[arg(long, default_value_t = 1297040200)]
+        destination_domain: u32,
         #[arg(
             long,
             default_value = "https://ethereum-sepolia-beacon-api.publicnode.com"
@@ -95,6 +98,9 @@ enum Command {
     /// Needs an L2 archive endpoint: the confirmed assertion is thousands of L2 blocks behind
     /// head - that is the rollup's challenge window - and no public node keeps state there.
     AttestL2 {
+        /// Only prove when the batch carries a message for this domain.
+        #[arg(long, default_value_t = 1297040200)]
+        destination_domain: u32,
         /// `arbitrum` or `base`.
         #[arg(long)]
         rollup: String,
@@ -161,6 +167,11 @@ enum Command {
     /// Everything gathered here is untrusted; the enclave re-verifies all of it, so a
     /// rejection names which check failed rather than producing a wrong root.
     AttestCelestia {
+        /// Only prove when the batch carries a message for this domain. An origin's tree is
+        /// shared by every destination, so without this one transfer starts a proof on every
+        /// route that reads the same tree.
+        #[arg(long, default_value_t = 11155111)]
+        destination_domain: u32,
         #[arg(long, default_value = "https://rpc-mocha.pops.one")]
         rpc: String,
         /// Serves reads at the ISM's trusted height, which public RPCs prune.
@@ -233,6 +244,9 @@ enum Command {
         api: String,
         #[arg(long, default_value = "https://api-mocha.pops.one")]
         celestia_rest: String,
+        /// Proxied because Mocha's public RPC omits `Access-Control-Allow-Origin` on POST.
+        #[arg(long, default_value = "https://rpc-mocha.pops.one")]
+        celestia_rpc: String,
     },
     /// Show each route's trusted state and how far behind the origin head it is.
     Status,
@@ -276,6 +290,7 @@ async fn main() -> Result<()> {
             identity_digest,
         } => commands::bootstrap_celestia(&rpc, lag, height, &identity_digest).await,
         Command::AttestEthereum {
+            destination_domain,
             beacon,
             execution,
             archive,
@@ -294,6 +309,7 @@ async fn main() -> Result<()> {
                 &enclave,
                 checkpoint.as_deref(),
                 &trusted_state,
+                destination_domain,
                 &merkle_tree_hook,
                 &mailbox,
                 base_slot,
@@ -302,6 +318,7 @@ async fn main() -> Result<()> {
             .await
         }
         Command::AttestCelestia {
+            destination_domain,
             rpc,
             archive,
             enclave,
@@ -315,6 +332,7 @@ async fn main() -> Result<()> {
                 archive.as_deref(),
                 &enclave,
                 &trusted_state,
+                destination_domain,
                 &merkle_tree_hook,
                 lag,
                 out,
@@ -322,6 +340,7 @@ async fn main() -> Result<()> {
             .await
         }
         Command::AttestL2 {
+            destination_domain,
             rollup,
             beacon,
             l1_execution,
@@ -344,6 +363,7 @@ async fn main() -> Result<()> {
                 logs_rpc.as_deref(),
                 &enclave,
                 &trusted_state,
+                destination_domain,
                 &anchor,
                 &merkle_tree_hook,
                 &mailbox,
@@ -394,7 +414,10 @@ async fn main() -> Result<()> {
             dir,
             api,
             celestia_rest,
-        } => tee_coprocessor::ui::serve(dir.into(), api, celestia_rest, &listen).await,
+            celestia_rpc,
+        } => {
+            tee_coprocessor::ui::serve(dir.into(), api, celestia_rest, celestia_rpc, &listen).await
+        }
         Command::Status => {
             let config = load()?;
             for route in &config.routes {

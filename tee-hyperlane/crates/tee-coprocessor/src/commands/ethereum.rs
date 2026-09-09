@@ -128,6 +128,7 @@ pub async fn attest_ethereum(
     enclave_url: &str,
     checkpoint: Option<&str>,
     trusted_state_hex: &str,
+    destination_domain: u32,
     merkle_tree_hook: &str,
     mailbox: &str,
     base_slot: u64,
@@ -187,6 +188,13 @@ pub async fn attest_ethereum(
         "attesting ethereum"
     );
     anyhow::ensure!(!dispatched.is_empty(), "nothing to attest");
+    // Sepolia's mailbox is Hyperlane's shared canonical one, so most of what lands in this
+    // range belongs to other bridges entirely.
+    let ours: Vec<Vec<u8>> = dispatched.iter().map(|d| d.message.clone()).collect();
+    anyhow::ensure!(
+        super::any_for_destination(&ours, destination_domain),
+        "nothing to attest; no messages for domain {destination_domain}"
+    );
 
     let mut tree_address = [0u8; 32];
     tree_address[12..].copy_from_slice(hook.as_slice());

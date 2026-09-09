@@ -56,6 +56,7 @@ pub async fn attest_celestia(
     archive: Option<&str>,
     enclave_url: &str,
     trusted_state_hex: &str,
+    destination_domain: u32,
     merkle_tree_hook_hex: &str,
     lag: u64,
     out: Option<String>,
@@ -104,6 +105,14 @@ pub async fn attest_celestia(
     anyhow::ensure!(
         !inserted.is_empty(),
         "nothing to attest; no messages dispatched"
+    );
+    // Every Celestia dispatch lands in this one tree, so "something was sent" is not the same
+    // question as "something was sent here". Proving on the former burned two extra proofs
+    // per transfer.
+    let ours: Vec<Vec<u8>> = inserted.iter().map(|m| m.message.clone()).collect();
+    anyhow::ensure!(
+        super::any_for_destination(&ours, destination_domain),
+        "nothing to attest; no messages for domain {destination_domain}"
     );
 
     // The tree as it stood at the ISM's trusted height, proven rather than assumed. The
