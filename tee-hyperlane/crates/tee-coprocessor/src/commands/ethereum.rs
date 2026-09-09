@@ -10,10 +10,20 @@ use crate::ethereum::SECONDS_PER_SLOT;
 
 use super::evm_tree_input;
 
-/// How far back to look for the checkpoint an L2-origin ISM's store was built from. Eight
-/// epochs is about 51 minutes, far longer than a tick.
+/// How far back to look for the checkpoint an L2-origin ISM's store was built from.
+///
+/// The window has to cover the age of the store, not the tick interval, and those are very
+/// different numbers. An L2-origin ISM commits to the store as it stood when the batch was
+/// *attested*, and the batch is submitted a proof later: the first Arbitrum delivery was
+/// attested at 01:57, proved at 03:25 and submitted at 04:56, so the next tick was looking
+/// for a store three hours old. Eight epochs is fifty-one minutes, so the search read the
+/// last hour of finalized checkpoints, found nothing, and wedged the route.
+///
+/// Ninety-six epochs is about ten hours, which covers a full prover queue with room over.
+/// The cost is bounded and only paid when the route cannot resolve its store any other way:
+/// each step is one beacon fetch, and the loop stops at the first match.
 const SLOTS_PER_EPOCH: u64 = 32;
-const MAX_CHECKPOINT_SEARCH_EPOCHS: u64 = 8;
+const MAX_CHECKPOINT_SEARCH_EPOCHS: u64 = 96;
 
 /// Rebuild the exact light-client store an ISM committed to.
 ///
