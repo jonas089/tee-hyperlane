@@ -10,6 +10,7 @@ use tendermint::block::Height;
 use tendermint_light_client_verifier::types::LightBlock;
 use tendermint_rpc::query::Query;
 use tendermint_rpc::{Client, HttpClient, Order, Paging};
+use tracing::debug;
 
 /// One Hyperlane message as the origin chain recorded it, in tree-insert order.
 /// Heights per `tx_search` call. Small enough that any one window stays inside a public
@@ -135,11 +136,33 @@ impl CelestiaReader {
             let query: Query = format!("tx.height >= {start} AND tx.height <= {end}").parse()?;
             let mut page = 1u32;
             loop {
-                let results = self
-                    .rpc
-                    .tx_search(query.clone(), false, page, 100, Order::Ascending)
-                    .await
-                    .with_context(|| format!("tx_search over {start}..={end}"))?;
+                // Retried per window rather than per sweep. Catching up across days is over a
+                // hundred requests to a public node, and one flaky answer used to discard the
+                // whole sweep and start again next tick - which, for a route far enough
+                // behind, means it never finishes at all.
+                let results = {
+                    let mut attempt = 0;
+                    loop {
+                        match self
+                            .rpc
+                            .tx_search(query.clone(), false, page, 100, Order::Ascending)
+                            .await
+                        {
+                            Ok(results) => break results,
+                            Err(e) if attempt < 4 => {
+                                attempt += 1;
+                                tokio::time::sleep(std::time::Duration::from_millis(250 * attempt))
+                                    .await;
+                                debug!(window = %format!("{start}..={end}"), attempt, error = %e,
+                                       "retrying tx_search");
+                            }
+                            Err(e) => {
+                                return Err(e)
+                                    .with_context(|| format!("tx_search over {start}..={end}"))
+                            }
+                        }
+                    }
+                };
                 if results.txs.is_empty() {
                     break;
                 }
