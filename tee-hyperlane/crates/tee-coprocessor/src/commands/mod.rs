@@ -81,6 +81,50 @@ pub(crate) fn recorded_checkpoint(out: Option<&str>) -> Option<String> {
     (!text.is_empty()).then_some(text)
 }
 
+/// How long a route may go without advancing before it proves anyway.
+///
+/// Routes only prove for their own destination, which is right - but it means a quiet route
+/// never moves, and a route that has not moved has to scan further every time it looks. Four
+/// days of that put every Celestia route beyond what its RPC would answer, and they stopped
+/// dead. Proving twice a day regardless keeps the distance small enough to stay recoverable,
+/// and costs one proof per route per twelve hours when nothing is happening.
+const HEARTBEAT: std::time::Duration = std::time::Duration::from_secs(12 * 60 * 60);
+
+/// Has this route gone long enough without advancing that it should prove regardless?
+///
+/// A heartbeat still needs a non-empty batch: the enclave refuses to attest nothing, and a
+/// chain that has dispatched nothing at all is not falling behind in any sense that matters.
+pub fn heartbeat_due(out: Option<&str>) -> bool {
+    let Some(dir) = out
+        .and_then(|o| std::path::Path::new(o).parent())
+        .and_then(|p| p.parent())
+    else {
+        return false;
+    };
+    match std::fs::metadata(dir.join("advanced")).and_then(|m| m.modified()) {
+        Ok(at) => at.elapsed().map(|d| d > HEARTBEAT).unwrap_or(false),
+        // Never advanced under this binary: take the heartbeat rather than wait a further
+        // twelve hours to discover the route is stuck.
+        Err(_) => true,
+    }
+}
+
+/// Note that this route just advanced, which is what the heartbeat measures from.
+pub fn record_advanced(out: Option<&str>) {
+    let Some(dir) = out
+        .and_then(|o| std::path::Path::new(o).parent())
+        .and_then(|p| p.parent())
+    else {
+        return;
+    };
+    let _ = std::fs::write(dir.join("advanced"), b"");
+}
+
+/// Remember how far a quiet route has checked, for the dashboard.
+pub(crate) fn record_scanned(out: Option<&str>, height: u64) {
+    record_attestable_head(out, height);
+}
+
 /// Is any of these messages addressed to `destination`?
 ///
 /// The gate on whether to prove, and it has to look at the destination rather than just at

@@ -35,3 +35,6 @@ tracing-subscriber.workspace = true
 [[bin]]
 name = "tee-hyperlane"
 path = "src/main.rs"
+
+[dev-dependencies]
+filetime = "0.2"

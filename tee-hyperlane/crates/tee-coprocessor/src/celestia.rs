@@ -12,6 +12,10 @@ use tendermint_rpc::query::Query;
 use tendermint_rpc::{Client, HttpClient, Order, Paging};
 
 /// One Hyperlane message as the origin chain recorded it, in tree-insert order.
+/// Heights per `tx_search` call. Small enough that any one window stays inside a public
+/// node's response limits, large enough that catching up does not take thousands of requests.
+const HEIGHT_WINDOW: u64 = 500;
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DispatchedMessage {
     pub height: u64,
@@ -116,27 +120,38 @@ impl CelestiaReader {
         from_height: u64,
         to_height: u64,
     ) -> Result<Vec<DispatchedMessage>> {
-        let query: Query =
-            format!("tx.height >= {from_height} AND tx.height <= {to_height}").parse()?;
-
+        // Scanned in windows, because the height range is unbounded in practice.
+        //
+        // `tx.height >= a AND tx.height <= b` matches every transaction on the chain in that
+        // span, not just Hyperlane's. A route that had been idle for four days asked for
+        // 64,000 blocks, which is 120,000 transactions, which is 1,200 pages - and the search
+        // simply never returned, so the route could not catch up and stayed stuck. Windowing
+        // bounds the work per request no matter how far behind a route has fallen; the total
+        // is still proportional to the gap, but each step now completes.
         let mut out = Vec::new();
-        let mut page = 1u32;
-        loop {
-            let results = self
-                .rpc
-                .tx_search(query.clone(), false, page, 100, Order::Ascending)
-                .await
-                .context("tx_search")?;
-            if results.txs.is_empty() {
-                break;
+        let mut start = from_height;
+        while start <= to_height {
+            let end = (start + HEIGHT_WINDOW - 1).min(to_height);
+            let query: Query = format!("tx.height >= {start} AND tx.height <= {end}").parse()?;
+            let mut page = 1u32;
+            loop {
+                let results = self
+                    .rpc
+                    .tx_search(query.clone(), false, page, 100, Order::Ascending)
+                    .await
+                    .with_context(|| format!("tx_search over {start}..={end}"))?;
+                if results.txs.is_empty() {
+                    break;
+                }
+                for tx in &results.txs {
+                    out.extend(inserts_in(tx.height.value(), &tx.tx_result.events)?);
+                }
+                if results.txs.len() < 100 {
+                    break;
+                }
+                page += 1;
             }
-            for tx in &results.txs {
-                out.extend(inserts_in(tx.height.value(), &tx.tx_result.events)?);
-            }
-            if results.txs.len() < 100 {
-                break;
-            }
-            page += 1;
+            start = end + 1;
         }
         out.sort_by_key(|m| m.tree_index);
         Ok(out)

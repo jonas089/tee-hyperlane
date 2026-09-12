@@ -246,10 +246,11 @@ pub async fn attest_ethereum(
     // Sepolia's mailbox is Hyperlane's shared canonical one, so most of what lands in this
     // range belongs to other bridges entirely.
     let ours: Vec<Vec<u8>> = dispatched.iter().map(|d| d.message.clone()).collect();
-    anyhow::ensure!(
-        super::any_for_destination(&ours, destination_domain),
-        "nothing to attest; no messages for domain {destination_domain}"
-    );
+    if !super::any_for_destination(&ours, destination_domain)
+        && !super::heartbeat_due(out.as_deref())
+    {
+        anyhow::bail!("nothing to attest; no messages for domain {destination_domain}");
+    }
 
     let mut tree_address = [0u8; 32];
     tree_address[12..].copy_from_slice(hook.as_slice());
@@ -274,6 +275,7 @@ pub async fn attest_ethereum(
 
     let attestation = EnclaveClient::new(enclave_url).attest(&request).await?;
     info!(messages = attestation.message_ids.len(), "enclave attested");
+    super::record_advanced(out.as_deref());
 
     // The store the ISM is about to commit to is the one this finality update leaves behind,
     // and its checkpoint is that header's root. Written now so the next tick is a lookup

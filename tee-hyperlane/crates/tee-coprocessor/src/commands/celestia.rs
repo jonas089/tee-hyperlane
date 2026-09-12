@@ -92,10 +92,38 @@ pub async fn attest_celestia(
     let (hook_bytes, proof) = reader.merkle_tree_hook_proof(hook_id, target).await?;
     let onchain = tee_node::state_proofs::decode_merkle_tree_hook(&hook_bytes)?;
 
+    // The tree as it stood at the ISM's trusted height, proven rather than assumed. The
+    // enclave replays the new leaves onto it and checks the result against the tree proved at
+    // the head, so a wrong snapshot cannot pass.
+    let (snapshot_bytes, snapshot_proof) = history
+        .merkle_tree_hook_proof(hook_id, trusted.height)
+        .await
+        .context("reading the merkle tree at the trusted height; set `archive_rpc` if pruned")?;
+    let snapshot = tee_node::state_proofs::decode_merkle_tree_hook(&snapshot_bytes)?;
+
+    // Two counts answer "was anything dispatched" exactly, before any transaction search.
+    // The search is proportional to how far behind the route is; this is two proofs whatever
+    // the gap. An idle route therefore costs nothing to keep current, which is what stopped
+    // being true when routes began skipping batches that were not addressed to them.
+    let expected = onchain.count.saturating_sub(snapshot.count) as usize;
+    if expected == 0 {
+        super::record_scanned(out.as_deref(), target);
+        anyhow::bail!("nothing to attest; the origin tree has not grown");
+    }
+
     // Everything inserted since the ISM's trusted height, in tree order.
     let inserted = history
         .dispatched_messages(trusted.height + 1, target)
         .await?;
+    // The tree says how many there should be, so a search that quietly returns too few is
+    // caught here rather than by the enclave rejecting the replay an hour later.
+    anyhow::ensure!(
+        inserted.len() == expected,
+        "the tree grew by {expected} leaves between {} and {target} but the search found {}; \
+         the origin RPC is missing transactions",
+        trusted.height,
+        inserted.len()
+    );
     info!(
         head,
         height = target,
@@ -110,19 +138,12 @@ pub async fn attest_celestia(
     // question as "something was sent here". Proving on the former burned two extra proofs
     // per transfer.
     let ours: Vec<Vec<u8>> = inserted.iter().map(|m| m.message.clone()).collect();
-    anyhow::ensure!(
-        super::any_for_destination(&ours, destination_domain),
-        "nothing to attest; no messages for domain {destination_domain}"
-    );
+    if !super::any_for_destination(&ours, destination_domain)
+        && !super::heartbeat_due(out.as_deref())
+    {
+        anyhow::bail!("nothing to attest; no messages for domain {destination_domain}");
+    }
 
-    // The tree as it stood at the ISM's trusted height, proven rather than assumed. The
-    // enclave replays the new leaves onto it and checks the result against the tree it just
-    // proved at the head, so a wrong snapshot cannot pass.
-    let (snapshot_bytes, snapshot_proof) = history
-        .merkle_tree_hook_proof(hook_id, trusted.height)
-        .await
-        .context("reading the merkle tree at the trusted height; set `archive_rpc` if pruned")?;
-    let snapshot = tee_node::state_proofs::decode_merkle_tree_hook(&snapshot_bytes)?;
     anyhow::ensure!(
         snapshot.count as usize + inserted.len() == onchain.count as usize,
         "snapshot has {} leaves and {} were found, but the head proves {}",
@@ -160,6 +181,7 @@ pub async fn attest_celestia(
     let attestation = client.attest(&request).await?;
 
     info!(messages = attestation.message_ids.len(), "enclave attested");
+    super::record_advanced(out.as_deref());
     if let Some(path) = out {
         let record = serde_json::json!({
             "attestation": {
