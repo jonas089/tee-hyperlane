@@ -39,9 +39,11 @@ In-flight transfers are kept; see [No message is lost](#no-message-is-lost).
 cd ~/tee-ism-nonzk && git pull
 sudo systemctl stop teeism-relayer
 cp -a devnet/.state ~/teeism-state-$(date +%F)
-mv devnet/.state/proofs ~/teeism-proofs-$(date +%F)
 cd ~/tee-ism-nonzk/tee-hyperlane && cargo build --release -p tee-coprocessor -p gas-oracle
 ```
+
+Leave `devnet/.state/proofs/` in place. It holds the hints (`chains/<chain>/`) that let each
+route rebuild its old ISM's light-client state and resume.
 
 **2. Images:** [DEPLOY step 4](DEPLOY.md#4-enclave-images).
 
@@ -114,7 +116,7 @@ A Celestia → EVM route can resume only if its last state is under 14 days old.
 | route | normal wait |
 |---|---|
 | Celestia → any EVM | < 1 min |
-| Eden → Celestia | 1-2 min |
+| Eden → Celestia | 1-4 min, mostly waiting for Eden to post its headers to mocha |
 | Sepolia → Celestia | ~15 min |
 | Arbitrum → Celestia | ~1h 40m |
 | Base → Celestia | 5 days |
@@ -144,6 +146,11 @@ cast call 0x2fF5cC82dBf333Ea30D8ee462178ab1707315355 "getAnchorRoot()(bytes32,ui
 | every route backing off | an endpoint is rate-limited |
 | UI shows `Failed to fetch` | the UI was built with the wrong `.env.local`; rebuild on the host |
 | `discarding a batch` | nothing; it rebuilds by itself |
+| `carrying sync committee updates` every tick | nothing; the ISM is behind and catches up when a batch lands |
+| `error decoding response body` once | a flaky RPC; nothing, unless it repeats |
+| Eden: `no celestia header in the last 400 rebuilds this ISM's store` | the `da-heights` hint is gone; restore `.state/proofs/chains/eden/` from a backup |
+| Eden: `no celestia block … carries an eden header at a height we hold a proof for` | normal for a few minutes after a restart; if it persists, check that mocha-light is synced |
+| Arbitrum, Base: `no finalized checkpoint in the last 512 epochs rebuilds this ISM's store` | the `checkpoints` hint is gone; restore `.state/proofs/chains/<chain>/` from a backup |
 
 To decode a four-letter code: `cast call <ism> "describeQuoteError(bytes)(string)" $(cast from-utf8 TCBR)`.
 

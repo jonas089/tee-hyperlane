@@ -70,7 +70,7 @@ Domains: Celestia `1297040299`, Sepolia `11155111`, Arbitrum `421614`, Base `845
 ```
 Celestia -> Arbitrum, Base, Sepolia   under 30 s
 Celestia -> Eden                      ~30 s
-Eden     -> Celestia                  1-2 min     Eden posts to Celestia about once a minute
+Eden     -> Celestia                  1-4 min     waiting for Eden to post its headers to mocha
 Sepolia  -> Celestia                  ~15 min     Ethereum finality
 Arbitrum -> Celestia                  ~1h 40m     how far Arbitrum's confirmed root trails
 Base     -> Celestia                  ~5 days     Base's dispute window
