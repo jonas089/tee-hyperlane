@@ -1,7 +1,33 @@
 # Shared helpers for the devnet scripts. Sourced, never executed.
 # shellcheck shell=bash
 
-set -euo pipefail
+set -Eeuo pipefail
+
+# No script stops without saying where. `set -e` alone exits on the first unchecked failure
+# and prints nothing, which is how 85-celestia-isms.sh once stopped halfway with no clue why.
+# The trap names the script, the line and the command; -E carries it into functions and
+# command substitutions.
+trap 'printf "\033[1;31merror\033[0m %s:%s: \`%s\` failed (exit %s)\n" \
+  "${BASH_SOURCE[0]##*/}" "${LINENO}" "${BASH_COMMAND}" "$?" >&2' ERR
+
+# Work a script had to leave undone. Each item is warned about as it happens, and the script
+# then exits 3 with the list instead of 0, so a partial run is never mistaken for a finished
+# one. Re-running the script picks up where it stopped: every step here is idempotent.
+INCOMPLETE=()
+incomplete() {
+  printf '\033[1;33m warn\033[0m %s\n' "$*" >&2
+  INCOMPLETE+=("$*")
+}
+report_incomplete() {
+  local rc=$?
+  if [ "${rc}" -eq 0 ] && [ "${#INCOMPLETE[@]}" -gt 0 ]; then
+    printf '\n\033[1;33mincomplete\033[0m %s: %s item(s) left undone\n' "${0##*/}" "${#INCOMPLETE[@]}" >&2
+    printf '  - %s\n' "${INCOMPLETE[@]}" >&2
+    printf 'fix the cause and run it again; finished steps are skipped\n' >&2
+    exit 3
+  fi
+}
+trap report_incomplete EXIT
 
 DEVNET_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REPO_DIR="$(cd "${DEVNET_DIR}/.." && pwd)"

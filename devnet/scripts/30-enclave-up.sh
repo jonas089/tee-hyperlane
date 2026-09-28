@@ -48,7 +48,12 @@ deploy_family() {
   if has "enclave-url-${family}"; then
     url="$(load "enclave-url-${family}")"
     if curl -sf -m 15 "${url}/health" >/dev/null 2>&1; then
-      if [ "$(measured_compose "${url}")" = "$(cat "${compose}")" ]; then
+      local measured
+      measured="$(measured_compose "${url}" || true)"
+      # Unreadable is not the same as different: deploying a new CVM over a failed read would
+      # replace a working enclave for nothing.
+      [ -n "${measured}" ] || die "${family} enclave ${url} answers /health but its /identity could not be read"
+      if [ "${measured}" = "$(cat "${compose}")" ]; then
         say "${family} enclave already up at ${url}"
         return 0
       fi

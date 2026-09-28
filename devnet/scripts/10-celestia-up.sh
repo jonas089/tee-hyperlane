@@ -36,5 +36,8 @@ wait_for_chain
 mkdir -p "${OUT_DIR}"
 save chain-id        "${CHAINID}"
 save celestia-domain "${CELESTIA_DOMAIN}"
-save relayer-address "$(addr relayer)"
-save user-address    "$(addr user)"
+# Read first: a failure inside an argument does not stop the script, and would save an empty id.
+relayer="$(addr relayer)"
+user="$(addr user)"
+save relayer-address "${relayer}"
+save user-address    "${user}"

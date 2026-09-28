@@ -3,6 +3,10 @@
 The whole bridge from nothing, on one Linux host, as `chef`. Every block starts with a `cd`,
 so paste it from anywhere. Every script is safe to re-run.
 
+A script that fails stops with `error`, naming the step or the command. One that could only do
+part of its work (Eden before the mocha node has synced, say) exits 3 and lists what it left
+undone: fix that and run it again.
+
 Ids the scripts create go in `devnet/.state/out/`. List them with
 `cd ~/tee-ism-nonzk && make status`.
 

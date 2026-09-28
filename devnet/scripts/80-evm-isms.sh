@@ -33,9 +33,10 @@ b = bytes.fromhex(q[2:] if q.startswith("0x") else q)[48:]
 # mr_td ++ mr_config_id, then rtmr0..2. rtmr3 is excluded: it carries app-id and
 # instance-id, so including it would tie the ISM to one CVM.
 pre = "0x" + (b[136:232] + b[328:472]).hex()
-print(subprocess.run(["cast", "keccak", pre], capture_output=True, text=True).stdout.strip())
+print(subprocess.run(["cast", "keccak", pre], capture_output=True, text=True, check=True).stdout.strip())
 PY
 )"
+[[ "${MEASUREMENTS}" =~ ^0x[0-9a-f]{64}$ ]] || die "could not compute the enclave's measurements from its quote (got '${MEASUREMENTS}')"
 # The contract revision this checkout deploys, read from the source rather than repeated here.
 ISM_REVISION="$(sed -n 's/.*uint8 public constant VERSION = \([0-9]*\);.*/\1/p' "${CONTRACTS}/src/TeeDcapIsm.sol")"
 [ -n "${ISM_REVISION}" ] || die "no VERSION in TeeDcapIsm.sol"
@@ -84,7 +85,7 @@ eden:3735928814:0x1D32350f3440BEa7f7E450Aa085f63E0d7E38729}"
 # stopped after the second chain.
 while IFS=: read -r name chainid mailbox; do
   addr_file="${OUT_DIR}/pccs-${name}.json"
-  [ -f "${addr_file}" ] || { warn "no PCCS on ${name}; skipping"; continue; }
+  [ -f "${addr_file}" ] || { incomplete "${name}: no PCCS record at ${addr_file}; no ISM deployed there"; continue; }
   rpc="$(python3 -c "import json;print(json.load(open('${addr_file}'))['rpc'])")"
   entry="$(python3 -c "import json;print(json.load(open('${addr_file}'))['AttestationEntrypoint'])")"
 
@@ -96,7 +97,10 @@ while IFS=: read -r name chainid mailbox; do
   chain_genesis="${GENESIS}"
   if has "ism-${name}"; then
     existing="$(load "ism-${name}")"
-    cur="$(cast call "${existing}" "enclaveMeasurements()(bytes32)" --rpc-url "${rpc}" 2>/dev/null || true)"
+    # A failed read must stop the run: taken as "different", it would replace a working ISM.
+    cur="$(cast call "${existing}" "enclaveMeasurements()(bytes32)" --rpc-url "${rpc}" 2>&1)" \
+      || die "could not read ${existing} on ${name}: ${cur}"
+    # The first deployments have no VERSION(), and a call to it reverts: that means revision 1.
     rev="$(cast call "${existing}" "VERSION()(uint8)" --rpc-url "${rpc}" 2>/dev/null || true)"
     if [ "${cur}" = "${MEASUREMENTS}" ] && [ "${rev}" = "${ISM_REVISION}" ]; then
       say "${name} already has ${existing} pinning this enclave, skipping"

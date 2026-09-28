@@ -45,7 +45,7 @@ send() { # <rpc> <to> <sig> <args...>
 
 for c in ${CHAINS}; do
   f="${OUT_DIR}/pccs-${c}.json"
-  [ -f "${f}" ] || { warn "no PCCS record for ${c}; skipping"; continue; }
+  [ -f "${f}" ] || { incomplete "${c}: no PCCS record at ${f}; copy it or deploy Automata there (DEPLOY appendix C)"; continue; }
   rpc="$(jq -r .rpc "${f}")"
   entry="$(jq -r .AttestationEntrypoint "${f}")"
   router="$(jq -r .PCCSRouter "${f}")"

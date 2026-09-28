@@ -26,8 +26,8 @@ point_at_ism() {
   local token="$1"
   has routing-ism-id || return 0
   say "pointing ${token} at the routing ism"
-  tx relayer warp set-token "${token}" --ism-id "$(load routing-ism-id)" >/dev/null 2>&1 \
-    || warn "could not set the token ism; the mailbox default still applies"
+  tx relayer warp set-token "${token}" --ism-id "$(load routing-ism-id)" >/dev/null \
+    || incomplete "${token}: could not point it at the routing ism (the error is above); 85-celestia-isms.sh does it again"
 }
 
 if has celestia-token-id; then
