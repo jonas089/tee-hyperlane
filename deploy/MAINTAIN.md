@@ -45,9 +45,10 @@ cd ~/tee-ism-nonzk/tee-hyperlane && cargo build --release -p tee-coprocessor -p 
 Leave `devnet/.state/proofs/` in place. It holds the hints (`chains/<chain>/`) that let each
 route rebuild its old ISM's light-client state and resume.
 
-**2. Images:** [DEPLOY step 4](DEPLOY.md#4-enclave-images).
+**2. Images:** [DEPLOY step 4](DEPLOY.md#4-enclave-images): build, pin, commit and push.
 
-**3. Enclaves:** [DEPLOY step 5](DEPLOY.md#5-enclaves). The old CVMs keep running.
+**3. Enclaves:** [DEPLOY step 5](DEPLOY.md#5-enclaves). It refuses to run until step 2's pins
+match the code and are pushed. The old CVMs keep running.
 
 **4. ISMs and routers**
 
@@ -76,7 +77,6 @@ curl -s localhost:3001/api/status | jq -r '.[] | "\(.name) \(.height)"'     # 8 
 
 ```sh
 phala cvms delete <old app id>        # ×3, ids in ~/teeism-state-*/out/enclave-app-id-*
-cd ~/tee-ism-nonzk && git commit deploy/docker-compose.*.yml -m "Pin new enclave images" && git push
 ```
 
 Then update the ids in `README.md`.

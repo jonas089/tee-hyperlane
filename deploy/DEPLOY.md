@@ -7,7 +7,7 @@ Ids the scripts create go in `devnet/.state/out/`. List them with
 `cd ~/tee-ism-nonzk && make status`.
 
 On a laptop, `make init && make start` (in the repo root) runs the whole thing against a local
-chain. `make stop` deletes the enclaves and `.state/`, so **never run it on ark**.
+chain. Without Nix there, set `FORCE_UNPINNED=1` to skip step 5's pin checks. `make stop` deletes the enclaves and `.state/`, so **never run it on ark**.
 
 ## 0. What you need
 
@@ -55,21 +55,18 @@ grep -E '^pruning|^min-retain-blocks' .state/celestia/config/app.toml   # "nothi
 
 ## 4. Enclave images
 
-Skip this to keep the images already pinned in `deploy/docker-compose.*.yml`.
-
 ```sh
-cd ~/tee-ism-nonzk
-docker login ghcr.io -u jonas089          # password: a GitHub token with write:packages
-for f in celestia ethereum evolve; do
-  nix build .#image-$f -o result-$f && docker load < result-$f \
-  && docker push ghcr.io/jonas089/tee-node:reproducible-$f \
-  && d=$(docker inspect --format '{{index .RepoDigests 0}}' ghcr.io/jonas089/tee-node:reproducible-$f | cut -d@ -f2) \
-  && sed -i "s|tee-node@sha256:[0-9a-f]*|tee-node@$d|" deploy/docker-compose.$f.yml
-done
-git diff --stat deploy/
+cd ~/tee-ism-nonzk/devnet
+docker login ghcr.io -u jonas089          # once; password: a GitHub token with write:packages
+./scripts/25-images.sh
+cd ~/tee-ism-nonzk && git add deploy/images.lock deploy/docker-compose.*.yml
+git commit -m "Pin enclave images" && git push
 ```
 
-A family whose compose file didn't change has the same code as before.
+`25-images.sh` builds, pushes and pins only the families whose code changed, and records each
+in `deploy/images.lock`. Step 5 refuses to run until those pins match the code and are
+pushed. Pushing from the server needs a GitHub token; otherwise copy the four files off and
+commit them elsewhere.
 
 ## 5. Enclaves
 
@@ -79,7 +76,9 @@ cd ~/tee-ism-nonzk/devnet
 for f in celestia ethereum evolve; do FAMILY=$f ~/tee-ism-nonzk/deploy/verify-digest.sh "$(cat .state/out/enclave-app-id-$f)"; done
 ```
 
-Every check must say `ok`. Never use `phala cvms upgrade`: it changes the enclave's identity.
+It stops first if a family's code no longer matches its pin in `deploy/images.lock`, or the
+pins aren't committed and pushed. Every `verify-digest.sh` check must say `ok`. Never use
+`phala cvms upgrade`: it changes the enclave's identity.
 
 ## 6. Intel collateral on the EVM chains
 

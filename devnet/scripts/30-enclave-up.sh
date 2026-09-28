@@ -125,6 +125,40 @@ for m in re.finditer(r'[{\[]', raw):
   die "${family} enclave did not come up; check 'phala cvms get --cvm-id ${app_id}'"
 }
 
+# Refuse to deploy an image the repo does not describe, or that the current code would not
+# build. For each family:
+#   - its source still evaluates to the store path deploy/images.lock recorded (new code with
+#     an old image, or the reverse, fails here);
+#   - its compose file pins the digest the lock recorded (a hand-edited compose fails here);
+#   - both files are committed and pushed, so `main` names what the enclave runs.
+# FORCE_UNPINNED=1 skips all of it, for a local experiment and nothing else.
+check_pins() {
+  if [ "${FORCE_UNPINNED:-0}" = 1 ]; then
+    warn "FORCE_UNPINNED=1: deploying without checking the pins against the code"
+    return
+  fi
+  need nix
+  need git
+  local family out
+  for family in ${FAMILIES}; do
+    out="$(image_out_path "${family}")" || die "could not evaluate .#image-${family}"
+    [ -n "$(locked "${family}" out)" ] \
+      || die "${family} has no entry in deploy/images.lock; run scripts/25-images.sh"
+    [ "$(locked "${family}" out)" = "${out}" ] \
+      || die "${family}: the code changed since its image was pinned; run scripts/25-images.sh"
+    [ "$(locked "${family}" digest)" = "$(pinned_digest "${family}")" ] \
+      || die "${family}: deploy/docker-compose.${family}.yml does not pin the digest in deploy/images.lock"
+  done
+  git -C "${REPO_DIR}" ls-files --error-unmatch deploy/images.lock >/dev/null 2>&1 \
+    || die "deploy/images.lock is not committed; commit and push it first"
+  git -C "${REPO_DIR}" diff --quiet HEAD -- deploy/images.lock 'deploy/docker-compose.*.yml' \
+    || die "deploy/images.lock or a compose file has uncommitted changes; commit and push them first"
+  git -C "${REPO_DIR}" fetch -q \
+    && git -C "${REPO_DIR}" merge-base --is-ancestor HEAD '@{upstream}' \
+    || die "this commit is not pushed; push it first, so the repo names what the enclaves run"
+}
+
+check_pins
 for family in ${FAMILIES}; do
   deploy_family "${family}"
 done

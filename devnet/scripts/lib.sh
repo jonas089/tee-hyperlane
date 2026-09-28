@@ -222,6 +222,25 @@ wait_for_chain() {
 #
 # One generator for `${STATE_DIR}/coprocessor.toml`, called before anything reads it: the ISM
 # scripts need the chain tables to produce genesis states, and `make start` needs the routes.
+# ---------------------------------------------------------------- enclave images
+#
+# deploy/images.lock records, per family, the Nix store path an image was built from and the
+# registry digest it was pushed as: `<family> <outPath> <digest>`. 25-images.sh writes it;
+# 30-enclave-up.sh refuses to deploy unless the current source still evaluates to that path.
+IMAGES_LOCK="${REPO_DIR}/deploy/images.lock"
+
+# The store path the current source would build for a family. Evaluates, never builds.
+image_out_path() { nix eval --raw "${REPO_DIR}#image-$1.outPath"; }
+
+# The digest a family's compose file pins.
+pinned_digest() { grep -o 'tee-node@sha256:[0-9a-f]*' "${REPO_DIR}/deploy/docker-compose.$1.yml" | cut -d@ -f2; }
+
+# locked <family> <out|digest> - that family's recorded value, or nothing.
+locked() {
+  local col=2; [ "$2" = digest ] && col=3
+  awk -v f="$1" -v c="${col}" '$1 == f { print $c }' "${IMAGES_LOCK}" 2>/dev/null || true
+}
+
 # Every chain is always written; a route only once its ISM exists. Endpoint defaults match the
 # live deployment; override any of them in devnet/.env.
 COPROCESSOR_CONFIG="${STATE_DIR}/coprocessor.toml"

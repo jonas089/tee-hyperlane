@@ -47,6 +47,7 @@ over HTTPS. Update it with `git pull`; `devnet/.env` and `devnet/.state/` there 
 | `deploy/MAINTAIN.md` | the monthly job, rolling out new code, waiting vs stuck, symptoms |
 | `deploy/INTERACT.md` | wallets, sending, checking arrival, latency and cost |
 | `deploy/coprocessor.toml.example` | the deployed chains and routes, verbatim but for the one key |
+| `deploy/images.lock` | which Nix build each pinned image came from; `30-enclave-up.sh` refuses to deploy when it and the code disagree |
 | `deploy/verify-digest.sh` | compose file to `compose_hash` to `mr_config_id`, against the signed quote |
 | `deploy/check-secrets.sh` | run before every commit |
 
