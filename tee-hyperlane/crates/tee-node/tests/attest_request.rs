@@ -162,11 +162,11 @@ fn a_batch_that_does_not_close_the_gap_is_refused() {
 #[test]
 fn a_request_for_another_protocol_is_refused() {
     let mut req = request(trusted(), vec![[11u8; 32]]);
-    req.protocol = PROTOCOL_VERSION - 1;
+    req.protocol = PROTOCOL_VERSION + 1;
     assert!(attest_with(&chain(HOOK), req).is_err());
     assert!(serde_json::from_value::<AttestRequest>(json!({ "trusted_state": "00" })).is_err());
     assert_eq!(
-        PROTOCOL_VERSION, 5,
+        PROTOCOL_VERSION, 1,
         "bump this when the request shape changes"
     );
 }

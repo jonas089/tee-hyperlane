@@ -23,10 +23,9 @@ use hyperlane_types::{get_tree_root, insert_leaf, MerkleTree};
 /// Bumped whenever a field is added, removed, or stops being honoured, so a caller built for
 /// an older shape is refused rather than having fields silently ignored.
 ///
-/// 3 turns `tree_snapshot` from a decoded tree into a proof of one.
-/// 4 makes an evolve origin carry the blocks that produced its root.
-/// 5 names the chain at the top level and leaves its input, and both tree proofs, to it.
-pub const PROTOCOL_VERSION: u32 = 5;
+/// 1 is the shape since the per-chain traits: `chain` at the top level, its `input` and both
+/// tree proofs left to it. Numbering restarted there; no enclave speaking an earlier shape runs.
+pub const PROTOCOL_VERSION: u32 = 1;
 
 /// How the enclave is asked to advance one ISM by one step.
 #[derive(Deserialize)]
