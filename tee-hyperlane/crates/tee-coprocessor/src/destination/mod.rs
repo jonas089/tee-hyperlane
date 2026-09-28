@@ -78,7 +78,7 @@ async fn run(program: &str, args: &[&str]) -> Result<String> {
         anyhow::bail!(
             "{program} {}: {}",
             args.first().unwrap_or(&""),
-            String::from_utf8_lossy(&out.stderr).trim()
+            crate::brief(&String::from_utf8_lossy(&out.stderr))
         );
     }
     Ok(String::from_utf8(out.stdout)?.trim().to_string())

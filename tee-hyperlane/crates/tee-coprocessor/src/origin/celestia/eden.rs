@@ -461,10 +461,13 @@ impl Da {
             .await
             .with_context(|| format!("{method} to the DA node"))?;
         let status = response.status();
-        let parsed: Value = response
-            .json()
-            .await
-            .with_context(|| format!("{method}: DA node returned {status}"))?;
+        let text = response.text().await?;
+        let parsed: Value = serde_json::from_str(&text).map_err(|_| {
+            anyhow::anyhow!(
+                "{method}: DA node answered HTTP {status} with {}",
+                crate::brief(&text)
+            )
+        })?;
         if let Some(err) = parsed.get("error") {
             anyhow::bail!("{method}: {err}");
         }

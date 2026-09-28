@@ -42,7 +42,16 @@ impl Rpc {
 
     async fn call_at(&self, url: &str, method: &str, params: Value) -> Result<Value> {
         let body = json!({ "jsonrpc": "2.0", "id": 1, "method": method, "params": params });
-        let response: Value = self.http.post(url).json(&body).send().await?.json().await?;
+        let reply = self.http.post(url).json(&body).send().await?;
+        let status = reply.status();
+        let text = reply.text().await?;
+        let response: Value = serde_json::from_str(&text).map_err(|_| {
+            let host = url.split('/').nth(2).unwrap_or(url);
+            anyhow::anyhow!(
+                "{method}: {host} answered HTTP {status} with {}",
+                crate::brief(&text)
+            )
+        })?;
         if let Some(err) = response.get("error") {
             anyhow::bail!("{method}: {err}");
         }
