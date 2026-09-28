@@ -9,6 +9,11 @@
 //! 5. stop unless one of them is ours, or the heartbeat is due
 //! 6. ask the enclave to attest, stage the result, and submit it
 //!
+//! Every pass also retries the messages parked in `undelivered/`: ones the destination refused,
+//! and ones left over from a batch whose attestation landed but whose delivery could not finish.
+//! A message the ISM covers is never forgotten, only parked, and a parked message is reported
+//! by the API until it lands.
+//!
 //! The ISM's state on chain is the only progress marker, so restarting is the same as
 //! continuing. A batch is staged on disk only so a crash between attesting and submitting does
 //! not lose it, and it is always finished before a new one starts: abandoning it after the ISM
@@ -23,7 +28,7 @@ use serde_json::{json, Value};
 use tracing::{debug, info, warn};
 
 use crate::config::{self, Config};
-use crate::destination::{Batch, Destination, Stale};
+use crate::destination::{Batch, Delivery, Destination, Outcome, Stale};
 use crate::origin::{Indexer, Message};
 
 /// A route that has not advanced in this long attests anyway, if its origin has any new leaf.
@@ -37,6 +42,47 @@ const STAGED_BATCH_MAX_AGE: Duration = Duration::from_secs(23 * 60 * 60);
 /// Retries back off by doubling up to this ceiling, so a route broken overnight still notices
 /// within the hour once it is fixed.
 const MAX_BACKOFF: Duration = Duration::from_secs(30 * 60);
+/// A parked message is retried after this, doubling per attempt up to `MAX_REDELIVERY_WAIT`.
+const REDELIVERY_WAIT: u64 = 60;
+const MAX_REDELIVERY_WAIT: u64 = 6 * 60 * 60;
+
+/// A message the ISM covers that has not been delivered, kept in `undelivered/<id>.json` until
+/// it is. Read by the tracker and the API, written only here.
+#[derive(Debug, Clone, serde::Serialize, Deserialize)]
+pub struct Parked {
+    pub id: String,
+    /// The message bytes, hex.
+    pub message: String,
+    pub attempts: u32,
+    pub first_failed_at: u64,
+    pub last_attempt_at: u64,
+    pub next_attempt_at: u64,
+    pub reason: String,
+    /// The last failed transaction, if one landed.
+    pub tx: Option<String>,
+}
+
+/// A delivery this relayer made or saw, kept in `delivered/<id>.json`.
+#[derive(Debug, Clone, serde::Serialize, Deserialize)]
+pub struct Delivered {
+    pub id: String,
+    /// Our transaction, or none when the message was already processed by someone else.
+    pub tx: Option<String>,
+    pub at: u64,
+}
+
+pub fn now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+fn redelivery_wait(attempts: u32) -> u64 {
+    REDELIVERY_WAIT
+        .saturating_mul(1 << attempts.min(16))
+        .min(MAX_REDELIVERY_WAIT)
+}
 
 pub struct Route {
     config: config::Route,
@@ -51,6 +97,8 @@ impl Route {
     pub fn new(config: &Config, route: &config::Route) -> Result<Self> {
         let dir = config.proof_dir().join(&route.name);
         std::fs::create_dir_all(dir.join("staging"))?;
+        std::fs::create_dir_all(dir.join("undelivered"))?;
+        std::fs::create_dir_all(dir.join("delivered"))?;
         Ok(Self {
             origin: config
                 .indexer(&route.from)
@@ -67,33 +115,42 @@ impl Route {
 
     /// Run forever: a pass every tick while healthy, backing off while failing.
     pub async fn run(self, tick: Duration) {
-        let mut failures: u32 = 0;
+        let mut streak = crate::Streak::default();
         loop {
-            match self.pass().await {
+            let result = self.pass().await;
+            if result.is_ok() {
+                self.clear_blocker();
+                if let Some((failures, lasted)) = streak.ok() {
+                    info!(route = %self.config.name, failures, after = %crate::monitor::duration(lasted.as_secs()), "route recovered");
+                }
+            }
+            match result {
                 Ok(Some(height)) => {
-                    failures = 0;
-                    self.clear_blocker();
-                    info!(route = %self.config.name, height, "batch delivered");
+                    debug!(route = %self.config.name, height, "batch delivered");
                     // Straight round again: the origin may already have more.
                     continue;
                 }
-                Ok(None) => {
-                    failures = 0;
-                    self.clear_blocker();
-                }
+                Ok(None) => {}
                 Err(e) => {
-                    failures = failures.saturating_add(1);
-                    let wait = backoff(tick, failures);
-                    warn!(route = %self.config.name, error = %format!("{e:#}"), consecutive_failures = failures, retry_in_secs = wait.as_secs(), "route failed");
-                    self.record_blocker(&format!("{e:#}"), failures);
+                    let error = format!("{e:#}");
+                    if let Some(n) = streak.fail(&error) {
+                        let wait = backoff(tick, streak.failures());
+                        if n == 1 {
+                            warn!(route = %self.config.name, error = %error, retry_in_secs = wait.as_secs(), "route failing");
+                        } else {
+                            warn!(route = %self.config.name, error = %error, consecutive_failures = n, retry_in_secs = wait.as_secs(), "route still failing");
+                        }
+                    }
+                    self.record_blocker(&error, streak.failures());
                 }
             }
-            tokio::time::sleep(backoff(tick, failures)).await;
+            tokio::time::sleep(backoff(tick, streak.failures())).await;
         }
     }
 
     /// One pass. `Some(height)` when a batch was delivered.
     async fn pass(&self) -> Result<Option<u64>> {
+        self.redeliver().await;
         if let Some(height) = self.submit_staged().await? {
             return Ok(Some(height));
         }
@@ -119,7 +176,7 @@ impl Route {
             return Ok(None);
         }
 
-        info!(route = %self.config.name, from = trusted.height, to = step.head, leaves = messages.len(), "attesting");
+        debug!(route = %self.config.name, from = trusted.height, to = step.head, leaves = messages.len(), "attesting");
         let request = json!({
             "protocol": tee_node::attest::PROTOCOL_VERSION,
             "trusted_state": hex::encode(trusted.encode()),
@@ -159,12 +216,6 @@ impl Route {
             .modified()?
             .elapsed()
             .unwrap_or_default();
-        if age > STAGED_BATCH_MAX_AGE {
-            warn!(route = %self.config.name, age_secs = age.as_secs(), "discarding a staged batch too old to be accepted; rebuilding");
-            std::fs::remove_file(&path)?;
-            return Ok(None);
-        }
-
         let mut record: Value = serde_json::from_slice(&raw)?;
         let att = &record["attestation"];
         let text = |v: &Value| {
@@ -183,16 +234,24 @@ impl Route {
                 .filter_map(|m| hex::decode(m.as_str()?).ok())
                 .collect(),
         };
-        match self.destination.submit(&batch).await {
-            Ok(()) => {}
+        if age > STAGED_BATCH_MAX_AGE {
+            warn!(route = %self.config.name, age_secs = age.as_secs(), "discarding a staged batch too old to be accepted; rebuilding");
+            self.discard(&batch, &path).await?;
+            return Ok(None);
+        }
+        let deliveries = match self.destination.submit(&batch).await {
+            Ok(d) => d,
             // The ISM moved past this batch's start, so no retry can land it. The next pass
             // builds from where the ISM actually is, which skips nothing.
             Err(e) if e.is::<Stale>() => {
                 warn!(route = %self.config.name, "discarding a batch the ISM has moved past; rebuilding");
-                std::fs::remove_file(&path)?;
+                self.discard(&batch, &path).await?;
                 return Ok(None);
             }
             Err(e) => return Err(e),
+        };
+        for d in deliveries {
+            self.settle(d);
         }
 
         let update = tee_node::state::AttestedUpdate::decode(&batch.payload)?;
@@ -214,6 +273,125 @@ impl Route {
         )?;
         std::fs::remove_file(&path)?;
         Ok(Some(height))
+    }
+
+    /// Drop a staged batch that can no longer land. If the ISM already covers it, its
+    /// attestation did land, and a rebuild would start after its messages: park the ones not
+    /// yet delivered so they are not lost.
+    async fn discard(&self, batch: &Batch, path: &std::path::Path) -> Result<()> {
+        let covered = tee_node::state::IsmState::decode(batch.new_state())?.height;
+        let ism = self
+            .destination
+            .state()
+            .await
+            .context("reading the ISM before discarding a batch")?;
+        if ism.height >= covered {
+            for (id, message) in batch.for_domain(self.destination_domain) {
+                if !self.destination.delivered(&id).await? {
+                    warn!(route = %self.config.name, id, "parking a covered message from a discarded batch");
+                    self.park(
+                        &id,
+                        message,
+                        "left over from a batch that could not finish".into(),
+                        None,
+                    );
+                }
+            }
+        }
+        std::fs::remove_file(path)?;
+        Ok(())
+    }
+
+    /// Record what became of one message.
+    fn settle(&self, d: Delivery) {
+        match d.outcome {
+            Outcome::Delivered { tx } => self.mark_delivered(&d.id, Some(tx)),
+            Outcome::AlreadyDelivered => self.mark_delivered(&d.id, None),
+            Outcome::Refused { tx, reason } => {
+                warn!(route = %self.config.name, id = d.id, reason, "delivery refused; parked for redelivery");
+                self.park(&d.id, &d.message, reason, tx);
+            }
+        }
+    }
+
+    fn mark_delivered(&self, id: &str, tx: Option<String>) {
+        let path = self.dir.join("delivered").join(format!("{id}.json"));
+        // Our own transaction wins over "someone else did it", which a retry would report.
+        if tx.is_none() && path.exists() {
+            return;
+        }
+        let body = Delivered {
+            id: id.to_string(),
+            tx,
+            at: now(),
+        };
+        if let Err(e) = write_json(&path, &body) {
+            warn!(route = %self.config.name, id, error = %e, "could not record a delivery");
+        }
+        let _ = std::fs::remove_file(self.dir.join("undelivered").join(format!("{id}.json")));
+    }
+
+    fn park(&self, id: &str, message: &[u8], reason: String, tx: Option<String>) {
+        let path = self.dir.join("undelivered").join(format!("{id}.json"));
+        let at = now();
+        let previous: Option<Parked> = std::fs::read(&path)
+            .ok()
+            .and_then(|b| serde_json::from_slice(&b).ok());
+        let attempts = previous.as_ref().map_or(0, |p| p.attempts) + 1;
+        let body = Parked {
+            id: id.to_string(),
+            message: hex::encode(message),
+            attempts,
+            first_failed_at: previous.as_ref().map_or(at, |p| p.first_failed_at),
+            last_attempt_at: at,
+            next_attempt_at: at + redelivery_wait(attempts - 1),
+            reason,
+            tx,
+        };
+        if let Err(e) = write_json(&path, &body) {
+            warn!(route = %self.config.name, id, error = %e, "could not park a message");
+        }
+    }
+
+    /// Retry every parked message that is due. Never fails the pass: a message that still
+    /// cannot land stays parked, and stays reported.
+    async fn redeliver(&self) {
+        let Ok(entries) = std::fs::read_dir(self.dir.join("undelivered")) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let Some(parked) = std::fs::read(entry.path())
+                .ok()
+                .and_then(|b| serde_json::from_slice::<Parked>(&b).ok())
+            else {
+                continue;
+            };
+            if parked.next_attempt_at > now() {
+                continue;
+            }
+            let Ok(message) = hex::decode(&parked.message) else {
+                continue;
+            };
+            match self.destination.deliver(&message).await {
+                Ok(outcome) => {
+                    if matches!(
+                        outcome,
+                        Outcome::Delivered { .. } | Outcome::AlreadyDelivered
+                    ) {
+                        info!(route = %self.config.name, id = parked.id, attempts = parked.attempts + 1, "parked message delivered");
+                    }
+                    self.settle(Delivery {
+                        id: parked.id,
+                        message,
+                        outcome,
+                    })
+                }
+                Err(e) => {
+                    warn!(route = %self.config.name, id = parked.id, error = %format!("{e:#}"), "redelivery failed");
+                    self.park(&parked.id, &message, format!("{e:#}"), parked.tx);
+                }
+            }
+        }
     }
 
     fn heartbeat_due(&self) -> bool {
@@ -240,8 +418,18 @@ impl Route {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0);
-        let body = json!({ "error": error, "consecutiveFailures": failures, "at": now });
-        let _ = std::fs::write(self.dir.join("blocked.json"), body.to_string());
+        // When this run of failures began, carried over from the last write, so the monitor can
+        // tell a blip from an outage.
+        let path = self.dir.join("blocked.json");
+        let since = std::fs::read(&path)
+            .ok()
+            .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+            .and_then(|b| b["since"].as_u64())
+            .filter(|_| failures > 1)
+            .unwrap_or(now);
+        let body =
+            json!({ "error": error, "consecutiveFailures": failures, "at": now, "since": since });
+        let _ = std::fs::write(path, body.to_string());
     }
 
     fn clear_blocker(&self) {
@@ -249,25 +437,35 @@ impl Route {
     }
 }
 
-/// Start every route and the dashboard API, and run until one of them stops.
+/// Start every route, the tracker and the API, and run until one of them stops.
 pub async fn serve(config: Config) -> Result<()> {
     let tick = Duration::from_secs(config.tick_secs);
     let mut tasks = tokio::task::JoinSet::new();
     for route in &config.routes {
-        info!(route = %route.name, from = %route.from, to = %route.to, "configured");
+        debug!(route = %route.name, from = %route.from, to = %route.to, "configured");
         tasks.spawn(Route::new(&config, route)?.run(tick));
     }
+    let tracker = crate::tracker::Tracker::new(&config)?;
+    tracker.spawn(&mut tasks);
     let api = crate::api::Api::new(&config)?;
     let listen = config.api_listen.clone();
+    info!(routes = config.routes.len(), api = %listen, "relayer started; a status line follows every 5 minutes");
     tasks.spawn(async move {
-        if let Err(e) = crate::api::serve(api, &listen).await {
+        if let Err(e) = crate::api::serve(api, tracker, &listen).await {
             warn!(error = %e, "api stopped");
         }
     });
-    // A route runs until the process stops. If anything ends, take the service down so systemd
+    // A route, a watcher and the monitor each run until the process stops. If anything ends, take the service down so systemd
     // restarts it, rather than leaving a direction silently dead.
     tasks.join_next().await;
     anyhow::bail!("a route or the api stopped")
+}
+
+fn write_json(path: &std::path::Path, value: &impl serde::Serialize) -> Result<()> {
+    let tmp = path.with_extension("tmp");
+    std::fs::write(&tmp, serde_json::to_vec_pretty(value)?)?;
+    std::fs::rename(tmp, path)?;
+    Ok(())
 }
 
 /// The tree says how many leaves the range must hold, so a scan that disagrees is caught here,

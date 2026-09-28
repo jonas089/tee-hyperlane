@@ -259,6 +259,54 @@ impl Rpc {
     }
 }
 
+impl Rpc {
+    pub async fn block_time(&self, height: u64) -> Result<u64> {
+        let h = Height::try_from(height)?;
+        let commit = Self::retrying("commit", || self.client.commit(h)).await?;
+        Ok(commit.signed_header.header.time.unix_timestamp().max(0) as u64)
+    }
+
+    /// Every transaction over `from..=to` that dispatched a Hyperlane message: its hash,
+    /// height and events.
+    pub async fn dispatch_txs(
+        &self,
+        from: u64,
+        to: u64,
+    ) -> Result<Vec<(String, u64, Vec<tendermint::abci::Event>)>> {
+        let mut found = Vec::new();
+        let mut start = from;
+        while start <= to {
+            let end = (start + SEARCH_WINDOW - 1).min(to);
+            let query: tendermint_rpc::query::Query = format!(
+                "tx.height >= {start} AND tx.height <= {end} AND {DISPATCH_EVENT}.message EXISTS"
+            )
+            .parse()?;
+            for page in 1.. {
+                let results = Self::retrying("tx_search", || {
+                    self.client
+                        .tx_search(query.clone(), false, page, 100, Order::Ascending)
+                })
+                .await?;
+                for tx in &results.txs {
+                    found.push((
+                        tx.hash.to_string(),
+                        tx.height.value(),
+                        tx.tx_result.events.clone(),
+                    ));
+                }
+                if results.txs.len() < 100 {
+                    break;
+                }
+            }
+            start = end + 1;
+        }
+        Ok(found)
+    }
+}
+
+/// The name of the event carrying a dispatched message's bytes in its `message` attribute.
+pub const DISPATCH_EVENT_NAME: &str = DISPATCH_EVENT;
+
 /// The leaves one transaction inserted into `hook`'s tree, with their indexes. Inserts into
 /// any other hook on the chain are skipped: counting them was a live failure, when a second
 /// deployment's hook shared the chain.

@@ -1,0 +1,1175 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "TEE ISM bridge explorer",
+    "version": "1.0.0",
+    "description": "Read-only. Times are unix seconds; ids and 32-byte addresses are 0x-prefixed lowercase hex. Fields are only ever added in v1; a removal or change of meaning is v2."
+  },
+  "paths": {
+    "/api/v1/health": {
+      "get": {
+        "summary": "Overall health",
+        "description": "200 when nothing is open, 503 otherwise, so a plain uptime probe alerts on any problem. Also 503 when the monitor itself has stopped.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Health"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Not ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Health"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/inbox": {
+      "get": {
+        "summary": "Notifications",
+        "parameters": [
+          {
+            "name": "resolved",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "Include resolved notifications from the last week."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Inbox"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/routes": {
+      "get": {
+        "summary": "Every route",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Route"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/routes/{name}": {
+      "get": {
+        "summary": "One route",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Route"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such route"
+          }
+        }
+      }
+    },
+    "/api/v1/chains": {
+      "get": {
+        "summary": "Every configured chain",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Chain"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/messages": {
+      "get": {
+        "summary": "Transfers",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Comma-separated statuses to include."
+          },
+          {
+            "name": "route",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "maximum": 500
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessagePage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unknown status"
+          }
+        }
+      }
+    },
+    "/api/v1/messages/{id}": {
+      "get": {
+        "summary": "One transfer",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Message"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not tracked"
+          }
+        }
+      }
+    },
+    "/api/v1/search": {
+      "get": {
+        "summary": "Find transfers",
+        "description": "By message id, origin or delivery transaction hash, or account (the sender of the origin transaction, or the transfer's recipient). Accepts 0x hex, bare hex, and bech32.",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchResult"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/metrics": {
+      "get": {
+        "summary": "Prometheus metrics",
+        "description": "teeism_notifications_open{severity}, teeism_messages{route,status}, teeism_ism_height{route}, teeism_last_sweep_seconds.",
+        "responses": {
+          "200": {
+            "description": "Prometheus text format",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ChainRef": {
+        "type": "object",
+        "description": "A chain as the config names it.",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "domain"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "domain": {
+            "type": "integer",
+            "description": "Hyperlane domain."
+          }
+        }
+      },
+      "Transfer": {
+        "type": "object",
+        "description": "The warp transfer the message carries.",
+        "additionalProperties": false,
+        "required": [
+          "recipient",
+          "recipientHex",
+          "amount"
+        ],
+        "properties": {
+          "recipient": {
+            "type": "string",
+            "description": "The receiving account as the destination writes it: bech32 on Celestia, 20-byte hex on EVM."
+          },
+          "recipientHex": {
+            "type": "string",
+            "description": "The same account as a 32-byte Hyperlane address."
+          },
+          "amount": {
+            "type": "string",
+            "description": "Base units of the token, decimal."
+          }
+        }
+      },
+      "Dispatch": {
+        "type": "object",
+        "description": "The origin transaction that sent the message.",
+        "additionalProperties": false,
+        "required": [
+          "tx",
+          "block",
+          "timestamp"
+        ],
+        "properties": {
+          "tx": {
+            "type": "string",
+            "description": "Transaction hash."
+          },
+          "block": {
+            "type": "integer",
+            "description": "Origin block height."
+          },
+          "timestamp": {
+            "type": "integer",
+            "description": "Block time. Unix seconds."
+          },
+          "from": {
+            "anyOf": [
+              {
+                "type": "string",
+                "description": "The account that sent the transaction."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "Verified": {
+        "type": "object",
+        "description": "When the tracker saw the ISM cover the message.",
+        "additionalProperties": false,
+        "required": [
+          "at",
+          "ismHeight"
+        ],
+        "properties": {
+          "at": {
+            "type": "integer",
+            "description": "Seen at. Unix seconds."
+          },
+          "ismHeight": {
+            "type": "integer",
+            "description": "The ISM height that covered it."
+          }
+        }
+      },
+      "Delivery": {
+        "type": "object",
+        "description": "When the destination mailbox processed the message.",
+        "additionalProperties": false,
+        "required": [
+          "at"
+        ],
+        "properties": {
+          "at": {
+            "type": "integer",
+            "description": "Seen at. Unix seconds."
+          },
+          "tx": {
+            "anyOf": [
+              {
+                "type": "string",
+                "description": "Our delivery transaction; null when someone else delivered it or it predates the tracker."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "Failure": {
+        "type": "object",
+        "description": "A refused delivery, parked and retried with backoff.",
+        "additionalProperties": false,
+        "required": [
+          "attempts",
+          "firstFailedAt",
+          "lastAttemptAt",
+          "nextAttemptAt",
+          "reason"
+        ],
+        "properties": {
+          "attempts": {
+            "type": "integer"
+          },
+          "firstFailedAt": {
+            "type": "integer",
+            "description": "First refusal. Unix seconds."
+          },
+          "lastAttemptAt": {
+            "type": "integer",
+            "description": "Last attempt. Unix seconds."
+          },
+          "nextAttemptAt": {
+            "type": "integer",
+            "description": "Next retry. Unix seconds."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why the destination refused it."
+          },
+          "tx": {
+            "anyOf": [
+              {
+                "type": "string",
+                "description": "The last failed transaction, if one landed."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "Links": {
+        "type": "object",
+        "description": "Explorer links, where the chain has an explorer configured.",
+        "additionalProperties": false,
+        "required": [],
+        "properties": {
+          "dispatchTx": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "deliveryTx": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "Notification": {
+        "type": "object",
+        "description": "One problem. Opens when its condition first holds, updates while it holds, resolves by itself when it clears. It cannot be dismissed.",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "key",
+          "severity",
+          "subject",
+          "subjectId",
+          "title",
+          "detail",
+          "openedAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Unique per occurrence."
+          },
+          "key": {
+            "type": "string",
+            "description": "The condition; at most one open notification per key. Kinds: message-overdue, message-failed, route-failing, route-silent, route-staged, ism-unreadable, watch-failing, monitor-silent."
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "warning",
+              "critical"
+            ]
+          },
+          "subject": {
+            "type": "string",
+            "description": "What it is about.",
+            "enum": [
+              "message",
+              "route",
+              "chain",
+              "monitor"
+            ]
+          },
+          "subjectId": {
+            "type": "string",
+            "description": "The message id, route name or chain name."
+          },
+          "title": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "openedAt": {
+            "type": "integer",
+            "description": "Opened. Unix seconds."
+          },
+          "updatedAt": {
+            "type": "integer",
+            "description": "Condition last seen. Unix seconds."
+          },
+          "resolvedAt": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "description": "Unix seconds, or null while open."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "Message": {
+        "type": "object",
+        "description": "A transfer on one of our routes, from dispatch to delivery.",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "route",
+          "nonce",
+          "sender",
+          "recipient",
+          "firstSeenAt",
+          "origin",
+          "destination",
+          "status",
+          "expectedBy",
+          "links",
+          "notifications"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Message id."
+          },
+          "route": {
+            "type": "string"
+          },
+          "nonce": {
+            "type": "integer"
+          },
+          "sender": {
+            "type": "string",
+            "description": "Origin router, 32-byte."
+          },
+          "recipient": {
+            "type": "string",
+            "description": "Destination router, 32-byte."
+          },
+          "transfer": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Transfer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "dispatch": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Dispatch"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "firstSeenAt": {
+            "type": "integer",
+            "description": "When the tracker first recorded it. Unix seconds."
+          },
+          "attestableAt": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "description": "Unix seconds when the route first reported an origin head at or past the dispatch block, or null."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "verified": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Verified"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "delivery": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Delivery"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "origin": {
+            "$ref": "#/components/schemas/ChainRef"
+          },
+          "destination": {
+            "$ref": "#/components/schemas/ChainRef"
+          },
+          "status": {
+            "type": "string",
+            "description": "Where the transfer is. `pending`: dispatched, not yet covered by the ISM, within its route's expected latency. `verified`: covered by the ISM, delivery next. `delivered`: processed by the destination mailbox. `failed`: the destination refused delivery; parked and retried. `overdue`: stuck, see `problem`.",
+            "enum": [
+              "pending",
+              "verified",
+              "delivered",
+              "failed",
+              "overdue"
+            ]
+          },
+          "expectedBy": {
+            "type": "integer",
+            "description": "Latest expected delivery. Unix seconds."
+          },
+          "waitingOn": {
+            "anyOf": [
+              {
+                "type": "string",
+                "description": "What it waits on, while pending or verified."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "problem": {
+            "anyOf": [
+              {
+                "type": "string",
+                "description": "What is wrong, when failed or overdue."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "failure": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Failure"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "links": {
+            "$ref": "#/components/schemas/Links"
+          },
+          "notifications": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Notification"
+            },
+            "description": "Open notifications about this message."
+          }
+        }
+      },
+      "MessagePage": {
+        "type": "object",
+        "description": "A page of transfers, problems first, then newest first.",
+        "additionalProperties": false,
+        "required": [
+          "total",
+          "messages"
+        ],
+        "properties": {
+          "total": {
+            "type": "integer",
+            "description": "Matching transfers across all pages."
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Message"
+            }
+          }
+        }
+      },
+      "SearchResult": {
+        "type": "object",
+        "description": "Transfers matching a message id, transaction hash, or account on either side.",
+        "additionalProperties": false,
+        "required": [
+          "query",
+          "matched",
+          "messages"
+        ],
+        "properties": {
+          "query": {
+            "type": "string"
+          },
+          "matched": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "message",
+                "transaction",
+                "account",
+                "none"
+              ]
+            }
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Message"
+            }
+          }
+        }
+      },
+      "IsmReading": {
+        "type": "object",
+        "description": "The route's ISM as the tracker last read it.",
+        "additionalProperties": false,
+        "required": [],
+        "properties": {
+          "height": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "timestamp": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "readAt": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "failingSince": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "OriginHead": {
+        "type": "object",
+        "description": "How far the route loop last found the origin could go.",
+        "additionalProperties": false,
+        "required": [
+          "height",
+          "reportedAt"
+        ],
+        "properties": {
+          "height": {
+            "type": "integer"
+          },
+          "reportedAt": {
+            "type": "integer",
+            "description": "Reported. Unix seconds."
+          }
+        }
+      },
+      "Failing": {
+        "type": "object",
+        "description": "The route loop's current run of failures.",
+        "additionalProperties": false,
+        "required": [
+          "error",
+          "consecutiveFailures"
+        ],
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "consecutiveFailures": {
+            "type": "integer"
+          },
+          "since": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "Staged": {
+        "type": "object",
+        "description": "An attested batch still being submitted.",
+        "additionalProperties": false,
+        "required": [
+          "messages"
+        ],
+        "properties": {
+          "height": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "messages": {
+            "type": "integer"
+          },
+          "since": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "StatusCounts": {
+        "type": "object",
+        "description": "Tracked transfers by status.",
+        "additionalProperties": false,
+        "required": [
+          "pending",
+          "verified",
+          "delivered",
+          "failed",
+          "overdue"
+        ],
+        "properties": {
+          "pending": {
+            "type": "integer"
+          },
+          "verified": {
+            "type": "integer"
+          },
+          "delivered": {
+            "type": "integer"
+          },
+          "failed": {
+            "type": "integer"
+          },
+          "overdue": {
+            "type": "integer"
+          }
+        }
+      },
+      "Route": {
+        "type": "object",
+        "description": "One route: its ISM, its loop, its transfers and its open problems.",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "from",
+          "to",
+          "ism",
+          "status",
+          "expectedLatencySecs",
+          "ismReading",
+          "counts",
+          "notifications"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "from": {
+            "$ref": "#/components/schemas/ChainRef"
+          },
+          "to": {
+            "$ref": "#/components/schemas/ChainRef"
+          },
+          "ism": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "description": "`ok`: nothing open. `degraded`: a warning is open. `down`: a critical notification is open.",
+            "enum": [
+              "ok",
+              "degraded",
+              "down"
+            ]
+          },
+          "expectedLatencySecs": {
+            "type": "integer",
+            "description": "Past this a transfer is overdue."
+          },
+          "ismReading": {
+            "$ref": "#/components/schemas/IsmReading"
+          },
+          "originHead": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OriginHead"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "failing": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Failing"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "staged": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Staged"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "counts": {
+            "$ref": "#/components/schemas/StatusCounts"
+          },
+          "notifications": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Notification"
+            },
+            "description": "Open notifications about the route, its transfers, its origin watch, or the monitor."
+          }
+        }
+      },
+      "Watch": {
+        "type": "object",
+        "description": "The tracker's watch on an origin.",
+        "additionalProperties": false,
+        "required": [],
+        "properties": {
+          "cursor": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "description": "Last block scanned."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tip": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "lastOkAt": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "failingSince": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "Chain": {
+        "type": "object",
+        "description": "A configured chain.",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "kind",
+          "domain"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "domain": {
+            "type": "integer"
+          },
+          "explorer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "watch": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Watch"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "Health": {
+        "type": "object",
+        "description": "Overall health.",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "checkedAt",
+          "open"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "description": "`ok`: nothing open. `degraded`: a warning is open. `down`: a critical notification is open.",
+            "enum": [
+              "ok",
+              "degraded",
+              "down"
+            ]
+          },
+          "checkedAt": {
+            "type": "integer",
+            "description": "Answered. Unix seconds."
+          },
+          "lastSweepAt": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "description": "When the monitor last ran, or null."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "open": {
+            "type": "object",
+            "description": "Open notifications by severity.",
+            "additionalProperties": false,
+            "required": [
+              "critical",
+              "warning"
+            ],
+            "properties": {
+              "critical": {
+                "type": "integer"
+              },
+              "warning": {
+                "type": "integer"
+              }
+            }
+          }
+        }
+      },
+      "Inbox": {
+        "type": "object",
+        "description": "Notifications: open first, most severe first, newest first; then resolved ones.",
+        "additionalProperties": false,
+        "required": [
+          "notifications"
+        ],
+        "properties": {
+          "notifications": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Notification"
+            }
+          }
+        }
+      }
+    }
+  }
+}
