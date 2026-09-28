@@ -4,18 +4,14 @@
 //! coprocessor can stall the bridge; it cannot make a chain accept a message the enclave did
 //! not attest.
 //!
-//! One file per chain under the chain it rides on, mirroring the enclave: `ethereum/base.rs`
-//! finds what the enclave's `ethereum/base.rs` verifies.
+//! Two directories, one per side of a route. `origin/` holds the `Indexer` trait and one file
+//! per chain that implements it, under the chain it rides on and mirroring the enclave:
+//! `origin/ethereum/base.rs` finds what the enclave's `ethereum/base.rs` verifies.
+//! `destination/` holds the `Destination` trait and its two implementations, EVM and Celestia.
 
 pub mod api;
 pub mod config;
 pub mod destination;
-pub mod evm;
 pub mod identity;
 pub mod origin;
 pub mod route;
-
-/// Celestia, and Eden, which rides on it.
-pub mod celestia;
-/// Ethereum, and Arbitrum and Base, which ride on it.
-pub mod ethereum;

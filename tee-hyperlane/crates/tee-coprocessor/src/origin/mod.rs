@@ -19,6 +19,13 @@ use async_trait::async_trait;
 use serde_json::Value;
 use tee_node::state::IsmState;
 
+/// Celestia, and Eden, which rides on it.
+pub mod celestia;
+/// Ethereum, and Arbitrum and Base, which ride on it.
+pub mod ethereum;
+/// Reading EVM state over JSON-RPC, shared by the EVM origins.
+pub mod evm;
+
 #[async_trait]
 pub trait Indexer: Send + Sync {
     async fn gather(&self, trusted: &IsmState) -> Result<Step>;

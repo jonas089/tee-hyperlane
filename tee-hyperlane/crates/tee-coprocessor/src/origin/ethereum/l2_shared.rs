@@ -9,7 +9,7 @@ use tee_node::origin::Chain;
 use tee_node::state::IsmState;
 
 use super::{Ethereum, L1Step};
-use crate::evm::{hex_number, quantity, Rpc};
+use crate::origin::evm::{hex_number, quantity, Rpc};
 use crate::origin::{self, Cache, Message, Step};
 
 /// `[chains.<name>]` for an L2.

@@ -23,7 +23,7 @@ use tee_node::state::IsmState;
 use tracing::{debug, info};
 use tree_hash::TreeHash;
 
-use crate::evm::Rpc;
+use crate::origin::evm::Rpc;
 use crate::origin::{self, Cache, Indexer, Message, Step};
 
 const SECONDS_PER_SLOT: u64 = 12;
@@ -259,7 +259,7 @@ impl Indexer for Ethereum {
             .tree_proof(
                 self.hook,
                 TREE_SLOT,
-                json!(crate::evm::hex_number(l1.block)),
+                json!(crate::origin::evm::hex_number(l1.block)),
             )
             .await?;
         let snapshot = self
@@ -267,7 +267,7 @@ impl Indexer for Ethereum {
             .tree_proof(
                 self.hook,
                 TREE_SLOT,
-                json!(crate::evm::hex_number(trusted.height)),
+                json!(crate::origin::evm::hex_number(trusted.height)),
             )
             .await
             .context("reading the tree at the trusted height; set `archive_rpc` if pruned")?;

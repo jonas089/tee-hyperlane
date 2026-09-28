@@ -30,8 +30,10 @@ devnet/                                 scripts that deploy everything, and the 
 deploy/                                 the guides, the measured compose files, systemd units
 ```
 
-Both crates have one file per chain, in the same place: `ethereum/base.rs` is everything about
-Base. `origin.rs` in each holds the trait a chain implements.
+Both crates have one file per chain: everything about Base is `tee-node/src/ethereum/base.rs`
+(how the enclave verifies it) and `tee-coprocessor/src/origin/ethereum/base.rs` (how its proofs
+are fetched). The coprocessor splits into `origin/` and `destination/`, each with its trait in
+`mod.rs` and one file per implementation.
 
 ## Deployments
 

@@ -11,7 +11,7 @@ use tee_node::ethereum::base::{
 use tee_node::state::IsmState;
 
 use super::l2_shared::L2;
-use crate::evm::{account, hex_number};
+use crate::origin::evm::{account, hex_number};
 use crate::origin::{Indexer, Message, Step};
 
 /// OP Stack's `L2ToL1MessagePasser`, whose storage root is part of the output root.

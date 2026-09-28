@@ -1,7 +1,7 @@
 # The ark deployment: five origins, eight routes, three enclaves.
 #
 # Chains are declared once and routes name them. A chain's fields are documented on its
-# `Config` in tee-hyperlane/crates/tee-coprocessor/src/<chain>.rs. This is the live file with
+# `Config` in tee-hyperlane/crates/tee-coprocessor/src/origin/<chain>.rs. This is the live file with
 # the one metered key replaced; refresh it after a re-deployment:
 #
 #   ssh chef@ark 'cat ~/tee-ism-nonzk/devnet/.state/coprocessor.toml' \

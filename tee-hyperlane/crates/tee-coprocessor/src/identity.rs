@@ -210,7 +210,10 @@ mod tests {
         let log = v["event_log"].as_str().unwrap();
         let a = Identity::from_quote(&hex::encode(&v4), log).unwrap();
         let b = Identity::from_quote(&hex::encode(&v5), log).unwrap();
-        assert_eq!(serde_json::to_value(a).unwrap(), serde_json::to_value(b).unwrap());
+        assert_eq!(
+            serde_json::to_value(a).unwrap(),
+            serde_json::to_value(b).unwrap()
+        );
     }
 
     #[test]

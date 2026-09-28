@@ -243,13 +243,12 @@ No enclave or ISM changes.
 
 ### B. Adding a chain
 
-One file per crate, named after the chain, under the chain it relies on (e.g.
-`ethereum/arbitrum.rs`):
+**As an origin**, one file per crate, named after the chain, under the chain it relies on:
 
-| crate | implement | returns |
+| file | implement | returns |
 |---|---|---|
-| `tee-node` | `origin::Origin` | `verify`: the verified state root. `merkle_tree`: the Hyperlane tree under it |
-| `tee-coprocessor` | `origin::Indexer` | `gather`: the inputs for those two. `index`: messages between heights. `bootstrap`: a genesis state |
+| `tee-node/src/ethereum/arbitrum.rs` | `origin::Origin` | `verify`: the verified state root. `merkle_tree`: the Hyperlane tree under it |
+| `tee-coprocessor/src/origin/ethereum/arbitrum.rs` | `origin::Indexer` | `gather`: the inputs for those two. `index`: messages between heights. `bootstrap`: a genesis state |
 
 Then register it:
 - add the chain to `CHAINS` in its parent module
@@ -261,6 +260,10 @@ Rules:
 - Contract addresses, storage slots and keys are constants in the chain's file, never inputs.
 - The time is never an input.
 - Test the chain against live data with `tests/live.rs`.
+
+**As a destination**, an EVM chain reuses `tee-coprocessor/src/destination/evm.rs` and
+`TeeDcapIsm.sol` unchanged. Any other kind of chain needs an ISM that behaves like
+`TeeDcapIsm`, and a `destination/<kind>.rs` implementing `destination::Destination`.
 
 ### C. Automata on a new EVM chain
 

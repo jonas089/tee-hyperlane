@@ -11,7 +11,7 @@ use tee_node::ethereum::arbitrum::{
 use tee_node::state::IsmState;
 
 use super::l2_shared::L2;
-use crate::evm::{account, hex_number};
+use crate::origin::evm::{account, hex_number};
 use crate::origin::{Indexer, Message, Step};
 
 /// `AssertionCreated(bytes32 indexed assertionHash, bytes32 indexed parentAssertionHash, ...)`.

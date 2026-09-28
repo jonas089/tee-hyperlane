@@ -235,7 +235,7 @@ impl Faucet {
         let Some(faucet) = &config.faucet else {
             return Ok(None);
         };
-        let chain: crate::celestia::Config = config.chain(&faucet.chain)?;
+        let chain: crate::origin::celestia::Config = config.chain(&faucet.chain)?;
         Ok(Some(Self {
             claims: config.proof_dir().join(".faucet"),
             rpc: chain.rpc,

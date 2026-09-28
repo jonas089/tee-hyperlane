@@ -29,7 +29,7 @@ use tendermint_light_client_verifier::types::LightBlock;
 use tracing::{debug, info, warn};
 
 use super::Rpc as CelestiaRpc;
-use crate::evm::{hex_number, Rpc};
+use crate::origin::evm::{hex_number, Rpc};
 use crate::origin::{self, Cache, Indexer, Message, Step};
 
 /// How far back to search for the Celestia header this ISM's store sits at, without a hint.
