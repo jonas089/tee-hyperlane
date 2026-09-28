@@ -19,7 +19,7 @@ struct AttestResponse {
     quote: String,
     /// dstack's runtime event log, as JSON text.
     event_log: String,
-    /// The canonical attested payload, hex. Both SP1 programs re-derive its hash.
+    /// The canonical attested payload, hex. Both ISMs check its sha256 against report_data.
     payload: String,
     /// The state this update moves the ISM to, hex.
     new_state: String,
