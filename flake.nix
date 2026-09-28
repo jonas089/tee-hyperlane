@@ -44,25 +44,13 @@
           "tee-hyperlane/rust-toolchain"
           "tee-hyperlane/crates/hyperlane-types"
           "tee-hyperlane/crates/tee-node"
-          # tee-attestation arrives as a path dependency, and its own manifest inherits from
-          # the tee-circuit workspace root, so that one file comes along. The circuit guests
-          # and circuit-tool do not: they are built separately and never linked here.
-          "tee-circuit/Cargo.toml"
-          "tee-circuit/tee-attestation"
         ];
 
         # Tests are not built (`doCheck = false`), so letting them into the source would put
         # the enclave's identity at the mercy of a fixture.
-        #
-        # `enclave-identity.toml` is excluded for a sharper reason, and `postPatch` below
-        # writes the placeholder that replaces it: the file names the compose hash, the
-        # compose hash covers this image's digest, and the image's digest would then depend
-        # on the file. Excluding it here is what actually breaks that cycle - overwriting it
-        # during the build does not, because the source is hashed before the build runs.
         excluded = rel:
           let seg = name: pkgs.lib.hasInfix "/${name}/" rel || pkgs.lib.hasSuffix "/${name}" rel;
-          in seg "target" || seg "tests" || seg "testdata" || seg "node_modules"
-            || pkgs.lib.hasSuffix "/enclave-identity.toml" rel;
+          in seg "target" || seg "tests" || seg "testdata" || seg "node_modules";
 
         # Each image is built from a source tree without the other families' chain files in it.
         #
@@ -175,36 +163,12 @@
             };
           };
 
-          # Two edits the source filter cannot make on its own.
-          #
-          # The members: cargo insists every workspace member resolve even when building one
-          # of them, and the excluded crates' manifests are not in `src`. Trimming the list
-          # is what lets them stay out.
-          #
-          # The identity: `enclave-identity.toml` pins the measurements the *circuits*
-          # demand, and one of them is the compose hash, which covers this image's digest.
-          # Leaving the file in the source would make the image digest depend on a value
-          # derived from the image digest - a cycle, and one that quietly falsifies the
-          # reproducibility claim in docs/verify-deployment.md, because the file is written
-          # after the image it describes was built. tee-node reads none of these constants
-          # (the policy is enforced in the SP1 guests, not in the enclave), so the build gets
-          # a placeholder instead. It is all-zero rather than `require_enclave = false` so
-          # that anyone who later wires policy enforcement into tee-node gets a build that
-          # accepts nothing, rather than one that accepts anything.
+          # cargo insists every workspace member resolve even when building one of them, and
+          # the excluded crates' manifests are not in `src`. Trimming the list is what lets
+          # them stay out.
           postPatch = ''
             sed -i 's|^members = .*|members = ["crates/hyperlane-types", "crates/tee-node"]|' Cargo.toml
             grep -q 'members = \["crates/hyperlane-types", "crates/tee-node"\]' Cargo.toml
-            # The tree outside sourceRoot is unpacked read-only, and the file is absent
-            # rather than merely stale, so the directory has to allow creating it.
-            chmod u+w ../tee-circuit/tee-attestation
-            cat > ../tee-circuit/tee-attestation/enclave-identity.toml <<'IDENTITY'
-            require_enclave = true
-            mr_td         = "${builtins.concatStringsSep "" (builtins.genList (_: "00") 48)}"
-            os_image_hash = "${builtins.concatStringsSep "" (builtins.genList (_: "00") 32)}"
-            compose_hash  = "${builtins.concatStringsSep "" (builtins.genList (_: "00") 32)}"
-            mr_kms        = "${builtins.concatStringsSep "" (builtins.genList (_: "00") 32)}"
-            key_provider  = "00"
-            IDENTITY
           '';
 
           cargoBuildFlags = [

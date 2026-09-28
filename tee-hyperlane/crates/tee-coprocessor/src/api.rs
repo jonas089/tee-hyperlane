@@ -109,7 +109,7 @@ impl Api {
             .read_json(name, "staging/batch.json")
             .and_then(|staged| {
                 let state = hex::decode(staged["attestation"]["new_state"].as_str()?).ok()?;
-                let height = tee_attestation::decode_ism_state(&state).ok()?.height;
+                let height = tee_node::state::IsmState::decode(&state).ok()?.height;
                 let ids: Vec<String> = staged["messages"]
                     .as_array()?
                     .iter()
@@ -192,19 +192,11 @@ async fn attestation(
 
 /// The measurements a quote and its event log carry, for display next to a batch.
 pub fn measurements(quote: &str, event_log: &str) -> Result<Measurements> {
-    let quote = dcap_qvl::quote::Quote::parse(&hex::decode(quote.trim_start_matches("0x"))?)
-        .map_err(|e| anyhow::anyhow!("quote does not parse: {e:?}"))?;
-    let td = quote.report.as_td10().context("not a TDX quote")?;
-    let events: Vec<tee_attestation::EventLog> = serde_json::from_str(event_log)?;
-    let event = |name: &str| {
-        tee_attestation::get_event_value(&events, name)
-            .map(hex::encode)
-            .unwrap_or_default()
-    };
+    let id = crate::identity::Identity::from_quote(quote, event_log)?;
     Ok(Measurements {
-        mr_td: hex::encode(td.mr_td),
-        os_image_hash: event("os-image-hash"),
-        compose_hash: event("compose-hash"),
+        mr_td: id.mr_td,
+        os_image_hash: id.os_image_hash,
+        compose_hash: id.compose_hash,
     })
 }
 
@@ -243,7 +235,7 @@ impl Faucet {
         let Some(faucet) = &config.faucet else {
             return Ok(None);
         };
-        let chain: crate::celestia::Config = config.chain(&faucet.chain)?;
+        let chain: crate::origin::celestia::Config = config.chain(&faucet.chain)?;
         Ok(Some(Self {
             claims: config.proof_dir().join(".faucet"),
             rpc: chain.rpc,

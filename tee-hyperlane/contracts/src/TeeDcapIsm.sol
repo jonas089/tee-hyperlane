@@ -37,8 +37,9 @@ contract TeeDcapIsm is IInterchainSecurityModule {
     // ---------------------------------------------------------------- layout
     //
     // Automata returns abi.encodePacked(uint16 version, uint16 bodyType, uint8 tcbStatus,
-    // bytes6 fmspc, bytes quoteBody, ...), with the 584-byte TD report body at offset 11.
-    // Every offset below was verified against a live quote and a live call to their verifier.
+    // bytes6 fmspc, bytes quoteBody, ...), with the TD report body at offset 11, for v4 and v5
+    // quotes alike. A TD 1.5 body is a TD 1.0 body with 64 bytes appended, so every offset below
+    // holds for both. Verified against a live v4 quote and a live call to their verifier.
     uint256 private constant BODY = 11;
     uint256 private constant OFF_TD_ATTRIBUTES = BODY + 120;
     /// mr_td and mr_config_id are adjacent, as are rtmr0..2, so the pinned measurements are
@@ -51,12 +52,15 @@ contract TeeDcapIsm is IInterchainSecurityModule {
     uint256 private constant MIN_OUTPUT = BODY + 584;
 
     uint16 private constant QUOTE_VERSION_4 = 4;
+    uint16 private constant QUOTE_VERSION_5 = 5;
     uint16 private constant BODY_TYPE_TD10 = 2;
+    uint16 private constant BODY_TYPE_TD15 = 3;
 
     /// TCB levels this bridge accepts, matching the Celestia module's allowlist.
     /// 0 is OK, 1 is SW_HARDENING_NEEDED. Anything higher means Intel has published a reason
     /// the platform may be compromised, and a bridge that keeps minting against such a
-    /// platform is trading other people's funds for its own uptime.
+    /// platform is trading other people's funds for its own uptime. That includes v5's
+    /// TD_RELAUNCH_ADVISED (8, 9): the CVM has to be relaunched before it attests again.
     uint8 private constant TCB_OK = 0;
     uint8 private constant TCB_SW_HARDENING_NEEDED = 1;
 
@@ -71,6 +75,11 @@ contract TeeDcapIsm is IInterchainSecurityModule {
 
     /// Hyperlane's module type for this bridge's ISMs, matching the Celestia module id.
     uint8 public constant MODULE_TYPE = 43;
+
+    /// Which revision of this contract is deployed. `80-evm-isms.sh` replaces an ISM whose
+    /// `VERSION` differs even when it pins the right enclave. 2 accepts v5 quotes; the first
+    /// deployments have no `VERSION` at all.
+    uint8 public constant VERSION = 2;
 
     IDcapAttestation public immutable dcap;
 
@@ -198,9 +207,10 @@ contract TeeDcapIsm is IInterchainSecurityModule {
 
         uint16 version = uint16(bytes2(_slice(out, 0, 2)));
         uint16 bodyType = uint16(bytes2(_slice(out, 2, 2)));
-        if (version != QUOTE_VERSION_4 || bodyType != BODY_TYPE_TD10) {
-            revert UnsupportedQuote(version, bodyType);
-        }
+        // v4 carries a TD 1.0 body; v5 carries TD 1.0 or TD 1.5. Both are TDX, never SGX.
+        bool v4 = version == QUOTE_VERSION_4 && bodyType == BODY_TYPE_TD10;
+        bool v5 = version == QUOTE_VERSION_5 && (bodyType == BODY_TYPE_TD10 || bodyType == BODY_TYPE_TD15);
+        if (!v4 && !v5) revert UnsupportedQuote(version, bodyType);
 
         uint8 tcbStatus = uint8(out[4]);
         if (tcbStatus != TCB_OK && tcbStatus != TCB_SW_HARDENING_NEEDED) {

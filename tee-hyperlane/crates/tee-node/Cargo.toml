@@ -21,7 +21,6 @@ evolve = ["celestia", "dep:revm", "dep:ev-revm", "dep:alloy-evm", "dep:alloy-con
 
 [dependencies]
 hyperlane-types.workspace = true
-tee-attestation.workspace = true
 
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true

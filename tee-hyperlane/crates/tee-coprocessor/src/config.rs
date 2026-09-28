@@ -25,8 +25,8 @@ use serde::de::DeserializeOwned;
 use serde::Deserialize;
 
 use crate::destination::{self, Destination};
+use crate::origin::{celestia, ethereum};
 use crate::origin::{Cache, Indexer};
-use crate::{celestia, ethereum};
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]

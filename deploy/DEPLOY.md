@@ -3,11 +3,15 @@
 The whole bridge from nothing, on one Linux host, as `chef`. Every block starts with a `cd`,
 so paste it from anywhere. Every script is safe to re-run.
 
+A script that fails stops with `error`, naming the step or the command. One that could only do
+part of its work (Eden before the mocha node has synced, say) exits 3 and lists what it left
+undone: fix that and run it again.
+
 Ids the scripts create go in `devnet/.state/out/`. List them with
 `cd ~/tee-ism-nonzk && make status`.
 
 On a laptop, `make init && make start` (in the repo root) runs the whole thing against a local
-chain. `make stop` deletes the enclaves and `.state/`, so **never run it on ark**.
+chain. Without Nix there, set `FORCE_UNPINNED=1` to skip step 5's pin checks. `make stop` deletes the enclaves and `.state/`, so **never run it on ark**.
 
 ## 0. What you need
 
@@ -55,21 +59,18 @@ grep -E '^pruning|^min-retain-blocks' .state/celestia/config/app.toml   # "nothi
 
 ## 4. Enclave images
 
-Skip this to keep the images already pinned in `deploy/docker-compose.*.yml`.
-
 ```sh
-cd ~/tee-ism-nonzk
-docker login ghcr.io -u jonas089          # password: a GitHub token with write:packages
-for f in celestia ethereum evolve; do
-  nix build .#image-$f -o result-$f && docker load < result-$f \
-  && docker push ghcr.io/jonas089/tee-node:reproducible-$f \
-  && d=$(docker inspect --format '{{index .RepoDigests 0}}' ghcr.io/jonas089/tee-node:reproducible-$f | cut -d@ -f2) \
-  && sed -i "s|tee-node@sha256:[0-9a-f]*|tee-node@$d|" deploy/docker-compose.$f.yml
-done
-git diff --stat deploy/
+cd ~/tee-ism-nonzk/devnet
+docker login ghcr.io -u jonas089          # once; password: a GitHub token with write:packages
+./scripts/25-images.sh
+cd ~/tee-ism-nonzk && git add deploy/images.lock deploy/docker-compose.*.yml
+git commit -m "Pin enclave images" && git push
 ```
 
-A family whose compose file didn't change has the same code as before.
+`25-images.sh` builds, pushes and pins only the families whose code changed, and records each
+in `deploy/images.lock`. Step 5 refuses to run until those pins match the code and are
+pushed. Pushing from the server needs a GitHub token; otherwise copy the four files off and
+commit them elsewhere.
 
 ## 5. Enclaves
 
@@ -79,7 +80,9 @@ cd ~/tee-ism-nonzk/devnet
 for f in celestia ethereum evolve; do FAMILY=$f ~/tee-ism-nonzk/deploy/verify-digest.sh "$(cat .state/out/enclave-app-id-$f)"; done
 ```
 
-Every check must say `ok`. Never use `phala cvms upgrade`: it changes the enclave's identity.
+It stops first if a family's code no longer matches its pin in `deploy/images.lock`, or the
+pins aren't committed and pushed. Every `verify-digest.sh` check must say `ok`. Never use
+`phala cvms upgrade`: it changes the enclave's identity.
 
 ## 6. Intel collateral on the EVM chains
 
@@ -112,6 +115,7 @@ It takes about 30 minutes to sync. Until it has, step 8 skips Eden; re-run step 
 ```sh
 cd ~/tee-ism-nonzk/devnet
 ./scripts/50-warp-celestia.sh
+./scripts/75-dcap-verifiers.sh   # a v5 quote verifier on each EVM chain, next to v4
 ./scripts/80-evm-isms.sh
 ./scripts/85-celestia-isms.sh
 ./scripts/90-evm-warp.sh
@@ -243,13 +247,12 @@ No enclave or ISM changes.
 
 ### B. Adding a chain
 
-One file per crate, named after the chain, under the chain it relies on (e.g.
-`ethereum/arbitrum.rs`):
+**As an origin**, one file per crate, named after the chain, under the chain it relies on:
 
-| crate | implement | returns |
+| file | implement | returns |
 |---|---|---|
-| `tee-node` | `origin::Origin` | `verify`: the verified state root. `merkle_tree`: the Hyperlane tree under it |
-| `tee-coprocessor` | `origin::Indexer` | `gather`: the inputs for those two. `index`: messages between heights. `bootstrap`: a genesis state |
+| `tee-node/src/ethereum/arbitrum.rs` | `origin::Origin` | `verify`: the verified state root. `merkle_tree`: the Hyperlane tree under it |
+| `tee-coprocessor/src/origin/ethereum/arbitrum.rs` | `origin::Indexer` | `gather`: the inputs for those two. `index`: messages between heights. `bootstrap`: a genesis state |
 
 Then register it:
 - add the chain to `CHAINS` in its parent module
@@ -261,6 +264,10 @@ Rules:
 - Contract addresses, storage slots and keys are constants in the chain's file, never inputs.
 - The time is never an input.
 - Test the chain against live data with `tests/live.rs`.
+
+**As a destination**, an EVM chain reuses `tee-coprocessor/src/destination/evm.rs` and
+`TeeDcapIsm.sol` unchanged. Any other kind of chain needs an ISM that behaves like
+`TeeDcapIsm`, and a `destination/<kind>.rs` implementing `destination::Destination`.
 
 ### C. Automata on a new EVM chain
 
@@ -286,6 +293,20 @@ Pitfalls:
 - Eden accepts TCB info only in the V1 DAO
 - `openzeppelin-contracts` must be v5.0.2
 
+`75-dcap-verifiers.sh` adds the v5 verifier (`V5QuoteVerifier`, recorded in the same
+file) once per chain. The deployed addresses differ per chain. `devnet/.state/out/pccs-<chain>.json` is the record
+the scripts and ISMs read:
+
+| contract | Sepolia | Arbitrum | Base | Eden |
+|---|---|---|---|---|
+| AttestationEntrypoint | `0x961D4408f512D4a169bD76433460d2981a70c71F` | same | same | `0x6d748C482E0Eae5b63b5664CDaBE2C4F0461B6B8` |
+| V4QuoteVerifier | `0xFFd8Ddff9b7e9ce124A7fdddcd817bA4d8B37ab7` | same | same | `0x0D00346F2FE363BBf086f1F753f6A3426627Ea92` |
+| PCCSRouter | `0xdA7336571D634bE002035Af6ec55F0816A2Ed263` | same | same | `0x2c86Cb1a65079D6389c7bb0cf375651a36e8E992` |
+| PcsDao | `0x3c3fF9105e62228c7dA62C3bA04d24D320c4433C` | same | same | same |
+| EnclaveIdentityDaoVersioned | `0x426B9aC0e424dEcC66e4C3a7d9293839e16D8fc1` | same | same | `0x4108d529200FE300EF38E7E68447E34bc8d4b891` |
+| FmspcTcbDaoVersioned | `0x7BDA83918CAAD9b5EC7F88A24660167E90053690` | `0xe08E2eE491666702312Fc71566420e2C221DdeC3` | `0x06D080A8642803465500D6C9004Cc9CF48094EeD` | `0x61F9E7c62B7c3ade50aeD35065Ea7a8733417471` (V1) |
+| TcbEvalDao | `0x03b1B658C34Bb7919A9cA2067d0055f7dD5C5495` | same | same | `0xDd0F2b5B38391f1Bdf47c670aA161d5Aed7310d7` |
+
 ### D. Endpoints
 
 Defaults, each overridable in `devnet/.env`:
@@ -294,7 +315,7 @@ Defaults, each overridable in `devnet/.env`:
 SEPOLIA_RPC       https://rpc.sepolia.ethpandaops.io
 SEPOLIA_BEACON    https://ethereum-sepolia-beacon-api.publicnode.com
 ARBITRUM_ARCHIVE  https://api.zan.top/arb-sepolia
-ARBITRUM_LOGS     https://arbitrum-sepolia-rpc.publicnode.com
+ARBITRUM_LOGS     https://sepolia-rollup.arbitrum.io/rpc   (serves eth_getLogs over 1M blocks; publicnode caps at 50k)
 ARBITRUM_RPC      https://sepolia-rollup.arbitrum.io/rpc
 BASE_ARCHIVE      Alchemy, from ALCHEMY_BASE_KEY
 BASE_RPC          https://sepolia.base.org

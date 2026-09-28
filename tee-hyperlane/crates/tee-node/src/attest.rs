@@ -11,9 +11,9 @@
 //! Nothing is written to disk and nothing is kept between requests: the destination chain's
 //! ISM state *is* the light client's database.
 
+use crate::state::{AttestedUpdate, IsmState};
 use serde::Deserialize;
 use serde_json::Value;
-use tee_attestation::{encode_attested_update, AttestedUpdate, IsmState};
 
 use crate::origin;
 use hyperlane_types::{get_tree_root, insert_leaf, MerkleTree};
@@ -23,10 +23,9 @@ use hyperlane_types::{get_tree_root, insert_leaf, MerkleTree};
 /// Bumped whenever a field is added, removed, or stops being honoured, so a caller built for
 /// an older shape is refused rather than having fields silently ignored.
 ///
-/// 3 turns `tree_snapshot` from a decoded tree into a proof of one.
-/// 4 makes an evolve origin carry the blocks that produced its root.
-/// 5 names the chain at the top level and leaves its input, and both tree proofs, to it.
-pub const PROTOCOL_VERSION: u32 = 5;
+/// 1 is the shape since the per-chain traits: `chain` at the top level, its `input` and both
+/// tree proofs left to it. Numbering restarted there; no enclave speaking an earlier shape runs.
+pub const PROTOCOL_VERSION: u32 = 1;
 
 /// How the enclave is asked to advance one ISM by one step.
 #[derive(Deserialize)]
@@ -52,14 +51,14 @@ pub struct AttestRequest {
 }
 
 mod hex_ism_state {
+    use crate::state::IsmState;
     use serde::{Deserialize, Deserializer};
-    use tee_attestation::{decode_ism_state, IsmState};
 
     pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<IsmState, D::Error> {
         let text = String::deserialize(d)?;
         let raw = hex::decode(text.strip_prefix("0x").unwrap_or(&text))
             .map_err(serde::de::Error::custom)?;
-        decode_ism_state(&raw).map_err(serde::de::Error::custom)
+        IsmState::decode(&raw).map_err(serde::de::Error::custom)
     }
 }
 
@@ -130,7 +129,7 @@ pub fn attest_with(
         attested_at: head.attested_at,
         message_ids: request.message_ids,
     };
-    let payload = encode_attested_update(&update);
+    let payload = update.encode();
     Ok((update, payload))
 }
 

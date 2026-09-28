@@ -47,6 +47,7 @@ over HTTPS. Update it with `git pull`; `devnet/.env` and `devnet/.state/` there 
 | `deploy/MAINTAIN.md` | the monthly job, rolling out new code, waiting vs stuck, symptoms |
 | `deploy/INTERACT.md` | wallets, sending, checking arrival, latency and cost |
 | `deploy/coprocessor.toml.example` | the deployed chains and routes, verbatim but for the one key |
+| `deploy/images.lock` | which Nix build each pinned image came from; `30-enclave-up.sh` refuses to deploy when it and the code disagree |
 | `deploy/verify-digest.sh` | compose file to `compose_hash` to `mr_config_id`, against the signed quote |
 | `deploy/check-secrets.sh` | run before every commit |
 
@@ -77,13 +78,16 @@ Only the Base route uses a metered RPC: an Alchemy key (`ALCHEMY_BASE_KEY` in `d
 - **Eden's executor is ev-reth's own** (`ev-revm`, pinned to tag `v0.6.0`), not a
   reimplementation, so its precompiles, fee sink and custom transaction types come from the
   chain being verified rather than from guesswork.
+- **v5 quotes: EVM yes, Celestia not yet.** Phala emits v4 TDX quotes today. `TeeDcapIsm`
+  (`VERSION` 2) and `75-dcap-verifiers.sh` accept v5 as well, but `x/teeism` still casts to
+  `QuoteV4`, so a host switch to v5 would stop the four routes into Celestia until it changes.
 - **Eden runs Osaka, not Prague.** Simple transfers execute the same under both, so the first
   fixtures passed on Prague and proved nothing; a DCAP verification does not, because P-256
   verification is an Osaka precompile. Under Prague it reverts with empty data.
 - **The per-family split bounds origin-specific changes only.** `flake.nix` gives each family
   its own source filter, so editing `celestia/eden.rs` or `celestia/eden/` moves the evolve
-  digest alone. `Cargo.lock` and the shared modules (`attest.rs`, `origin.rs`, `evm.rs`) are in
-  every image's source, so touching those still moves all three.
+  digest alone. `Cargo.lock` and the shared modules (`attest.rs`, `origin.rs`, `state.rs`,
+  `evm.rs`) are in every image's source, so touching those still moves all three.
 - **A replacement ISM resumes, it never re-anchors.** `80-evm-isms.sh` and
   `85-celestia-isms.sh` start a replacement from the old ISM's last state with only the identity
   (last 32 bytes) swapped, so nothing in flight is lost, and stop rather than fall back to the

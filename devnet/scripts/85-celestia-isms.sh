@@ -44,7 +44,7 @@ settle() {
 
 # send <what> <tx args...> - broadcast, wait, and stop with the node's own error on any failure,
 # so a failed step is never mistaken for a finished one.
-send() {
+send() { # also leaves the included transaction in SENT, for callers that need its events
   local what="$1" out hash result; shift
   out="$("${A}" tx "$@" ${TX} 2>&1 || true)"
   hash="$(printf '%s' "${out}" | python3 -c 'import sys,json;print(json.load(sys.stdin)["txhash"])' 2>/dev/null || true)"
@@ -53,6 +53,7 @@ send() {
   [ -n "${result}" ] || die "${what}: ${hash} not included"
   printf '%s' "${result}" | python3 -c 'import sys,json;d=json.load(sys.stdin);sys.exit(1 if d.get("code") else 0)' \
     || die "${what}: failed: $(printf '%s' "${result}" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("raw_log",""))')"
+  SENT="${result}"
 }
 
 # The identity digest an ISM pins: the last 32 bytes of its state, which the module checks
@@ -127,7 +128,7 @@ for row in ${ORIGINS}; do
   # guard read as if it handled the case and never once ran: base took the run down with it
   # and Eden, the origin after it, was never attempted.
   genesis="$(genesis_for "${name}" "${family}" "${replacing}" || true)"
-  [ -n "${genesis}" ] || { warn "  could not anchor ${name}; skipping, its current ISM stays in place"; continue; }
+  [ -n "${genesis}" ] || { incomplete "${name}: could not build its genesis state (the reason is above); its current ISM stays in place"; continue; }
 
   OUT_DIR="${OUT_DIR}" python3 - "${genesis}" "${tree}" "${name}" "${family}" <<'PY'
 import json, sys, os
@@ -140,7 +141,7 @@ PY
 
   out="$("${A}" tx teeism create "${OUT_DIR}/ism-${name}-origin.json" ${TX} 2>&1 || true)"
   hash="$(printf '%s' "${out}" | python3 -c 'import sys,json;print(json.load(sys.stdin)["txhash"])' 2>/dev/null || true)"
-  [ -n "${hash}" ] || { warn "  ${name}: broadcast failed: ${out}"; continue; }
+  [ -n "${hash}" ] || { incomplete "${name}: ISM create not broadcast: ${out}"; continue; }
   id="$( (settle "${hash}" || true) | python3 -c '
 import sys, json
 d = json.load(sys.stdin)
@@ -153,7 +154,7 @@ for ev in d["events"]:
             if a["key"] == "id":
                 print(a["value"].strip(chr(34)))
 ' 2>/dev/null || true)"
-  [ -n "${id}" ] || { warn "  ${name}: ISM not created (tx ${hash})"; continue; }
+  [ -n "${id}" ] || { incomplete "${name}: ISM not created; see tx ${hash} (celestia-appd query tx ${hash})"; continue; }
   save "ism-celestia-${name}" "${id}"
   say "  ${id}"
 done
@@ -170,9 +171,8 @@ if has routing-ism-id; then
   routing="$(load routing-ism-id)"
   say "  already created: ${routing}"
 else
-  hash="$("${A}" tx hyperlane ism create-routing ${TX} 2>&1 \
-    | python3 -c 'import sys,json;print(json.load(sys.stdin)["txhash"])')"
-  routing="$(settle "${hash}" | python3 -c '
+  send "create the routing ism" hyperlane ism create-routing
+  routing="$(printf '%s' "${SENT}" | python3 -c '
 import sys, json
 for ev in json.load(sys.stdin)["events"]:
     if "RoutingIsm" in ev["type"] or "routing" in ev["type"].lower():

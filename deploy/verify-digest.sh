@@ -90,9 +90,10 @@ work = sys.argv[1]
 d = json.load(open(f"{work}/id.json"))
 q = d["quote"]
 raw = bytes.fromhex(q[2:] if q.startswith("0x") else q)
-# The TD report body starts after the 48 byte quote header. mr_config_id sits at offset 184
-# of the body and dstack writes it as 0x01 then the compose hash then zero padding.
-body = raw[48:]
+# The TD report body starts after the 48 byte quote header, plus a 6 byte body descriptor in
+# a v5 quote. mr_config_id sits at offset 184 of the body, in TD 1.0 and TD 1.5 alike, and
+# dstack writes it as 0x01 then the compose hash then zero padding.
+body = raw[48 + (6 if int.from_bytes(raw[0:2], "little") == 5 else 0):]
 cfg = body[184:232]
 if cfg[0] != 1:
     print(f"       mr_config_id does not start with 0x01: {cfg[:1].hex()}")
@@ -125,7 +126,8 @@ if [ -n "${ISM}" ] && [ -n "${RPC}" ]; then
 import json, subprocess, sys
 work = sys.argv[1]
 d = json.load(open(f"{work}/id.json"))
-q = d["quote"]; raw = bytes.fromhex(q[2:] if q.startswith("0x") else q)[48:]
+q = bytes.fromhex(d["quote"].removeprefix("0x"))
+raw = q[48 + (6 if int.from_bytes(q[0:2], "little") == 5 else 0):]   # the report body, v4 or v5
 # mr_td ++ mr_config_id, then rtmr0..2. rtmr3 is excluded on purpose: it carries app-id and
 # instance-id, so including it would tie an ISM to one CVM rather than to the code it runs.
 pre = "0x" + (raw[136:232] + raw[328:472]).hex()

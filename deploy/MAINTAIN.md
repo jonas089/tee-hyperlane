@@ -28,7 +28,7 @@ For UI changes, also rebuild the UI ([DEPLOY step 11](DEPLOY.md#11-ui-and-gatewa
 
 ## Update: enclave code
 
-For changes to `crates/tee-node`, `hyperlane-types`, `tee-attestation` or `Cargo.lock`. Each
+For changes to `crates/tee-node`, `crates/hyperlane-types` or `Cargo.lock`. Each
 changed enclave needs new ISMs. The scripts only redo what changed.
 
 In-flight transfers are kept; see [No message is lost](#no-message-is-lost).
@@ -45,18 +45,20 @@ cd ~/tee-ism-nonzk/tee-hyperlane && cargo build --release -p tee-coprocessor -p 
 Leave `devnet/.state/proofs/` in place. It holds the hints (`chains/<chain>/`) that let each
 route rebuild its old ISM's light-client state and resume.
 
-**2. Images:** [DEPLOY step 4](DEPLOY.md#4-enclave-images).
+**2. Images:** [DEPLOY step 4](DEPLOY.md#4-enclave-images): build, pin, commit and push.
 
-**3. Enclaves:** [DEPLOY step 5](DEPLOY.md#5-enclaves). The old CVMs keep running.
+**3. Enclaves:** [DEPLOY step 5](DEPLOY.md#5-enclaves). It refuses to run until step 2's pins
+match the code and are pushed. The old CVMs keep running.
 
 **4. ISMs and routers**
 
 ```sh
 cd ~/tee-ism-nonzk/devnet
-./scripts/80-evm-isms.sh && ./scripts/85-celestia-isms.sh && ./scripts/90-evm-warp.sh
+./scripts/75-dcap-verifiers.sh && ./scripts/80-evm-isms.sh && ./scripts/85-celestia-isms.sh && ./scripts/90-evm-warp.sh
 ```
 
-Each router should print `repointing`. **If one prints `deploying the collateral USDC router`,
+`80-evm-isms.sh` also replaces an EVM ISM whose contract `VERSION` is older than the source's,
+even when the enclave is unchanged. Each router should print `repointing`. **If one prints `deploying the collateral USDC router`,
 press Ctrl-C.** A new collateral router strands the USDC held in the old one.
 
 **5. Start**
@@ -76,7 +78,6 @@ curl -s localhost:3001/api/status | jq -r '.[] | "\(.name) \(.height)"'     # 8 
 
 ```sh
 phala cvms delete <old app id>        # ×3, ids in ~/teeism-state-*/out/enclave-app-id-*
-cd ~/tee-ism-nonzk && git commit deploy/docker-compose.*.yml -m "Pin new enclave images" && git push
 ```
 
 Then update the ids in `README.md`.

@@ -1,7 +1,7 @@
 # The ark deployment: five origins, eight routes, three enclaves.
 #
 # Chains are declared once and routes name them. A chain's fields are documented on its
-# `Config` in tee-hyperlane/crates/tee-coprocessor/src/<chain>.rs. This is the live file with
+# `Config` in tee-hyperlane/crates/tee-coprocessor/src/origin/<chain>.rs. This is the live file with
 # the one metered key replaced; refresh it after a re-deployment:
 #
 #   ssh chef@ark 'cat ~/tee-ism-nonzk/devnet/.state/coprocessor.toml' \
@@ -48,7 +48,7 @@ kind = "arbitrum"
 domain = 421614
 l1 = "sepolia"
 rpc = "https://api.zan.top/arb-sepolia"
-logs_rpc = "https://arbitrum-sepolia-rpc.publicnode.com"
+logs_rpc = "https://sepolia-rollup.arbitrum.io/rpc"
 send_rpc = "https://sepolia-rollup.arbitrum.io/rpc"
 mailbox = "0x598facE78a4302f11E3de0bee1894Da0b2Cb71F8"
 merkle_tree_hook = "0xAD34A66Bf6dB18E858F6B686557075568c6E031C"

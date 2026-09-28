@@ -19,7 +19,7 @@ struct AttestResponse {
     quote: String,
     /// dstack's runtime event log, as JSON text.
     event_log: String,
-    /// The canonical attested payload, hex. Both SP1 programs re-derive its hash.
+    /// The canonical attested payload, hex. Both ISMs check its sha256 against report_data.
     payload: String,
     /// The state this update moves the ISM to, hex.
     new_state: String,
@@ -81,7 +81,7 @@ async fn attest(
     })?;
 
     let quote = dstack
-        .get_quote(tee_attestation::hash_attested_update(&update))
+        .get_quote(update.hash())
         .await
         .map_err(|e| reject(StatusCode::INTERNAL_SERVER_ERROR, e))?;
 
@@ -94,7 +94,7 @@ async fn attest(
         quote: quote.quote,
         event_log: quote.event_log,
         payload: hex::encode(&payload),
-        new_state: hex::encode(tee_attestation::encode_ism_state(&update.new_state)),
+        new_state: hex::encode(update.new_state.encode()),
         message_ids: update.message_ids.iter().map(hex::encode).collect(),
     }))
 }

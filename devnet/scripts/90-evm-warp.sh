@@ -72,25 +72,33 @@ kind_for() {
 # **collateral** router abandons the escrow inside it. An identity rotation did exactly that
 # to Sepolia's USDC router once, stranding real USDC in a contract nothing referenced any
 # more. A synthetic is less dramatic but still orphans the supply it minted.
-reusable() {
-  local cand="$1" rpc="$2" ism="$3" code cur owner
-  code="$(cast code "${cand}" --rpc-url "${rpc}" 2>/dev/null || true)"
-  [ -n "${code}" ] && [ "${code}" != "0x" ] || return 1
-  cur="$(cast call "${cand}" "interchainSecurityModule()(address)" --rpc-url "${rpc}" 2>/dev/null || true)"
-  if [ "$(printf '%s' "${cur}" | tr 'A-Z' 'a-z')" = "$(printf '%s' "${ism}" | tr 'A-Z' 'a-z')" ]; then
-    return 0
-  fi
-  # Drifted. Ours to repoint?
-  owner="$(cast call "${cand}" "owner()(address)" --rpc-url "${rpc}" 2>/dev/null || true)"
-  local me
-  me="$(cast wallet address --private-key "${EVM_PRIVATE_KEY}" 2>/dev/null || true)"
-  [ -n "${owner}" ] && [ "$(printf '%s' "${owner}" | tr 'A-Z' 'a-z')" = "$(printf '%s' "${me}" | tr 'A-Z' 'a-z')" ] || return 1
+#
+# So a recorded router is replaced only when the chain says there is no code at its address.
+# Anything else that goes wrong - an RPC error, a router owned by someone else, a repoint that
+# does not take - stops the run, because deploying over it is the one mistake that costs funds.
+lower() { printf '%s' "$1" | tr 'A-Z' 'a-z'; }
+reusable() { # <router> <rpc> <ism>: 0 reused or repointed, 1 no code there; dies otherwise
+  local cand="$1" rpc="$2" ism="$3" code cur owner me out
+  code="$(cast code "${cand}" --rpc-url "${rpc}" 2>&1)" \
+    || die "could not read the code at ${cand} (${rpc}): ${code}"
+  [ "${code}" = "0x" ] && return 1
+  cur="$(cast call "${cand}" "interchainSecurityModule()(address)" --rpc-url "${rpc}" 2>&1)" \
+    || die "could not read ${cand}'s ISM: ${cur}"
+  [ "$(lower "${cur}")" = "$(lower "${ism}")" ] && return 0
+  owner="$(cast call "${cand}" "owner()(address)" --rpc-url "${rpc}" 2>&1)" \
+    || die "could not read ${cand}'s owner: ${owner}"
+  me="$(cast wallet address --private-key "${EVM_PRIVATE_KEY}")"
+  [ "$(lower "${owner}")" = "$(lower "${me}")" ] \
+    || die "${cand} is owned by ${owner}, not ${me}; its owner has to point it at ${ism}. Not deploying a replacement."
   say "repointing ${cand} at ${ism}"
-  cast send "${cand}" "setInterchainSecurityModule(address)" "${ism}" \
-    --rpc-url "${rpc}" --private-key "${EVM_PRIVATE_KEY}" >/dev/null 2>&1 || return 1
+  out="$(cast send "${cand}" "setInterchainSecurityModule(address)" "${ism}" \
+    --rpc-url "${rpc}" --private-key "${EVM_PRIVATE_KEY}" 2>&1)" \
+    || die "repointing ${cand} failed: $(printf '%s' "${out}" | tail -3)"
   sleep 4
-  cur="$(cast call "${cand}" "interchainSecurityModule()(address)" --rpc-url "${rpc}" 2>/dev/null || true)"
-  [ "$(printf '%s' "${cur}" | tr 'A-Z' 'a-z')" = "$(printf '%s' "${ism}" | tr 'A-Z' 'a-z')" ]
+  cur="$(cast call "${cand}" "interchainSecurityModule()(address)" --rpc-url "${rpc}" 2>&1)" \
+    || die "could not read ${cand}'s ISM after repointing: ${cur}"
+  [ "$(lower "${cur}")" = "$(lower "${ism}")" ] \
+    || die "${cand} still reports ISM ${cur} after repointing to ${ism}"
 }
 
 # `forge script` prints the address it simulated, which exists whether or not the broadcast
@@ -109,13 +117,13 @@ confirm_code() {
 # subshell and `save` writes state the parent never sees.
 while IFS=: read -r name chainid mailbox; do
   addr_file="${OUT_DIR}/pccs-${name}.json"
-  [ -f "${addr_file}" ] || { warn "no PCCS on ${name}; skipping"; continue; }
+  [ -f "${addr_file}" ] || { incomplete "${name}: no PCCS record, so no ISM and no routers there"; continue; }
   rpc="$(python3 -c "import json;print(json.load(open('${addr_file}'))['rpc'])")"
-  has "ism-${name}" || { warn "no ISM on ${name}; skipping"; continue; }
+  has "ism-${name}" || { incomplete "${name}: no ISM recorded; run 80-evm-isms.sh first"; continue; }
   ism="$(load "ism-${name}")"
 
   while IFS=: read -r label token_key suffix tname tsymbol tdec; do
-    has "${token_key}" || { warn "no ${label} token on celestia; skipping"; continue; }
+    has "${token_key}" || { incomplete "${name}: no ${label} token on celestia; run 50-warp-celestia.sh first"; continue; }
     token="$(load "${token_key}")"
     kind="$(kind_for "${label}" "${name}")"
     key="${name}-${suffix}"
@@ -161,11 +169,12 @@ while IFS=: read -r name chainid mailbox; do
       # tracking and the second comes back "replacement transaction underpriced", which reads
       # like a rejected enrolment rather than a collision.
       for attempt in 1 2 3; do
-        if cast send "${router}" "enrollRemoteRouter(uint32,bytes32)" "${DOMAIN}" "${token}" \
-             --rpc-url "${rpc}" --private-key "${EVM_PRIVATE_KEY}" >/dev/null 2>&1; then
+        if out="$(cast send "${router}" "enrollRemoteRouter(uint32,bytes32)" "${DOMAIN}" "${token}" \
+             --rpc-url "${rpc}" --private-key "${EVM_PRIVATE_KEY}" 2>&1)"; then
           break
         fi
-        [ "${attempt}" = 3 ] && die "enrollRemoteRouter failed for ${label} on ${name}"
+        [ "${attempt}" = 3 ] && die "enrollRemoteRouter failed for ${label} on ${name}: $(printf '%s' "${out}" | tail -3)"
+        warn "enrollRemoteRouter attempt ${attempt} failed, retrying: $(printf '%s' "${out}" | tail -1)"
         sleep $((attempt * 6))
       done
       sleep 4
@@ -183,7 +192,7 @@ done <<< "${CHAINS}"
 # domain that is already enrolled, so a repoint has to unroll first.
 enroll_from_celestia() {
   local token="$1" domain="$2" name="$3" label="$4" key="$5"
-  has "${key}" || { warn "no ${name} ${label} router; skipping"; return 0; }
+  has "${key}" || { incomplete "celestia ${label} token: no ${name} router to enroll"; return 0; }
   local router want got
   router="$(load "${key}")"
   want="0x000000000000000000000000$(printf '%s' "${router#0x}" | tr 'A-Z' 'a-z')"

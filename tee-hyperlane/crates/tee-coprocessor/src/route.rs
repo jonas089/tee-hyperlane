@@ -122,7 +122,7 @@ impl Route {
         info!(route = %self.config.name, from = trusted.height, to = step.head, leaves = messages.len(), "attesting");
         let request = json!({
             "protocol": tee_node::attest::PROTOCOL_VERSION,
-            "trusted_state": hex::encode(tee_attestation::encode_ism_state(&trusted)),
+            "trusted_state": hex::encode(trusted.encode()),
             "chain": step.chain,
             "input": step.input,
             "tree": step.tree,
@@ -195,7 +195,7 @@ impl Route {
             Err(e) => return Err(e),
         }
 
-        let update = tee_attestation::decode_attested_update(&batch.payload)?;
+        let update = tee_node::state::AttestedUpdate::decode(&batch.payload)?;
         let height = update.new_state.height;
         record["height"] = height.into();
         record["state_root"] = format!("0x{}", hex::encode(update.new_state.state_root)).into();

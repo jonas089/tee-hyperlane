@@ -1,7 +1,33 @@
 # Shared helpers for the devnet scripts. Sourced, never executed.
 # shellcheck shell=bash
 
-set -euo pipefail
+set -Eeuo pipefail
+
+# No script stops without saying where. `set -e` alone exits on the first unchecked failure
+# and prints nothing, which is how 85-celestia-isms.sh once stopped halfway with no clue why.
+# The trap names the script, the line and the command; -E carries it into functions and
+# command substitutions.
+trap 'printf "\033[1;31merror\033[0m %s:%s: \`%s\` failed (exit %s)\n" \
+  "${BASH_SOURCE[0]##*/}" "${LINENO}" "${BASH_COMMAND}" "$?" >&2' ERR
+
+# Work a script had to leave undone. Each item is warned about as it happens, and the script
+# then exits 3 with the list instead of 0, so a partial run is never mistaken for a finished
+# one. Re-running the script picks up where it stopped: every step here is idempotent.
+INCOMPLETE=()
+incomplete() {
+  printf '\033[1;33m warn\033[0m %s\n' "$*" >&2
+  INCOMPLETE+=("$*")
+}
+report_incomplete() {
+  local rc=$?
+  if [ "${rc}" -eq 0 ] && [ "${#INCOMPLETE[@]}" -gt 0 ]; then
+    printf '\n\033[1;33mincomplete\033[0m %s: %s item(s) left undone\n' "${0##*/}" "${#INCOMPLETE[@]}" >&2
+    printf '  - %s\n' "${INCOMPLETE[@]}" >&2
+    printf 'fix the cause and run it again; finished steps are skipped\n' >&2
+    exit 3
+  fi
+}
+trap report_incomplete EXIT
 
 DEVNET_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REPO_DIR="$(cd "${DEVNET_DIR}/.." && pwd)"
@@ -222,6 +248,25 @@ wait_for_chain() {
 #
 # One generator for `${STATE_DIR}/coprocessor.toml`, called before anything reads it: the ISM
 # scripts need the chain tables to produce genesis states, and `make start` needs the routes.
+# ---------------------------------------------------------------- enclave images
+#
+# deploy/images.lock records, per family, the Nix store path an image was built from and the
+# registry digest it was pushed as: `<family> <outPath> <digest>`. 25-images.sh writes it;
+# 30-enclave-up.sh refuses to deploy unless the current source still evaluates to that path.
+IMAGES_LOCK="${REPO_DIR}/deploy/images.lock"
+
+# The store path the current source would build for a family. Evaluates, never builds.
+image_out_path() { nix eval --raw "${REPO_DIR}#image-$1.outPath"; }
+
+# The digest a family's compose file pins.
+pinned_digest() { grep -o 'tee-node@sha256:[0-9a-f]*' "${REPO_DIR}/deploy/docker-compose.$1.yml" | cut -d@ -f2; }
+
+# locked <family> <out|digest> - that family's recorded value, or nothing.
+locked() {
+  local col=2; [ "$2" = digest ] && col=3
+  awk -v f="$1" -v c="${col}" '$1 == f { print $c }' "${IMAGES_LOCK}" 2>/dev/null || true
+}
+
 # Every chain is always written; a route only once its ISM exists. Endpoint defaults match the
 # live deployment; override any of them in devnet/.env.
 COPROCESSOR_CONFIG="${STATE_DIR}/coprocessor.toml"
@@ -295,7 +340,7 @@ kind = "arbitrum"
 domain = ${ARBITRUM_SEPOLIA_DOMAIN}
 l1 = "sepolia"
 rpc = "${ARBITRUM_ARCHIVE:-https://api.zan.top/arb-sepolia}"
-logs_rpc = "${ARBITRUM_LOGS:-https://arbitrum-sepolia-rpc.publicnode.com}"
+logs_rpc = "${ARBITRUM_LOGS:-https://sepolia-rollup.arbitrum.io/rpc}"
 send_rpc = "${ARBITRUM_RPC:-https://sepolia-rollup.arbitrum.io/rpc}"
 mailbox = "${ARBITRUM_MAILBOX:-0x598facE78a4302f11E3de0bee1894Da0b2Cb71F8}"
 merkle_tree_hook = "${ARBITRUM_HOOK:-0xAD34A66Bf6dB18E858F6B686557075568c6E031C}"

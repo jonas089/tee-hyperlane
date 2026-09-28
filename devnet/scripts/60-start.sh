@@ -37,6 +37,15 @@ APPD="${APPD}" COLLATERAL_BIN="${COLLATERAL_BIN}" \
 echo $! > "${STATE_DIR}/relayer.pid"
 say "relayer log: ${STATE_DIR}/logs/relayer.log"
 
+# alive <name> <pidfile> <log> - a process that died on start must not read as running.
+alive() {
+  sleep 5
+  kill -0 "$(cat "$2")" 2>/dev/null && return 0
+  tail -20 "$3" >&2
+  die "$1 exited right after starting; its log is above and in $3"
+}
+alive relayer "${STATE_DIR}/relayer.pid" "${STATE_DIR}/logs/relayer.log"
+
 # The UI's deployment values normally name the live testnet. The devnet mints its ids at
 # genesis, so they cannot be known in advance and are written here instead.
 # Empty rather than absent when an asset was not deployed: the UI reads an empty value as
@@ -75,6 +84,7 @@ say "starting the bridge UI on http://localhost:3000"
     > "${STATE_DIR}/logs/ui.log" 2>&1 &
   echo $! > "${STATE_DIR}/ui.pid"
 )
+alive "the bridge UI" "${STATE_DIR}/ui.pid" "${STATE_DIR}/logs/ui.log"
 
 say "devnet is running"
 echo

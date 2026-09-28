@@ -7234,21 +7234,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c1bbb9f3c5c463a01705937a24fdabc5047929ac764b2d5b9cf681c1f5041ed5"
 
 [[package]]
-name = "tee-attestation"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "dcap-qvl",
- "hex",
- "parity-scale-codec",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "thiserror 1.0.69",
- "toml",
-]
-
-[[package]]
 name = "tee-coprocessor"
 version = "0.1.0"
 dependencies = [
@@ -7269,7 +7254,7 @@ dependencies = [
  "reqwest 0.12.28",
  "serde",
  "serde_json",
- "tee-attestation",
+ "sha2 0.10.9",
  "tee-node",
  "tempfile",
  "tendermint",
@@ -7314,7 +7299,6 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "ssz_types",
- "tee-attestation",
  "tendermint",
  "tendermint-light-client-verifier",
  "thiserror 1.0.69",

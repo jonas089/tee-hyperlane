@@ -25,14 +25,15 @@ The enclave stores nothing; its state lives in the ISM on chain.
 tee-hyperlane/crates/tee-node/          the enclave
 tee-hyperlane/crates/tee-coprocessor/   the service: every route, the API, the faucet
 tee-hyperlane/contracts/                TeeDcapIsm.sol
-tee-circuit/tee-attestation/            the enclave identity check both ISMs share
 bridge-app/                             React UI, MetaMask + Keplr
 devnet/                                 scripts that deploy everything, and the gateway
 deploy/                                 the guides, the measured compose files, systemd units
 ```
 
-Both crates have one file per chain, in the same place: `ethereum/base.rs` is everything about
-Base. `origin.rs` in each holds the trait a chain implements.
+Both crates have one file per chain: everything about Base is `tee-node/src/ethereum/base.rs`
+(how the enclave verifies it) and `tee-coprocessor/src/origin/ethereum/base.rs` (how its proofs
+are fetched). The coprocessor splits into `origin/` and `destination/`, each with its trait in
+`mod.rs` and one file per implementation.
 
 ## Deployments
 
@@ -140,7 +141,6 @@ teeism-gas-oracle  systemd  paymaster upkeep
 ## Tests
 
 ```sh
-cd tee-circuit   && cargo test                        # attestation, identity
 cd tee-hyperlane && cargo test                        # state proofs, trees, L2 roots, Eden execution
 cd tee-hyperlane && cargo test -p tee-coprocessor --test live -- --ignored   # live chains; set EDEN_DA_RPC, BASE_ARCHIVE_RPC
 cd tee-hyperlane/contracts && forge test              # TeeDcapIsm.sol

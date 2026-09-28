@@ -10,9 +10,9 @@ use std::sync::Mutex;
 use alloy_primitives::B256;
 use hyperlane_types::{insert_leaf, MerkleTree};
 use serde_json::{json, Value};
-use tee_attestation::{encode_ism_state, IsmState};
 use tee_node::attest::{attest_with, AttestRequest, PROTOCOL_VERSION};
 use tee_node::origin::{Chain, Head, Origin, Tree};
+use tee_node::state::IsmState;
 
 const HOOK: [u8; 32] = [7u8; 32];
 const TRUSTED_ROOT: [u8; 32] = [1u8; 32];
@@ -94,7 +94,7 @@ fn trusted() -> IsmState {
 fn request(trusted: IsmState, ids: Vec<[u8; 32]>) -> AttestRequest {
     serde_json::from_value(json!({
         "protocol": PROTOCOL_VERSION,
-        "trusted_state": hex::encode(encode_ism_state(&trusted)),
+        "trusted_state": hex::encode(trusted.encode()),
         "chain": "stand-in",
         "input": {},
         "tree": {},
@@ -162,11 +162,11 @@ fn a_batch_that_does_not_close_the_gap_is_refused() {
 #[test]
 fn a_request_for_another_protocol_is_refused() {
     let mut req = request(trusted(), vec![[11u8; 32]]);
-    req.protocol = PROTOCOL_VERSION - 1;
+    req.protocol = PROTOCOL_VERSION + 1;
     assert!(attest_with(&chain(HOOK), req).is_err());
     assert!(serde_json::from_value::<AttestRequest>(json!({ "trusted_state": "00" })).is_err());
     assert_eq!(
-        PROTOCOL_VERSION, 5,
+        PROTOCOL_VERSION, 1,
         "bump this when the request shape changes"
     );
 }
