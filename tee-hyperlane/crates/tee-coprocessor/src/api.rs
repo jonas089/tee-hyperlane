@@ -17,7 +17,7 @@ use axum::routing::get;
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 use crate::config::{self, Config};
 use crate::destination::Destination;
@@ -163,7 +163,7 @@ pub async fn serve(api: Api, tracker: Arc<crate::tracker::Tracker>, listen: &str
         .merge(crate::v1::router(tracker))
         .merge(legacy);
     let listener = tokio::net::TcpListener::bind(listen).await?;
-    info!(listen, "api listening");
+    debug!(listen, "api listening");
     axum::serve(listener, app).await?;
     Ok(())
 }

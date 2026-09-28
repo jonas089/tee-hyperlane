@@ -124,7 +124,7 @@ impl Ethereum {
         let from = store.store.finalized_header.beacon().slot / SLOTS_PER_SYNC_PERIOD;
         let to = slot / SLOTS_PER_SYNC_PERIOD;
         let committee_updates = if to > from {
-            info!(periods = to - from, "carrying sync committee updates");
+            debug!(periods = to - from, "carrying sync committee updates");
             self.beacon.updates(from, to - from).await?
         } else {
             Vec::new()

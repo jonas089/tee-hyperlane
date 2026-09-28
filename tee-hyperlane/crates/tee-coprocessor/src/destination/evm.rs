@@ -5,7 +5,7 @@ use anyhow::{Context, Result};
 use async_trait::async_trait;
 use serde_json::Value;
 use tee_node::state::IsmState;
-use tracing::info;
+use tracing::debug;
 
 use super::{run, Batch, Delivery, Destination, Outcome};
 
@@ -188,7 +188,7 @@ impl Destination for Evm {
                 .await
             {
                 Ok(tx) => {
-                    info!(tx, "submitted attestation");
+                    debug!(tx, "submitted attestation");
                     attestation = Some(tx);
                     nonce += 1;
                 }
@@ -234,7 +234,7 @@ impl Destination for Evm {
                 continue;
             }
             let tx = self.send_process(message, nonce).await?;
-            info!(id, tx, "delivering");
+            debug!(id, tx, "delivering");
             sent.push((id, message.clone(), tx));
             nonce += 1;
         }
@@ -269,7 +269,7 @@ impl Destination for Evm {
         let tx = self
             .send_process(message, self.next_nonce(&sender).await?)
             .await?;
-        info!(id, tx, "redelivering");
+        debug!(id, tx, "redelivering");
         Ok(if self.landed(&tx).await? {
             Outcome::Delivered { tx }
         } else {

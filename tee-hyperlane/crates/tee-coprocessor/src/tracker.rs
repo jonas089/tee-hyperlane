@@ -22,7 +22,7 @@ use alloy_primitives::{keccak256, Address, U256};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 use crate::config::{self, Config};
 use crate::destination::Destination;
@@ -479,8 +479,22 @@ impl Tracker {
         for index in 0..self.watchers.len() {
             let tracker = Arc::clone(self);
             tasks.spawn(async move {
+                let mut streak = crate::Streak::default();
+                let chain = tracker.watchers[index].chain.clone();
                 loop {
-                    tracker.poll(index).await;
+                    match tracker.poll(index).await {
+                        Ok(()) => {
+                            if let Some((failures, lasted)) = streak.ok() {
+                                info!(chain, failures, after = %crate::monitor::duration(lasted.as_secs()), "watching again");
+                            }
+                        }
+                        Err(e) => {
+                            let error = crate::brief(&format!("{e:#}"));
+                            if let Some(n) = streak.fail(&error) {
+                                warn!(chain, error, consecutive_failures = n, "cannot read the origin to watch for transfers");
+                            }
+                        }
+                    }
                     tracker.save();
                     tokio::time::sleep(Duration::from_secs(tracker.track_secs)).await;
                 }
@@ -488,15 +502,21 @@ impl Tracker {
         }
         let tracker = Arc::clone(self);
         tasks.spawn(async move {
+            // The first status line waits one interval, so the watchers have read every origin.
+            let mut last_summary = now();
             loop {
                 crate::monitor::sweep(&tracker);
+                if now().saturating_sub(last_summary) >= crate::monitor::SUMMARY_EVERY {
+                    crate::monitor::log_summary(&tracker);
+                    last_summary = now();
+                }
                 tracker.save();
                 tokio::time::sleep(Duration::from_secs(tracker.track_secs)).await;
             }
         });
     }
 
-    async fn poll(&self, index: usize) {
+    async fn poll(&self, index: usize) -> Result<()> {
         let watcher = &self.watchers[index];
         let chain = watcher.chain.clone();
         let result = self.scan(watcher).await;
@@ -515,12 +535,10 @@ impl Tracker {
                 }
             }
         }
-        if let Err(e) = &result {
-            warn!(chain, error = %format!("{e:#}"), "tracker could not read the origin");
-        }
         for route in self.routes.iter().filter(|r| r.from == chain) {
             self.progress(route).await;
         }
+        result
     }
 
     /// Read the origin's new blocks and record every dispatch to our routers.
@@ -591,8 +609,12 @@ impl Tracker {
             info!(
                 route = route.name,
                 id,
-                block = seen.block,
-                "tracking a transfer"
+                amount = record.transfer.as_ref().map_or("", |t| t.amount.as_str()),
+                to = record
+                    .transfer
+                    .as_ref()
+                    .map_or("", |t| t.recipient.as_str()),
+                "new transfer"
             );
             state.messages.insert(id, record);
         }
@@ -666,6 +688,21 @@ impl Tracker {
                         tx: None,
                     });
                 }
+            }
+            if record.verified.is_some() && before.verified.is_none() {
+                debug!(route = route.name, id = record.id, "transfer verified");
+            }
+            if let (Some(d), None) = (&record.delivery, &before.delivery) {
+                let sent = record
+                    .dispatch
+                    .as_ref()
+                    .map_or(record.first_seen_at, |d| d.timestamp);
+                info!(
+                    route = route.name,
+                    id = record.id,
+                    after = %crate::monitor::duration(d.at.saturating_sub(sent)),
+                    "transfer delivered"
+                );
             }
             if record != before {
                 self.lock().messages.insert(record.id.clone(), record);

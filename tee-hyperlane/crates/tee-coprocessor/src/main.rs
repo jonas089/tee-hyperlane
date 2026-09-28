@@ -48,12 +48,22 @@ enum Mode {
 #[tokio::main]
 async fn main() -> Result<()> {
     // Logs go to stderr: `genesis` prints the state on stdout, and the ISM scripts capture it.
-    tracing_subscriber::fmt()
+    // Under systemd, journald stamps each line itself, so the time and colours are left out
+    // there; `RUST_LOG=debug` brings back every step of every pass.
+    use std::io::IsTerminal;
+    let terminal = std::io::stderr().is_terminal();
+    let filter =
+        tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into());
+    let builder = tracing_subscriber::fmt()
+        .with_target(false)
+        .with_ansi(terminal)
         .with_writer(std::io::stderr)
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
-        )
-        .init();
+        .with_env_filter(filter);
+    if terminal {
+        builder.init();
+    } else {
+        builder.without_time().init();
+    }
     let cli = Cli::parse();
     if let Some(Mode::Identity { url, json }) = &cli.mode {
         let identity = tee_coprocessor::identity::Identity::fetch(url).await?;

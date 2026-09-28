@@ -382,7 +382,10 @@ pub fn sweep(tracker: &Tracker) {
                 open.severity = open.severity.max(c.severity);
             }
             None => {
-                tracing::warn!(key = c.key, title = c.title, "notification opened");
+                match c.severity {
+                    Severity::Critical => tracing::error!("PROBLEM {}: {}", c.title, c.detail),
+                    Severity::Warning => tracing::warn!("problem {}: {}", c.title, c.detail),
+                }
                 inbox.push(Notification {
                     id: format!("{}@{at}", c.key),
                     key: c.key.clone(),
@@ -400,7 +403,11 @@ pub fn sweep(tracker: &Tracker) {
     }
     for n in inbox.iter_mut().filter(|n| n.resolved_at.is_none()) {
         if !current.iter().any(|c| c.key == n.key) {
-            tracing::info!(key = n.key, "notification resolved");
+            tracing::info!(
+                "resolved after {}: {}",
+                duration(at.saturating_sub(n.opened_at)),
+                n.title
+            );
             n.resolved_at = Some(at);
         }
     }
@@ -409,6 +416,49 @@ pub fn sweep(tracker: &Tracker) {
             .is_none_or(|r| at.saturating_sub(r) < KEEP_RESOLVED)
     });
     state.last_sweep_at = Some(at);
+}
+
+/// How often the log gets a status line, so a quiet log still says the relayer is alive.
+pub const SUMMARY_EVERY: u64 = 5 * 60;
+
+/// One line on how everything is: all good, or which problems are open.
+pub fn log_summary(tracker: &Tracker) {
+    let at = now();
+    let state = tracker.lock();
+    let open: Vec<&Notification> = state
+        .inbox
+        .iter()
+        .filter(|n| n.resolved_at.is_none())
+        .collect();
+    let mut in_flight = 0;
+    let mut delivered_recently = 0;
+    for m in state.messages.values() {
+        match &m.delivery {
+            None => in_flight += 1,
+            Some(d) if at.saturating_sub(d.at) < 3600 => delivered_recently += 1,
+            Some(_) => {}
+        }
+    }
+    let routes = tracker.routes.len();
+    if open.is_empty() {
+        tracing::info!(
+            "all good: {routes} routes healthy, {in_flight} transfer{} in flight, {delivered_recently} delivered in the last hour",
+            if in_flight == 1 { "" } else { "s" }
+        );
+        return;
+    }
+    let titles: Vec<&str> = open.iter().map(|n| n.title.as_str()).collect();
+    let line = format!(
+        "{} problem{} open: {}; {in_flight} in flight, {delivered_recently} delivered in the last hour; details at /api/v1/inbox",
+        open.len(),
+        if open.len() == 1 { "" } else { "s" },
+        titles.join("; ")
+    );
+    if open.iter().any(|n| n.severity == Severity::Critical) {
+        tracing::error!("{line}");
+    } else {
+        tracing::warn!("{line}");
+    }
 }
 
 /// The monitor's own health, which it cannot report through the inbox: if the sweep stops,

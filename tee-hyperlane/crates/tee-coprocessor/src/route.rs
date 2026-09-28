@@ -115,28 +115,36 @@ impl Route {
 
     /// Run forever: a pass every tick while healthy, backing off while failing.
     pub async fn run(self, tick: Duration) {
-        let mut failures: u32 = 0;
+        let mut streak = crate::Streak::default();
         loop {
-            match self.pass().await {
+            let result = self.pass().await;
+            if result.is_ok() {
+                self.clear_blocker();
+                if let Some((failures, lasted)) = streak.ok() {
+                    info!(route = %self.config.name, failures, after = %crate::monitor::duration(lasted.as_secs()), "route recovered");
+                }
+            }
+            match result {
                 Ok(Some(height)) => {
-                    failures = 0;
-                    self.clear_blocker();
-                    info!(route = %self.config.name, height, "batch delivered");
+                    debug!(route = %self.config.name, height, "batch delivered");
                     // Straight round again: the origin may already have more.
                     continue;
                 }
-                Ok(None) => {
-                    failures = 0;
-                    self.clear_blocker();
-                }
+                Ok(None) => {}
                 Err(e) => {
-                    failures = failures.saturating_add(1);
-                    let wait = backoff(tick, failures);
-                    warn!(route = %self.config.name, error = %format!("{e:#}"), consecutive_failures = failures, retry_in_secs = wait.as_secs(), "route failed");
-                    self.record_blocker(&format!("{e:#}"), failures);
+                    let error = format!("{e:#}");
+                    if let Some(n) = streak.fail(&error) {
+                        let wait = backoff(tick, streak.failures());
+                        if n == 1 {
+                            warn!(route = %self.config.name, error = %error, retry_in_secs = wait.as_secs(), "route failing");
+                        } else {
+                            warn!(route = %self.config.name, error = %error, consecutive_failures = n, retry_in_secs = wait.as_secs(), "route still failing");
+                        }
+                    }
+                    self.record_blocker(&error, streak.failures());
                 }
             }
-            tokio::time::sleep(backoff(tick, failures)).await;
+            tokio::time::sleep(backoff(tick, streak.failures())).await;
         }
     }
 
@@ -168,7 +176,7 @@ impl Route {
             return Ok(None);
         }
 
-        info!(route = %self.config.name, from = trusted.height, to = step.head, leaves = messages.len(), "attesting");
+        debug!(route = %self.config.name, from = trusted.height, to = step.head, leaves = messages.len(), "attesting");
         let request = json!({
             "protocol": tee_node::attest::PROTOCOL_VERSION,
             "trusted_state": hex::encode(trusted.encode()),
@@ -365,11 +373,19 @@ impl Route {
                 continue;
             };
             match self.destination.deliver(&message).await {
-                Ok(outcome) => self.settle(Delivery {
-                    id: parked.id,
-                    message,
-                    outcome,
-                }),
+                Ok(outcome) => {
+                    if matches!(
+                        outcome,
+                        Outcome::Delivered { .. } | Outcome::AlreadyDelivered
+                    ) {
+                        info!(route = %self.config.name, id = parked.id, attempts = parked.attempts + 1, "parked message delivered");
+                    }
+                    self.settle(Delivery {
+                        id: parked.id,
+                        message,
+                        outcome,
+                    })
+                }
                 Err(e) => {
                     warn!(route = %self.config.name, id = parked.id, error = %format!("{e:#}"), "redelivery failed");
                     self.park(&parked.id, &message, format!("{e:#}"), parked.tx);
@@ -426,13 +442,14 @@ pub async fn serve(config: Config) -> Result<()> {
     let tick = Duration::from_secs(config.tick_secs);
     let mut tasks = tokio::task::JoinSet::new();
     for route in &config.routes {
-        info!(route = %route.name, from = %route.from, to = %route.to, "configured");
+        debug!(route = %route.name, from = %route.from, to = %route.to, "configured");
         tasks.spawn(Route::new(&config, route)?.run(tick));
     }
     let tracker = crate::tracker::Tracker::new(&config)?;
     tracker.spawn(&mut tasks);
     let api = crate::api::Api::new(&config)?;
     let listen = config.api_listen.clone();
+    info!(routes = config.routes.len(), api = %listen, "relayer started; a status line follows every 5 minutes");
     tasks.spawn(async move {
         if let Err(e) = crate::api::serve(api, tracker, &listen).await {
             warn!(error = %e, "api stopped");

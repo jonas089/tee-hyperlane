@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use base64::Engine as _;
 use serde_json::Value;
 use tee_node::state::IsmState;
-use tracing::info;
+use tracing::debug;
 
 use super::{run, Batch, Delivery, Destination, Outcome};
 
@@ -88,7 +88,7 @@ impl Celestia {
                         tx: Some(hash),
                     }));
                 }
-                info!(tx = hash, "included");
+                debug!(tx = hash, "included");
                 return Ok(Ok(hash));
             }
         }
@@ -180,7 +180,7 @@ impl Destination for Celestia {
             let outcome = if self.is_delivered(&id).await? {
                 Outcome::AlreadyDelivered
             } else {
-                info!(id, "delivering");
+                debug!(id, "delivering");
                 self.process(message).await?
             };
             out.push(Delivery {
@@ -197,7 +197,7 @@ impl Destination for Celestia {
         if self.is_delivered(&id).await? {
             return Ok(Outcome::AlreadyDelivered);
         }
-        info!(id, "redelivering");
+        debug!(id, "redelivering");
         self.process(message).await
     }
 

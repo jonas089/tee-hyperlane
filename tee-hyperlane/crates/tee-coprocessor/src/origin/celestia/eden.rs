@@ -26,7 +26,7 @@ use tee_node::celestia::eden::{Eden as EdenChain, SignedHeader, EDEN, TREE_SLOT}
 use tee_node::celestia::CelestiaStore;
 use tee_node::state::IsmState;
 use tendermint_light_client_verifier::types::LightBlock;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 use super::Rpc as CelestiaRpc;
 use crate::origin::evm::{hex_number, Rpc};
@@ -307,7 +307,7 @@ impl Indexer for Eden {
         }
 
         if let Err(e) = self.capture_tree(trusted.height).await {
-            warn!(error = %e, "could not capture an eden tree proof this tick");
+            debug!(error = %e, "could not capture an eden tree proof this tick");
         }
         let snapshot = self.cached_tree(trusted.height).with_context(|| {
             format!(
@@ -350,7 +350,7 @@ impl Indexer for Eden {
             .changed_blocks(trusted.height, header.height)
             .await
             .context("finding eden's state changes")?;
-        info!(
+        debug!(
             blocks = changed.len(),
             from = trusted.height,
             to = header.height,
