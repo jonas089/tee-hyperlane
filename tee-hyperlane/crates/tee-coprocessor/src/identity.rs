@@ -195,6 +195,24 @@ mod tests {
         assert_eq!(id.compose_hash.len(), 64);
     }
 
+    /// A v5 quote puts a body descriptor between the header and the same report body. Phala's
+    /// hosts emit v4 today; this is what a host upgrade to v5 would hand us.
+    #[test]
+    fn a_v5_quote_reads_the_same_identity() {
+        let v: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/fixtures/identity.json")).unwrap();
+        let v4 = hex::decode(v["quote"].as_str().unwrap().trim_start_matches("0x")).unwrap();
+        let mut v5 = vec![5, 0];
+        v5.extend_from_slice(&v4[2..48]);
+        v5.extend_from_slice(&2u16.to_le_bytes()); // TD 1.0 body
+        v5.extend_from_slice(&584u32.to_le_bytes());
+        v5.extend_from_slice(&v4[48..]);
+        let log = v["event_log"].as_str().unwrap();
+        let a = Identity::from_quote(&hex::encode(&v4), log).unwrap();
+        let b = Identity::from_quote(&hex::encode(&v5), log).unwrap();
+        assert_eq!(serde_json::to_value(a).unwrap(), serde_json::to_value(b).unwrap());
+    }
+
     #[test]
     fn a_log_the_quote_did_not_measure_is_refused() {
         let v: serde_json::Value =

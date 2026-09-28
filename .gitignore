@@ -9,3 +9,7 @@ context/
 tee-circuit/elf/
 bridge-app/dist/
 bridge-app/tsconfig.tsbuildinfo
+
+# Automata libraries fetched by devnet/scripts/75-dcap-verifiers.sh
+devnet/automata/automata/evm/lib/
+devnet/automata/pccs/lib/

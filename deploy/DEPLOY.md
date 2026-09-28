@@ -111,6 +111,7 @@ It takes about 30 minutes to sync. Until it has, step 8 skips Eden; re-run step 
 ```sh
 cd ~/tee-ism-nonzk/devnet
 ./scripts/50-warp-celestia.sh
+./scripts/75-dcap-verifiers.sh   # a v5 quote verifier on each EVM chain, next to v4
 ./scripts/80-evm-isms.sh
 ./scripts/85-celestia-isms.sh
 ./scripts/90-evm-warp.sh
@@ -285,7 +286,8 @@ Pitfalls:
 - Eden accepts TCB info only in the V1 DAO
 - `openzeppelin-contracts` must be v5.0.2
 
-The deployed addresses differ per chain. `devnet/.state/out/pccs-<chain>.json` is the record
+`75-dcap-verifiers.sh` adds the v5 verifier (`V5QuoteVerifier`, recorded in the same
+file) once per chain. The deployed addresses differ per chain. `devnet/.state/out/pccs-<chain>.json` is the record
 the scripts and ISMs read:
 
 | contract | Sepolia | Arbitrum | Base | Eden |

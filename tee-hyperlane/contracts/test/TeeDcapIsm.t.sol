@@ -75,14 +75,36 @@ contract TeeDcapIsmTest is Test {
 
     /// A verifier output shaped exactly like Automata's, committing to `payload`.
     function _output(bytes memory payload, uint8 tcbStatus, bool debug) internal pure returns (bytes memory) {
-        bytes memory body = new bytes(584);
+        return _outputAs(4, 2, 584, payload, tcbStatus, debug);
+    }
+
+    /// The same for any quote version and body type. A TD 1.5 body (648 bytes) is a TD 1.0
+    /// body with 64 bytes appended, which Automata passes through at the same offset.
+    function _outputAs(uint16 version, uint16 bodyType, uint256 bodyLen, bytes memory payload, uint8 tcbStatus, bool debug)
+        internal
+        pure
+        returns (bytes memory)
+    {
+        bytes memory body = new bytes(bodyLen);
         if (debug) body[120] = 0x01;
         // mr_td and the RTMRs are left zero; the test that needs them sets MEASUREMENTS to match.
         bytes32 h = sha256(payload);
         for (uint256 i = 0; i < 32; i++) {
             body[520 + i] = h[i];
         }
-        return abi.encodePacked(uint16(4), uint16(2), tcbStatus, bytes6(0), body);
+        for (uint256 i = 584; i < bodyLen; i++) {
+            body[i] = 0xee; // tee_tcb_svn2 and mr_servicetd, which nothing here reads
+        }
+        return abi.encodePacked(version, bodyType, tcbStatus, bytes6(0), body);
+    }
+
+    function _oneStepPayload() internal view returns (bytes memory) {
+        return _payload(
+            _state(1, GENESIS_HEIGHT, GENESIS_TIME),
+            _state(2, GENESIS_HEIGHT + 1, GENESIS_TIME),
+            uint64(block.timestamp),
+            new bytes32[](0)
+        );
     }
 
     function _zeroMeasurements() internal pure returns (bytes32) {
@@ -129,6 +151,62 @@ contract TeeDcapIsmTest is Test {
         assertTrue(target.verify(hex"", message));
         vm.prank(MAILBOX);
         assertFalse(target.verify(hex"", message), "a delivered message must not verify twice");
+    }
+
+    // ---------------------------------------------------------------- quote versions
+
+    function test_acceptsAV5QuoteWithATd15Body() public {
+        TeeDcapIsm target = _fresh();
+        bytes memory payload = _oneStepPayload();
+        dcap.set(true, _outputAs(5, 3, 648, payload, 0, false));
+        target.submitAttestation(hex"00", payload);
+        assertEq(keccak256(target.state()), keccak256(_state(2, GENESIS_HEIGHT + 1, GENESIS_TIME)));
+    }
+
+    function test_acceptsAV5QuoteWithATd10Body() public {
+        TeeDcapIsm target = _fresh();
+        bytes memory payload = _oneStepPayload();
+        dcap.set(true, _outputAs(5, 2, 584, payload, 0, false));
+        target.submitAttestation(hex"00", payload);
+        assertEq(keccak256(target.state()), keccak256(_state(2, GENESIS_HEIGHT + 1, GENESIS_TIME)));
+    }
+
+    /// The measurements sit at the same offsets in a TD 1.5 body, so a different enclave is
+    /// still caught there.
+    function test_aTd15BodyFromAnotherEnclaveIsRejected() public {
+        TeeDcapIsm target = _fresh();
+        bytes memory payload = _oneStepPayload();
+        bytes memory out = _outputAs(5, 3, 648, payload, 0, false);
+        out[11 + 136] = 0x01; // first byte of mr_td
+        dcap.set(true, out);
+        vm.expectPartialRevert(TeeDcapIsm.WrongEnclave.selector);
+        target.submitAttestation(hex"00", payload);
+    }
+
+    function test_rejectsQuoteShapesThatAreNotTdx() public {
+        TeeDcapIsm target = _fresh();
+        bytes memory payload = _oneStepPayload();
+        uint16[3] memory versions = [uint16(4), 5, 3];
+        uint16[3] memory types = [uint16(3), 1, 2];
+        for (uint256 i = 0; i < 3; i++) {
+            dcap.set(true, _outputAs(versions[i], types[i], 648, payload, 0, false));
+            vm.expectRevert(abi.encodeWithSelector(TeeDcapIsm.UnsupportedQuote.selector, versions[i], types[i]));
+            target.submitAttestation(hex"00", payload);
+        }
+    }
+
+    function test_rejectsRelaunchAdvised() public {
+        TeeDcapIsm target = _fresh();
+        bytes memory payload = _oneStepPayload();
+        for (uint8 status = 8; status <= 9; status++) {
+            dcap.set(true, _outputAs(5, 3, 648, payload, status, false));
+            vm.expectRevert(abi.encodeWithSelector(TeeDcapIsm.TcbNotAcceptable.selector, status));
+            target.submitAttestation(hex"00", payload);
+        }
+    }
+
+    function test_reportsItsRevision() public view {
+        assertEq(ism.VERSION(), 2);
     }
 
     function test_verifyOnlyFromMailbox() public {

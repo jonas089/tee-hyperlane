@@ -54,10 +54,11 @@ match the code and are pushed. The old CVMs keep running.
 
 ```sh
 cd ~/tee-ism-nonzk/devnet
-./scripts/80-evm-isms.sh && ./scripts/85-celestia-isms.sh && ./scripts/90-evm-warp.sh
+./scripts/75-dcap-verifiers.sh && ./scripts/80-evm-isms.sh && ./scripts/85-celestia-isms.sh && ./scripts/90-evm-warp.sh
 ```
 
-Each router should print `repointing`. **If one prints `deploying the collateral USDC router`,
+`80-evm-isms.sh` also replaces an EVM ISM whose contract `VERSION` is older than the source's,
+even when the enclave is unchanged. Each router should print `repointing`. **If one prints `deploying the collateral USDC router`,
 press Ctrl-C.** A new collateral router strands the USDC held in the old one.
 
 **5. Start**

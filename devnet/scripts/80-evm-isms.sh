@@ -36,6 +36,10 @@ pre = "0x" + (b[136:232] + b[328:472]).hex()
 print(subprocess.run(["cast", "keccak", pre], capture_output=True, text=True).stdout.strip())
 PY
 )"
+# The contract revision this checkout deploys, read from the source rather than repeated here.
+ISM_REVISION="$(sed -n 's/.*uint8 public constant VERSION = \([0-9]*\);.*/\1/p' "${CONTRACTS}/src/TeeDcapIsm.sol")"
+[ -n "${ISM_REVISION}" ] || die "no VERSION in TeeDcapIsm.sol"
+
 IDENTITY="$(load "identity-digest-${ENCLAVE_FAMILY}")"
 [ -n "${IDENTITY}" ] || die "no identity-digest-${ENCLAVE_FAMILY}; deploy that enclave first"
 say "  measurements  ${MEASUREMENTS}"
@@ -84,16 +88,21 @@ while IFS=: read -r name chainid mailbox; do
   rpc="$(python3 -c "import json;print(json.load(open('${addr_file}'))['rpc'])")"
   entry="$(python3 -c "import json;print(json.load(open('${addr_file}'))['AttestationEntrypoint'])")"
 
-  # Skip a chain that already has an ISM pinning this enclave. Without this, re-running the
-  # step silently abandons the previous deployment and pays for another.
+  # Skip a chain whose ISM already pins this enclave and runs this revision of the contract.
+  # Without this, re-running the step silently abandons the previous deployment and pays for
+  # another. The revision matters too: a contract change with the same enclave (v5 quote
+  # support, say) must still replace the ISM. The first deployments have no VERSION(), which
+  # reads as empty and so as outdated.
   chain_genesis="${GENESIS}"
   if has "ism-${name}"; then
     existing="$(load "ism-${name}")"
     cur="$(cast call "${existing}" "enclaveMeasurements()(bytes32)" --rpc-url "${rpc}" 2>/dev/null || true)"
-    if [ "${cur}" = "${MEASUREMENTS}" ]; then
+    rev="$(cast call "${existing}" "VERSION()(uint8)" --rpc-url "${rpc}" 2>/dev/null || true)"
+    if [ "${cur}" = "${MEASUREMENTS}" ] && [ "${rev}" = "${ISM_REVISION}" ]; then
       say "${name} already has ${existing} pinning this enclave, skipping"
       continue
     fi
+    [ "${cur}" = "${MEASUREMENTS}" ] && say "${name}: ${existing} is contract revision ${rev:-1}, replacing with ${ISM_REVISION}"
     if [ -z "${ISM_GENESIS:-}" ]; then
       old="$(cast call "${existing}" "state()(bytes)" --rpc-url "${rpc}" 2>/dev/null || true)"
       [ "${#old}" -eq 234 ] || die "could not read ${existing}'s state on ${name}; refusing to anchor at the head and lose messages"
