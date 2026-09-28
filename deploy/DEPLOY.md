@@ -315,7 +315,7 @@ Defaults, each overridable in `devnet/.env`:
 SEPOLIA_RPC       https://rpc.sepolia.ethpandaops.io
 SEPOLIA_BEACON    https://ethereum-sepolia-beacon-api.publicnode.com
 ARBITRUM_ARCHIVE  https://api.zan.top/arb-sepolia
-ARBITRUM_LOGS     https://arbitrum-sepolia-rpc.publicnode.com
+ARBITRUM_LOGS     https://sepolia-rollup.arbitrum.io/rpc   (serves eth_getLogs over 1M blocks; publicnode caps at 50k)
 ARBITRUM_RPC      https://sepolia-rollup.arbitrum.io/rpc
 BASE_ARCHIVE      Alchemy, from ALCHEMY_BASE_KEY
 BASE_RPC          https://sepolia.base.org
