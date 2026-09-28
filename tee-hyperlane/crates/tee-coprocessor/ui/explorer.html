@@ -1,0 +1,419 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TEE Bridge Explorer</title>
+<style>
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --text: #16181d; --muted: #616875; --line: #e2e5ea;
+  --accent: #5b3fd6; --ok: #11845b; --ok-bg: #e3f5ec; --warn: #9a6200; --warn-bg: #fdf2dc;
+  --bad: #c23030; --bad-bg: #fbe5e5; --info: #2f5fc4; --info-bg: #e5edfb; --code: #f0f1f4;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1115; --panel: #171a20; --text: #e7e9ee; --muted: #9098a6; --line: #2a2f38;
+    --accent: #9d86ff; --ok: #4fd39a; --ok-bg: #12291f; --warn: #f0b64a; --warn-bg: #2d2412;
+    --bad: #ff7676; --bad-bg: #331616; --info: #7fa6ff; --info-bg: #152139; --code: #1f232b;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text);
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; }
+header { position: sticky; top: 0; z-index: 5; background: var(--panel); border-bottom: 1px solid var(--line); }
+.bar { max-width: 1180px; margin: 0 auto; padding: 10px 16px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.brand { font-weight: 700; font-size: 16px; color: var(--text); white-space: nowrap; }
+.search { flex: 1 1 320px; display: flex; min-width: 0; }
+.search input { flex: 1; min-width: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px 0 0 8px;
+  background: var(--bg); color: var(--text); font: inherit; }
+.search button { padding: 8px 14px; border: 1px solid var(--accent); background: var(--accent); color: #fff;
+  border-radius: 0 8px 8px 0; font: inherit; cursor: pointer; }
+.inbox-btn { position: relative; padding: 7px 12px; border: 1px solid var(--line); border-radius: 8px;
+  background: var(--panel); color: var(--text); font: inherit; cursor: pointer; white-space: nowrap; }
+.badge { display: inline-block; min-width: 20px; padding: 0 6px; border-radius: 10px; font-size: 12px;
+  font-weight: 700; text-align: center; margin-left: 6px; background: var(--line); color: var(--muted); }
+.badge.hot { background: var(--bad); color: #fff; }
+main { max-width: 1180px; margin: 0 auto; padding: 16px; }
+.banner { padding: 10px 14px; border-radius: 8px; margin-bottom: 14px; font-weight: 600; }
+.banner.bad { background: var(--bad-bg); color: var(--bad); }
+.banner.warn { background: var(--warn-bg); color: var(--warn); }
+.banner.ok { background: var(--ok-bg); color: var(--ok); }
+h1 { font-size: 20px; margin: 4px 0 14px; }
+h2 { font-size: 15px; margin: 22px 0 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+.card { padding: 12px 14px; display: block; color: var(--text); }
+.card:hover { border-color: var(--accent); text-decoration: none; }
+.card .top { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; }
+.card .name { font-weight: 650; overflow-wrap: anywhere; }
+.kv { display: grid; grid-template-columns: max-content 1fr; gap: 3px 12px; font-size: 13px; }
+.kv dt { color: var(--muted); }
+.kv dd { margin: 0; overflow-wrap: anywhere; }
+.pill { display: inline-block; padding: 1px 9px; border-radius: 10px; font-size: 12px; font-weight: 650; white-space: nowrap; }
+.s-ok, .s-delivered { background: var(--ok-bg); color: var(--ok); }
+.s-degraded, .s-warning, .s-pending, .s-verified { background: var(--info-bg); color: var(--info); }
+.s-degraded, .s-warning { background: var(--warn-bg); color: var(--warn); }
+.s-down, .s-critical, .s-failed, .s-overdue { background: var(--bad-bg); color: var(--bad); }
+.s-resolved { background: var(--line); color: var(--muted); }
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-size: 12px; color: var(--muted); font-weight: 600; }
+tr:last-child td { border-bottom: 0; }
+tr.click { cursor: pointer; }
+tr.click:hover td { background: var(--bg); }
+.scroll { overflow-x: auto; }
+.muted { color: var(--muted); }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+.chip { padding: 4px 10px; border-radius: 14px; border: 1px solid var(--line); background: var(--panel);
+  color: var(--text); font: inherit; font-size: 13px; cursor: pointer; }
+.chip.on { border-color: var(--accent); color: var(--accent); font-weight: 650; }
+.note { padding: 12px 14px; border-bottom: 1px solid var(--line); display: flex; gap: 12px; align-items: flex-start; }
+.note:last-child { border-bottom: 0; }
+.note .body { flex: 1; min-width: 0; }
+.note .title { font-weight: 650; }
+.note .detail { color: var(--muted); overflow-wrap: anywhere; margin-top: 2px; }
+.note.unread { box-shadow: inset 3px 0 0 var(--accent); }
+.note .when { color: var(--muted); font-size: 12px; white-space: nowrap; }
+.timeline { list-style: none; margin: 0; padding: 14px; }
+.timeline li { position: relative; padding: 0 0 16px 26px; }
+.timeline li:last-child { padding-bottom: 0; }
+.timeline li::before { content: ""; position: absolute; left: 5px; top: 5px; width: 10px; height: 10px; border-radius: 50%;
+  background: var(--line); }
+.timeline li.done::before { background: var(--ok); }
+.timeline li.bad::before { background: var(--bad); }
+.timeline li::after { content: ""; position: absolute; left: 9px; top: 18px; bottom: 0; width: 2px; background: var(--line); }
+.timeline li:last-child::after { display: none; }
+.problem { padding: 12px 14px; border-radius: 8px; background: var(--bad-bg); color: var(--bad); margin-bottom: 12px; overflow-wrap: anywhere; }
+.waiting { padding: 12px 14px; border-radius: 8px; background: var(--info-bg); color: var(--info); margin-bottom: 12px; }
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+@media (max-width: 760px) { .two { grid-template-columns: 1fr; } .hide-sm { display: none; } }
+.pad { padding: 12px 14px; }
+details summary { cursor: pointer; color: var(--muted); padding: 10px 14px; }
+pre { margin: 0; padding: 12px 14px; background: var(--code); overflow-x: auto; font-size: 12px; border-radius: 0 0 10px 10px; }
+.empty { padding: 18px 14px; color: var(--muted); text-align: center; }
+.foot { color: var(--muted); font-size: 12px; margin-top: 22px; }
+.linkbtn { background: none; border: 0; color: var(--accent); font: inherit; cursor: pointer; padding: 0; }
+</style>
+</head>
+<body>
+<header>
+  <div class="bar">
+    <a class="brand" href="#/">TEE Bridge Explorer</a>
+    <form class="search" id="search">
+      <input id="q" placeholder="Message id, transaction hash, or address" autocomplete="off" spellcheck="false">
+      <button type="submit">Search</button>
+    </form>
+    <span id="health"></span>
+    <button class="inbox-btn" id="inbox-btn" type="button">Inbox<span class="badge" id="unread">0</span></button>
+  </div>
+</header>
+<main>
+  <div id="api-banner"></div>
+  <div id="view"><div class="empty">Loading…</div></div>
+  <div class="foot" id="foot"></div>
+</main>
+<script>
+"use strict";
+const API = "/api/v1";
+const POLL_MS = 10000;
+let lastOk = null, lastFail = null, cache = {};
+
+// ---------------------------------------------------------------- helpers
+const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const short = (h) => { h = String(h ?? ""); return h.length > 20 ? h.slice(0, 10) + "…" + h.slice(-6) : h; };
+function ago(t) {
+  if (!t) return "";
+  const s = Math.floor(Date.now() / 1000) - t, f = Math.abs(s);
+  const d = f < 90 ? `${f}s` : f < 5400 ? `${Math.round(f / 60)}m` : f < 172800 ? `${Math.floor(f / 3600)}h ${Math.floor((f % 3600) / 60)}m` : `${Math.floor(f / 86400)}d ${Math.floor((f % 86400) / 3600)}h`;
+  return s >= 0 ? `${d} ago` : `in ${d}`;
+}
+const when = (t) => t ? `<span title="${esc(new Date(t * 1000).toLocaleString())}">${esc(ago(t))}</span>` : `<span class="muted">not yet</span>`;
+const pill = (s) => `<span class="pill s-${esc(s)}">${esc(s)}</span>`;
+const txLink = (hash, url) => hash ? (url ? `<a class="mono" href="${esc(url)}" target="_blank" rel="noopener">${esc(short(hash))}</a>` : `<span class="mono" title="${esc(hash)}">${esc(short(hash))}</span>`) : `<span class="muted">none</span>`;
+const subjectLink = (n) => ({ message: `#/message/${n.subjectId}`, route: `#/route/${n.subjectId}`, chain: `#/chain/${n.subjectId}`, monitor: "#/inbox" }[n.subject] || "#/inbox");
+
+function store(key, fallback) {
+  try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; } catch { return fallback; }
+}
+function save(key, value) { try { localStorage.setItem(key, JSON.stringify(value)); } catch {} }
+
+async function get(path) {
+  const r = await fetch(API + path, { cache: "no-store" });
+  // /health answers 503 when anything is open; that is data, not a failure.
+  if (!r.ok && !(path === "/health" && r.status === 503)) {
+    const e = new Error(`${path}: HTTP ${r.status}`); e.status = r.status; throw e;
+  }
+  return r.json();
+}
+
+// ---------------------------------------------------------------- inbox state
+
+// Read state is per viewer and lives only in this browser: the server has no way to dismiss a
+// notification, so reading one here never hides it from anyone else.
+let seen = new Set(store("teeism.seen", []));
+let alerted = new Set(store("teeism.alerted", []));
+function markSeen(list) {
+  list.forEach((n) => seen.add(n.id));
+  save("teeism.seen", [...seen].slice(-2000));
+  renderBadge();
+}
+function renderBadge() {
+  const open = (cache.inbox || []).filter((n) => !n.resolvedAt);
+  const unread = open.filter((n) => !seen.has(n.id)).length;
+  const b = document.getElementById("unread");
+  b.textContent = unread || open.length;
+  b.className = "badge" + (unread ? " hot" : "");
+  b.title = unread ? `${unread} unread` : `${open.length} open`;
+  document.title = (unread ? `(${unread}) ` : "") + "TEE Bridge Explorer";
+}
+function desktopAlerts(list) {
+  if (!("Notification" in window) || Notification.permission !== "granted") return;
+  for (const n of list) {
+    if (n.resolvedAt || alerted.has(n.id) || n.severity !== "critical") continue;
+    alerted.add(n.id);
+    try {
+      const d = new Notification(n.title, { body: n.detail, tag: n.id });
+      d.onclick = () => { window.focus(); location.hash = subjectLink(n); };
+    } catch {}
+  }
+  save("teeism.alerted", [...alerted].slice(-2000));
+}
+
+// ---------------------------------------------------------------- polling
+
+async function refresh() {
+  try {
+    const [health, inbox] = await Promise.all([get("/health"), get("/inbox?resolved=true")]);
+    cache.health = health; cache.inbox = inbox.notifications;
+    lastOk = Date.now(); lastFail = null;
+  } catch (e) {
+    lastFail = lastFail || Date.now();
+  }
+  renderChrome();
+  await route();
+}
+
+function renderChrome() {
+  const banner = document.getElementById("api-banner");
+  if (lastFail) {
+    banner.innerHTML = `<div class="banner bad">The explorer API has not answered since ${esc(new Date(lastFail).toLocaleTimeString())}. The relayer may be down, and nothing on this page is current.</div>`;
+  } else banner.innerHTML = "";
+  const h = cache.health;
+  document.getElementById("health").innerHTML = h ? pill(h.status) : "";
+  renderBadge();
+  desktopAlerts(cache.inbox || []);
+  document.getElementById("foot").textContent = lastOk ? `Updated ${new Date(lastOk).toLocaleTimeString()}, refreshing every ${POLL_MS / 1000}s. API: /api/v1/openapi.json` : "";
+}
+
+// ---------------------------------------------------------------- views
+
+function noteRow(n) {
+  const unread = !n.resolvedAt && !seen.has(n.id);
+  const state = n.resolvedAt ? pill("resolved") : pill(n.severity);
+  const time = n.resolvedAt ? `resolved ${when(n.resolvedAt)}` : `opened ${when(n.openedAt)}`;
+  return `<div class="note${unread ? " unread" : ""}">
+    <div>${state}</div>
+    <div class="body"><a class="title" href="${esc(subjectLink(n))}">${esc(n.title)}</a>
+      <div class="detail">${esc(n.detail)}</div></div>
+    <div class="when">${time}</div></div>`;
+}
+
+function inboxList(list, emptyText) {
+  return list.length ? `<div class="panel">${list.map(noteRow).join("")}</div>` : `<div class="panel empty">${esc(emptyText)}</div>`;
+}
+
+function messageRows(messages, showRoute = true) {
+  if (!messages.length) return `<div class="panel empty">No transfers.</div>`;
+  const rows = messages.map((m) => `<tr class="click" data-href="#/message/${esc(m.id)}">
+      <td>${pill(m.status)}</td>
+      <td class="mono"><a href="#/message/${esc(m.id)}">${esc(short(m.id))}</a></td>
+      ${showRoute ? `<td>${esc(m.route)}</td>` : ""}
+      <td class="hide-sm mono">${esc(m.transfer ? m.transfer.amount : "")}</td>
+      <td class="hide-sm mono" title="${esc(m.transfer ? m.transfer.recipient : "")}">${esc(short(m.transfer ? m.transfer.recipient : ""))}</td>
+      <td>${when(m.dispatch ? m.dispatch.timestamp : m.firstSeenAt)}</td>
+      <td class="muted">${esc(m.problem || m.waitingOn || "")}</td></tr>`).join("");
+  return `<div class="panel scroll"><table><thead><tr><th>Status</th><th>Message</th>${showRoute ? "<th>Route</th>" : ""}
+    <th class="hide-sm">Amount (base units)</th><th class="hide-sm">Recipient</th><th>Sent</th><th>Detail</th></tr></thead>
+    <tbody>${rows}</tbody></table></div>`;
+}
+
+function routeCard(r) {
+  const c = r.counts;
+  return `<a class="panel card" href="#/route/${esc(r.name)}">
+    <div class="top"><span class="name">${esc(r.from.name)} to ${esc(r.to.name)}</span>${pill(r.status)}</div>
+    <dl class="kv">
+      <dt>ISM height</dt><dd>${esc(r.ismReading.height ?? "unread")}</dd>
+      <dt>Origin head</dt><dd>${r.originHead ? `${esc(r.originHead.height)} (${when(r.originHead.reportedAt)})` : "not reported"}</dd>
+      <dt>Transfers</dt><dd>${c.pending + c.verified} in flight, ${c.delivered} delivered${c.failed + c.overdue ? `, <b style="color:var(--bad)">${c.failed + c.overdue} stuck</b>` : ""}</dd>
+      ${r.failing ? `<dt>Failing</dt><dd style="color:var(--bad)">${esc(r.failing.consecutiveFailures)}x since ${when(r.failing.since)}</dd>` : ""}
+    </dl></a>`;
+}
+
+let filter = store("teeism.filter", "");
+async function overview() {
+  const [routes, page] = await Promise.all([get("/routes"), get(`/messages?limit=50${filter ? "&status=" + filter : ""}`)]);
+  const open = (cache.inbox || []).filter((n) => !n.resolvedAt);
+  const h = cache.health;
+  const summary = !h ? "" : h.status === "ok"
+    ? `<div class="banner ok">All routes healthy. Nothing is stuck.</div>`
+    : `<div class="banner ${h.status === "down" ? "bad" : "warn"}">${h.open.critical} critical and ${h.open.warning} warning notification${h.open.critical + h.open.warning === 1 ? "" : "s"} open. <a href="#/inbox">Open the inbox</a></div>`;
+  const chips = [["", "All"], ["overdue,failed", "Stuck"], ["pending,verified", "In flight"], ["delivered", "Delivered"]]
+    .map(([v, l]) => `<button class="chip${filter === v ? " on" : ""}" data-filter="${v}">${l}</button>`).join("");
+  return `${summary}
+    ${open.length ? `<h2>Open problems</h2>${inboxList(open.slice(0, 5), "")}${open.length > 5 ? `<p><a href="#/inbox">All ${open.length} open notifications</a></p>` : ""}` : ""}
+    <h2>Routes</h2><div class="grid">${routes.map(routeCard).join("")}</div>
+    <h2>Transfers <span class="muted" style="text-transform:none">(${page.total})</span></h2>
+    <div class="chips">${chips}</div>${messageRows(page.messages)}`;
+}
+
+let showResolved = false;
+async function inboxView() {
+  const all = cache.inbox || [];
+  const open = all.filter((n) => !n.resolvedAt);
+  const resolved = all.filter((n) => n.resolvedAt);
+  markSeen(open);
+  const perm = "Notification" in window && Notification.permission === "default"
+    ? `<p><button class="linkbtn" id="enable-alerts">Get a desktop alert when something critical opens</button></p>` : "";
+  return `<h1>Inbox</h1>
+    <p class="muted">A notification opens when a transfer is stuck or part of the bridge stops working, and resolves on its own once the problem is gone. It cannot be dismissed.</p>${perm}
+    <h2>Open (${open.length})</h2>${inboxList(open, "Nothing is wrong right now.")}
+    <h2>Resolved in the last week (${resolved.length}) <button class="linkbtn" id="toggle-resolved">${showResolved ? "hide" : "show"}</button></h2>
+    ${showResolved ? inboxList(resolved, "None.") : ""}`;
+}
+
+function step(label, t, state, extra = "") {
+  return `<li class="${state}"><b>${esc(label)}</b> ${t ? when(t) : state === "done" ? "" : `<span class="muted">not yet</span>`}${extra ? `<div class="muted">${extra}</div>` : ""}</li>`;
+}
+
+async function messageView(id) {
+  let m;
+  try { m = await get(`/messages/${encodeURIComponent(id)}`); }
+  catch (e) { if (e.status === 404) return `<h1>Transfer not found</h1><p class="muted">The tracker has no transfer with id <code>${esc(id)}</code>. It only tracks transfers to our routers, from when it started watching.</p>`; throw e; }
+  markSeen(m.notifications);
+  const d = m.dispatch, stuck = m.status === "overdue" || m.status === "failed";
+  const timeline = `<ol class="timeline">
+    ${step("Dispatched on " + m.origin.name, d && d.timestamp, d ? "done" : "", d ? `block ${esc(d.block)}, tx ${txLink(d.tx, m.links.dispatchTx)}${d.from ? `, from <span class="mono">${esc(d.from)}</span>` : ""}` : "recorded from an earlier batch")}
+    ${step("Final on the origin", m.attestableAt, m.attestableAt ? "done" : "", "the route found the origin head at or past this block")}
+    ${step("Verified by the ISM", m.verified && m.verified.at, m.verified ? "done" : stuck && !m.delivery ? "bad" : "", m.verified ? `ISM height ${esc(m.verified.ismHeight)}` : "")}
+    ${step("Delivered on " + m.destination.name, m.delivery && m.delivery.at, m.delivery ? "done" : m.status === "failed" ? "bad" : "", m.delivery ? `tx ${txLink(m.delivery.tx, m.links.deliveryTx)}` : "")}
+  </ol>`;
+  const f = m.failure;
+  return `<h1>Transfer ${pill(m.status)}</h1>
+    ${m.problem ? `<div class="problem"><b>Stuck:</b> ${esc(m.problem)}</div>` : ""}
+    ${m.waitingOn && !m.problem ? `<div class="waiting">Waiting on ${esc(m.waitingOn)}. Expected by ${when(m.expectedBy)}.</div>` : ""}
+    <div class="two">
+      <div class="panel">${timeline}</div>
+      <div class="panel pad"><dl class="kv">
+        <dt>Message id</dt><dd class="mono">${esc(m.id)}</dd>
+        <dt>Route</dt><dd><a href="#/route/${esc(m.route)}">${esc(m.route)}</a></dd>
+        <dt>Amount</dt><dd class="mono">${esc(m.transfer ? m.transfer.amount + " base units" : "not a token transfer")}</dd>
+        <dt>Recipient</dt><dd class="mono">${m.transfer ? `<a href="#/search/${esc(m.transfer.recipient)}">${esc(m.transfer.recipient)}</a>` : ""}</dd>
+        ${d && d.from ? `<dt>Sender</dt><dd class="mono"><a href="#/search/${esc(d.from)}">${esc(d.from)}</a></dd>` : ""}
+        <dt>Nonce</dt><dd>${esc(m.nonce)}</dd>
+        <dt>Expected by</dt><dd>${when(m.expectedBy)}</dd>
+        <dt>Origin router</dt><dd class="mono">${esc(short(m.sender))}</dd>
+        <dt>Destination router</dt><dd class="mono">${esc(short(m.recipient))}</dd>
+      </dl></div>
+    </div>
+    ${f ? `<h2>Delivery failures</h2><div class="panel pad"><dl class="kv">
+      <dt>Attempts</dt><dd>${esc(f.attempts)}</dd><dt>First failed</dt><dd>${when(f.firstFailedAt)}</dd>
+      <dt>Next retry</dt><dd>${when(f.nextAttemptAt)}</dd><dt>Reason</dt><dd>${esc(f.reason)}</dd>
+      ${f.tx ? `<dt>Last tx</dt><dd class="mono">${esc(f.tx)}</dd>` : ""}</dl></div>` : ""}
+    ${m.notifications.length ? `<h2>Notifications</h2>${inboxList(m.notifications, "")}` : ""}
+    <h2>Raw</h2><div class="panel"><details><summary>JSON from /api/v1/messages/${esc(short(m.id))}</summary><pre>${esc(JSON.stringify(m, null, 2))}</pre></details></div>`;
+}
+
+async function routeView(name) {
+  let r;
+  try { r = await get(`/routes/${encodeURIComponent(name)}`); }
+  catch (e) { if (e.status === 404) return `<h1>No route ${esc(name)}</h1>`; throw e; }
+  const page = await get(`/messages?route=${encodeURIComponent(name)}&limit=100`);
+  markSeen(r.notifications);
+  return `<h1>${esc(r.from.name)} to ${esc(r.to.name)} ${pill(r.status)}</h1>
+    ${r.notifications.length ? inboxList(r.notifications, "") : ""}
+    <div class="two" style="margin-top:12px">
+      <div class="panel pad"><dl class="kv">
+        <dt>Route</dt><dd>${esc(r.name)}</dd><dt>ISM</dt><dd class="mono">${esc(r.ism)}</dd>
+        <dt>ISM height</dt><dd>${esc(r.ismReading.height ?? "unread")} ${r.ismReading.readAt ? `(read ${when(r.ismReading.readAt)})` : ""}</dd>
+        ${r.ismReading.error ? `<dt>ISM read error</dt><dd style="color:var(--bad)">${esc(r.ismReading.error)}</dd>` : ""}
+        <dt>Origin head</dt><dd>${r.originHead ? `${esc(r.originHead.height)} (${when(r.originHead.reportedAt)})` : "not reported"}</dd>
+        <dt>Normal latency</dt><dd>up to ${esc(Math.round(r.expectedLatencySecs / 60))} minutes</dd>
+      </dl></div>
+      <div class="panel pad"><dl class="kv">
+        <dt>Loop</dt><dd>${r.failing ? `<span style="color:var(--bad)">failing ${esc(r.failing.consecutiveFailures)}x since ${when(r.failing.since)}</span>` : "healthy"}</dd>
+        ${r.failing ? `<dt>Last error</dt><dd>${esc(r.failing.error)}</dd>` : ""}
+        <dt>Staged batch</dt><dd>${r.staged ? `${esc(r.staged.messages)} leaves to height ${esc(r.staged.height ?? "?")}, since ${when(r.staged.since)}` : "none"}</dd>
+        <dt>Transfers</dt><dd>${esc(r.counts.pending)} pending, ${esc(r.counts.verified)} verified, ${esc(r.counts.delivered)} delivered, ${esc(r.counts.failed)} failed, ${esc(r.counts.overdue)} overdue</dd>
+      </dl></div>
+    </div>
+    <h2>Transfers (${page.total})</h2>${messageRows(page.messages, false)}`;
+}
+
+async function chainView(name) {
+  const chains = await get("/chains");
+  const c = chains.find((x) => x.name === name);
+  if (!c) return `<h1>No chain ${esc(name)}</h1>`;
+  const w = c.watch;
+  return `<h1>${esc(c.name)}</h1><div class="panel pad"><dl class="kv">
+    <dt>Kind</dt><dd>${esc(c.kind)}</dd><dt>Domain</dt><dd>${esc(c.domain)}</dd>
+    <dt>Explorer</dt><dd>${c.explorer ? `<a href="${esc(c.explorer)}" target="_blank" rel="noopener">${esc(c.explorer)}</a>` : "none configured"}</dd>
+    ${w ? `<dt>Scanned to</dt><dd>${esc(w.cursor ?? "not started")} of ${esc(w.tip ?? "?")}</dd>
+      <dt>Last good read</dt><dd>${when(w.lastOkAt)}</dd>
+      ${w.error ? `<dt>Error</dt><dd style="color:var(--bad)">${esc(w.error)} (since ${when(w.failingSince)})</dd>` : ""}` : "<dt>Watched</dt><dd>no, not an origin</dd>"}
+  </dl></div>`;
+}
+
+async function searchView(q) {
+  document.getElementById("q").value = q;
+  const r = await get(`/search?q=${encodeURIComponent(q)}`);
+  const how = r.matched.filter((m) => m !== "none");
+  return `<h1>Search</h1><p class="muted">${how.length ? `Matched ${esc(how.join(", "))}` : "No transfer matches"} <code>${esc(q)}</code>.</p>${messageRows(r.messages)}`;
+}
+
+// ---------------------------------------------------------------- routing
+
+let rendering = false;
+async function route() {
+  if (rendering) return;
+  rendering = true;
+  const view = document.getElementById("view");
+  const [, kind, ...rest] = (location.hash || "#/").slice(1).split("/");
+  const arg = decodeURIComponent(rest.join("/"));
+  try {
+    const html = kind === "inbox" ? await inboxView()
+      : kind === "message" ? await messageView(arg)
+      : kind === "route" ? await routeView(arg)
+      : kind === "chain" ? await chainView(arg)
+      : kind === "search" ? await searchView(arg)
+      : await overview();
+    const open = view.querySelector("details[open]") !== null;
+    view.innerHTML = html;
+    if (open) view.querySelector("details")?.setAttribute("open", "");
+  } catch (e) {
+    if (!view.innerHTML || view.textContent.includes("Loading")) view.innerHTML = `<div class="panel empty">Could not load this view: ${esc(e.message)}</div>`;
+  } finally { rendering = false; }
+}
+
+document.getElementById("search").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const q = document.getElementById("q").value.trim();
+  if (q) location.hash = `#/search/${encodeURIComponent(q)}`;
+});
+document.getElementById("inbox-btn").addEventListener("click", () => { location.hash = "#/inbox"; });
+document.getElementById("view").addEventListener("click", (e) => {
+  const chip = e.target.closest("[data-filter]");
+  if (chip) { filter = chip.dataset.filter; save("teeism.filter", filter); route(); return; }
+  if (e.target.id === "toggle-resolved") { showResolved = !showResolved; route(); return; }
+  if (e.target.id === "enable-alerts") { Notification.requestPermission().then(() => route()); return; }
+  const row = e.target.closest("tr[data-href]");
+  if (row && !e.target.closest("a")) location.hash = row.dataset.href;
+});
+window.addEventListener("hashchange", () => { window.scrollTo(0, 0); route(); });
+refresh();
+setInterval(refresh, POLL_MS);
+</script>
+</body>
+</html>

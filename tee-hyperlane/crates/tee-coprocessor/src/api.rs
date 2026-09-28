@@ -1,4 +1,5 @@
-//! The dashboard API, served from the same process as the routes.
+//! The HTTP server: the explorer page, `/api/v1` (see `v1.rs`), and the older endpoints the
+//! bridge app still calls, served from the same process as the routes.
 //!
 //! Everything it reports comes from two places: each route's directory, where the route loop
 //! writes its staged and finished batches and its markers, and each destination's ISM, read
@@ -146,18 +147,21 @@ impl Api {
     }
 }
 
-pub async fn serve(api: Api, listen: &str) -> Result<()> {
-    let app = Router::new()
-        .route(
-            "/",
-            get(|| async { axum::response::Html(include_str!("../ui/relayer.html")) }),
-        )
+pub async fn serve(api: Api, tracker: Arc<crate::tracker::Tracker>, listen: &str) -> Result<()> {
+    let legacy = Router::new()
         .route("/api/health", get(|| async { "ok" }))
         .route("/api/status", get(status))
         .route("/api/attestation/{message_id}", get(attestation))
         .route("/api/faucet", get(faucet_info).post(faucet_claim))
         .route("/api/faucet/{address}", get(faucet_claimed))
         .with_state(api);
+    let app = Router::new()
+        .route(
+            "/",
+            get(|| async { axum::response::Html(include_str!("../ui/explorer.html")) }),
+        )
+        .merge(crate::v1::router(tracker))
+        .merge(legacy);
     let listener = tokio::net::TcpListener::bind(listen).await?;
     info!(listen, "api listening");
     axum::serve(listener, app).await?;

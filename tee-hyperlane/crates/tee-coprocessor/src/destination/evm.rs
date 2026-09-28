@@ -7,7 +7,7 @@ use serde_json::Value;
 use tee_node::state::IsmState;
 use tracing::info;
 
-use super::{run, Batch, Destination};
+use super::{run, Batch, Delivery, Destination, Outcome};
 
 /// An EVM chain: `TeeDcapIsm.submitAttestation`, then `Mailbox.process` per message.
 pub struct Evm {
@@ -48,6 +48,106 @@ impl Evm {
         all.extend_from_slice(extra);
         Ok(run("cast", &all).await?.trim_matches('"').to_string())
     }
+
+    async fn sender(&self) -> Result<String> {
+        run(
+            "cast",
+            &["wallet", "address", "--private-key", &Self::key()?],
+        )
+        .await
+    }
+
+    /// The next nonce counting transactions still in the mempool, so a pass that follows one
+    /// whose transactions have not been mined yet does not reuse their nonces.
+    async fn next_nonce(&self, sender: &str) -> Result<u64> {
+        Ok(run(
+            "cast",
+            &[
+                "nonce",
+                sender,
+                "--block",
+                "pending",
+                "--rpc-url",
+                &self.rpc,
+            ],
+        )
+        .await?
+        .parse()?)
+    }
+
+    async fn send_process(&self, message: &[u8], nonce: u64) -> Result<String> {
+        let gas = std::env::var("DELIVERY_GAS").unwrap_or_else(|_| "400000".into());
+        self.send(
+            &self.mailbox,
+            "process(bytes,bytes)",
+            &["0x", &format!("0x{}", hex::encode(message))],
+            nonce,
+            &["--gas-limit", &gas],
+        )
+        .await
+    }
+
+    /// Wait for `tx`; `Ok(false)` when it was mined and reverted.
+    async fn landed(&self, tx: &str) -> Result<bool> {
+        let receipt: Value = serde_json::from_str(
+            &run(
+                "cast",
+                &[
+                    "receipt",
+                    tx,
+                    "--rpc-url",
+                    &self.rpc,
+                    "--confirmations",
+                    "1",
+                    "--json",
+                ],
+            )
+            .await?,
+        )?;
+        Ok(receipt["status"].as_str() == Some("0x1"))
+    }
+
+    /// Why `process` reverts for `message`, by replaying it as a call. The receipt of a
+    /// reverted transaction carries no reason.
+    async fn revert_reason(&self, message: &[u8], sender: &str) -> String {
+        let replay = run(
+            "cast",
+            &[
+                "call",
+                &self.mailbox,
+                "process(bytes,bytes)",
+                "0x",
+                &format!("0x{}", hex::encode(message)),
+                "--from",
+                sender,
+                "--rpc-url",
+                &self.rpc,
+            ],
+        )
+        .await;
+        match replay {
+            Err(e) => e.to_string(),
+            Ok(_) => "the transaction reverted, but replaying it now succeeds; likely out of gas \
+                      (DELIVERY_GAS) or a state that has since changed"
+                .into(),
+        }
+    }
+
+    async fn is_delivered(&self, id: &str) -> Result<bool> {
+        Ok(run(
+            "cast",
+            &[
+                "call",
+                &self.mailbox,
+                "delivered(bytes32)(bool)",
+                &format!("0x{id}"),
+                "--rpc-url",
+                &self.rpc,
+            ],
+        )
+        .await?
+            == "true")
+    }
 }
 
 #[async_trait]
@@ -63,23 +163,17 @@ impl Destination for Evm {
         )?)?)
     }
 
-    async fn submit(&self, batch: &Batch) -> Result<()> {
+    async fn submit(&self, batch: &Batch) -> Result<Vec<Delivery>> {
         let state = run(
             "cast",
             &["call", &self.ism, "state()(bytes)", "--rpc-url", &self.rpc],
         )
         .await?;
         let advanced = batch.advanced(&hex::decode(state.trim_start_matches("0x"))?)?;
-        let sender = run(
-            "cast",
-            &["wallet", "address", "--private-key", &Self::key()?],
-        )
-        .await?;
-        let mut nonce: u64 = run("cast", &["nonce", &sender, "--rpc-url", &self.rpc])
-            .await?
-            .parse()?;
-        let mut pending = Vec::new();
+        let sender = self.sender().await?;
+        let mut nonce = self.next_nonce(&sender).await?;
 
+        let mut attestation = None;
         if !advanced {
             let quote = format!("0x{}", batch.quote.trim_start_matches("0x"));
             let payload = format!("0x{}", hex::encode(&batch.payload));
@@ -95,7 +189,7 @@ impl Destination for Evm {
             {
                 Ok(tx) => {
                     info!(tx, "submitted attestation");
-                    pending.push(tx);
+                    attestation = Some(tx);
                     nonce += 1;
                 }
                 // Automata refuses with a four-letter code, such as "TCBR" for collateral missing
@@ -127,58 +221,66 @@ impl Destination for Evm {
             }
         }
 
-        let gas = std::env::var("DELIVERY_GAS").unwrap_or_else(|_| "400000".into());
+        // Sent back to back with explicit nonces, then confirmed together.
+        let mut sent = Vec::new();
+        let mut out = Vec::new();
         for (id, message) in batch.for_domain(self.domain) {
-            let delivered = run(
-                "cast",
-                &[
-                    "call",
-                    &self.mailbox,
-                    "delivered(bytes32)(bool)",
-                    &format!("0x{id}"),
-                    "--rpc-url",
-                    &self.rpc,
-                ],
-            )
-            .await?;
-            if delivered == "true" {
+            if self.is_delivered(&id).await? {
+                out.push(Delivery {
+                    id,
+                    message: message.clone(),
+                    outcome: Outcome::AlreadyDelivered,
+                });
                 continue;
             }
-            let tx = self
-                .send(
-                    &self.mailbox,
-                    "process(bytes,bytes)",
-                    &["0x", &format!("0x{}", hex::encode(message))],
-                    nonce,
-                    &["--gas-limit", &gas],
-                )
-                .await?;
+            let tx = self.send_process(message, nonce).await?;
             info!(id, tx, "delivering");
-            pending.push(tx);
+            sent.push((id, message.clone(), tx));
             nonce += 1;
         }
 
-        for tx in pending {
-            let receipt: Value = serde_json::from_str(
-                &run(
-                    "cast",
-                    &[
-                        "receipt",
-                        &tx,
-                        "--rpc-url",
-                        &self.rpc,
-                        "--confirmations",
-                        "1",
-                        "--json",
-                    ],
-                )
-                .await?,
-            )?;
-            anyhow::ensure!(
-                receipt["status"].as_str() == Some("0x1"),
-                "transaction {tx} reverted"
-            );
+        if let Some(tx) = &attestation {
+            anyhow::ensure!(self.landed(tx).await?, "attestation {tx} reverted");
         }
-        Ok(())
+        for (id, message, tx) in sent {
+            let outcome = if self.landed(&tx).await? {
+                Outcome::Delivered { tx }
+            } else {
+                Outcome::Refused {
+                    reason: self.revert_reason(&message, &sender).await,
+                    tx: Some(tx),
+                }
+            };
+            out.push(Delivery {
+                id,
+                message,
+                outcome,
+            });
+        }
+        Ok(out)
+    }
+
+    async fn deliver(&self, message: &[u8]) -> Result<Outcome> {
+        let id = hex::encode(alloy_primitives::keccak256(message));
+        if self.is_delivered(&id).await? {
+            return Ok(Outcome::AlreadyDelivered);
+        }
+        let sender = self.sender().await?;
+        let tx = self
+            .send_process(message, self.next_nonce(&sender).await?)
+            .await?;
+        info!(id, tx, "redelivering");
+        Ok(if self.landed(&tx).await? {
+            Outcome::Delivered { tx }
+        } else {
+            Outcome::Refused {
+                reason: self.revert_reason(message, &sender).await,
+                tx: Some(tx),
+            }
+        })
+    }
+
+    async fn delivered(&self, id: &str) -> Result<bool> {
+        self.is_delivered(id).await
     }
 }

@@ -44,6 +44,10 @@ pub struct Config {
     pub routes: Vec<Route>,
     /// Test TIA for anyone who asks, from a funded key on a Celestia chain. Off when absent.
     pub faucet: Option<crate::api::FaucetConfig>,
+    /// How often the tracker reads each origin for new transfers and checks each one's
+    /// progress.
+    #[serde(default = "default_track")]
+    pub track_secs: u64,
 }
 
 #[derive(Clone, Deserialize)]
@@ -61,10 +65,16 @@ pub struct Route {
     /// decides when a route works, never what it delivers: a batch always carries every leaf.
     #[serde(default)]
     pub routers: Vec<String>,
+    /// How long a transfer on this route may take before it is reported overdue. Defaults by
+    /// origin: see `tracker::expected_latency`.
+    pub expected_latency_secs: Option<u64>,
 }
 
 fn default_tick() -> u64 {
     60
+}
+fn default_track() -> u64 {
+    15
 }
 fn default_api() -> String {
     "0.0.0.0:3001".into()
@@ -88,7 +98,7 @@ impl Config {
         }
     }
 
-    fn kind(&self, name: &str) -> Result<&str> {
+    pub fn kind(&self, name: &str) -> Result<&str> {
         self.chains
             .get(name)
             .with_context(|| format!("no chain `{name}` in the config"))?
@@ -104,7 +114,9 @@ impl Config {
             .get(name)
             .with_context(|| format!("no chain `{name}` in the config"))?
             .clone();
+        // Read by the tracker and the explorer, never by the chain's own `Config`.
         table.remove("kind");
+        table.remove("explorer");
         table.try_into().with_context(|| format!("chain `{name}`"))
     }
 
@@ -156,8 +168,9 @@ impl Config {
             .chains
             .get(name)
             .with_context(|| format!("no chain `{name}` in the config"))?;
+        let mut table = table.clone();
+        table.remove("explorer");
         let endpoint: Endpoint = table
-            .clone()
             .try_into()
             .with_context(|| format!("chain `{name}`"))?;
         let mailbox = endpoint

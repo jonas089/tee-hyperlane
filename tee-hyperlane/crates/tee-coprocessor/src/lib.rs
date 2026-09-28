@@ -10,11 +10,15 @@
 //! `destination/` holds the `Destination` trait and its two implementations, EVM and Celestia.
 
 pub mod api;
+pub mod bech32;
 pub mod config;
 pub mod destination;
 pub mod identity;
+pub mod monitor;
 pub mod origin;
 pub mod route;
+pub mod tracker;
+pub mod v1;
 
 /// Error text from an endpoint, shortened to one line for a log. An endpoint that fails behind
 /// a CDN answers with a whole HTML page, which is reduced to its `<title>`; anything else loses

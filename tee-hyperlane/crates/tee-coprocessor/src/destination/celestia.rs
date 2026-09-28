@@ -8,7 +8,7 @@ use serde_json::Value;
 use tee_node::state::IsmState;
 use tracing::info;
 
-use super::{run, Batch, Destination};
+use super::{run, Batch, Delivery, Destination, Outcome};
 
 /// Celestia: `x/teeism` submit-attestation, with fresh Intel collateral carried in the
 /// transaction, then `hyperlane mailbox process` per message.
@@ -36,6 +36,15 @@ impl Celestia {
 
     /// Broadcast and wait for inclusion, since `sync` only means the node accepted it.
     async fn send(&self, args: &[&str]) -> Result<()> {
+        match self.send_checked(args).await? {
+            Ok(_) => Ok(()),
+            Err(Refusal { reason, .. }) => Err(anyhow::anyhow!(reason)),
+        }
+    }
+
+    /// As `send`, but a transaction the chain refused comes back as a `Refusal` rather than an
+    /// error, so a message the chain will not take can be told from a node that is down.
+    async fn send_checked(&self, args: &[&str]) -> Result<std::result::Result<String, Refusal>> {
         let mut all = vec!["tx"];
         all.extend_from_slice(args);
         all.extend_from_slice(&[
@@ -58,26 +67,62 @@ impl Celestia {
             "json",
         ]);
         let sent: Value = serde_json::from_str(&run(&Self::appd(), &all).await?)?;
-        anyhow::ensure!(
-            sent["code"].as_u64().unwrap_or(0) == 0,
-            "rejected at broadcast: {}",
-            sent["raw_log"]
-        );
+        let code = sent["code"].as_u64().unwrap_or(0);
+        // 32 is a stale account sequence: a race with our own earlier transaction, not
+        // anything wrong with this one.
+        anyhow::ensure!(code != 32, "rejected at broadcast: {}", sent["raw_log"]);
+        if code != 0 {
+            return Ok(Err(Refusal {
+                tx: None,
+                reason: format!("rejected at broadcast (code {code}): {}", sent["raw_log"]),
+            }));
+        }
         let hash = sent["txhash"].as_str().context("no txhash")?.to_string();
         for _ in 0..30 {
             tokio::time::sleep(std::time::Duration::from_secs(2)).await;
             if let Ok(tx) = self.query(&["tx", &hash]).await {
-                anyhow::ensure!(
-                    tx["code"].as_u64() == Some(0),
-                    "{hash} failed: {}",
-                    tx["raw_log"]
-                );
+                let code = tx["code"].as_u64().unwrap_or(0);
+                if code != 0 {
+                    return Ok(Err(Refusal {
+                        reason: format!("{hash} failed (code {code}): {}", tx["raw_log"]),
+                        tx: Some(hash),
+                    }));
+                }
                 info!(tx = hash, "included");
-                return Ok(());
+                return Ok(Ok(hash));
             }
         }
         anyhow::bail!("{hash} was accepted but not included within 60s")
     }
+
+    async fn is_delivered(&self, id: &str) -> Result<bool> {
+        let delivered = self
+            .query(&["hyperlane", "delivered", &self.mailbox, &format!("0x{id}")])
+            .await?;
+        Ok(delivered["delivered"].as_bool() == Some(true))
+    }
+
+    async fn process(&self, message: &[u8]) -> Result<Outcome> {
+        let sent = self
+            .send_checked(&[
+                "hyperlane",
+                "mailbox",
+                "process",
+                &self.mailbox,
+                "0x",
+                &format!("0x{}", hex::encode(message)),
+            ])
+            .await?;
+        Ok(match sent {
+            Ok(tx) => Outcome::Delivered { tx },
+            Err(Refusal { tx, reason }) => Outcome::Refused { tx, reason },
+        })
+    }
+}
+
+struct Refusal {
+    tx: Option<String>,
+    reason: String,
 }
 
 #[async_trait]
@@ -89,7 +134,7 @@ impl Destination for Celestia {
         Ok(IsmState::decode(&raw)?)
     }
 
-    async fn submit(&self, batch: &Batch) -> Result<()> {
+    async fn submit(&self, batch: &Batch) -> Result<Vec<Delivery>> {
         let ism = self.query(&["teeism", "ism", &self.ism]).await?;
         let state = base64::engine::general_purpose::STANDARD
             .decode(ism["ism"]["state"].as_str().context("ism.state")?)?;
@@ -130,24 +175,33 @@ impl Destination for Celestia {
             ])
             .await?;
         }
+        let mut out = Vec::new();
         for (id, message) in batch.for_domain(self.domain) {
-            let delivered = self
-                .query(&["hyperlane", "delivered", &self.mailbox, &format!("0x{id}")])
-                .await?;
-            if delivered["delivered"].as_bool() == Some(true) {
-                continue;
-            }
-            info!(id, "delivering");
-            self.send(&[
-                "hyperlane",
-                "mailbox",
-                "process",
-                &self.mailbox,
-                "0x",
-                &format!("0x{}", hex::encode(message)),
-            ])
-            .await?;
+            let outcome = if self.is_delivered(&id).await? {
+                Outcome::AlreadyDelivered
+            } else {
+                info!(id, "delivering");
+                self.process(message).await?
+            };
+            out.push(Delivery {
+                id,
+                message: message.clone(),
+                outcome,
+            });
         }
-        Ok(())
+        Ok(out)
+    }
+
+    async fn deliver(&self, message: &[u8]) -> Result<Outcome> {
+        let id = hex::encode(alloy_primitives::keccak256(message));
+        if self.is_delivered(&id).await? {
+            return Ok(Outcome::AlreadyDelivered);
+        }
+        info!(id, "redelivering");
+        self.process(message).await
+    }
+
+    async fn delivered(&self, id: &str) -> Result<bool> {
+        self.is_delivered(id).await
     }
 }

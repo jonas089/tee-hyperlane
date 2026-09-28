@@ -131,7 +131,10 @@ impl Rpc {
         to: u64,
     ) -> Result<Vec<Message>> {
         let mut bodies = Vec::new();
-        for log in self.logs(mailbox, DISPATCH_TOPIC, from, to).await? {
+        for log in self
+            .logs(mailbox, json!([DISPATCH_TOPIC]), from, to)
+            .await?
+        {
             let data = hex::decode(
                 log["data"]
                     .as_str()
@@ -147,7 +150,7 @@ impl Rpc {
             bodies.push((keccak256(&bytes).0, bytes));
         }
         let mut out = Vec::new();
-        for log in self.logs(hook, INSERTED_TOPIC, from, to).await? {
+        for log in self.logs(hook, json!([INSERTED_TOPIC]), from, to).await? {
             let data = hex::decode(
                 log["data"]
                     .as_str()
@@ -168,14 +171,59 @@ impl Rpc {
         Ok(out.into_iter().map(|(_, m)| m).collect())
     }
 
+    /// A read from the log endpoint, which is the free one where a chain has two: the tracker
+    /// reads only through this, so watching a chain never spends metered calls.
+    pub async fn read(&self, method: &str, params: Value) -> Result<Value> {
+        self.call_at(&self.logs_url, method, params).await
+    }
+
+    /// Every `Dispatch` from `mailbox` to one of `recipients` over `from..=to`, as the raw logs
+    /// with the message bytes decoded: `(log, message)`.
+    pub async fn dispatches_to(
+        &self,
+        mailbox: Address,
+        recipients: &[[u8; 32]],
+        from: u64,
+        to: u64,
+    ) -> Result<Vec<(Value, Vec<u8>)>> {
+        let wanted: Vec<String> = recipients
+            .iter()
+            .map(|r| format!("0x{}", hex::encode(r)))
+            .collect();
+        let topics = json!([DISPATCH_TOPIC, null, null, wanted]);
+        let mut out = Vec::new();
+        for log in self.logs(mailbox, topics, from, to).await? {
+            let data = hex::decode(
+                log["data"]
+                    .as_str()
+                    .context("data")?
+                    .trim_start_matches("0x"),
+            )?;
+            anyhow::ensure!(data.len() >= 64, "dispatch log too short");
+            let len = u64::from_be_bytes(data[56..64].try_into()?) as usize;
+            let bytes = data
+                .get(64..64 + len)
+                .context("dispatch log shorter than its message")?
+                .to_vec();
+            out.push((log, bytes));
+        }
+        Ok(out)
+    }
+
     /// `eth_getLogs` over any range, narrowing the window when the endpoint refuses. A pruned
     /// endpoint answers an old range with an empty array rather than an error; the route's
     /// leaf-count check is what catches that.
-    async fn logs(&self, address: Address, topic: &str, from: u64, to: u64) -> Result<Vec<Value>> {
+    async fn logs(
+        &self,
+        address: Address,
+        topics: Value,
+        from: u64,
+        to: u64,
+    ) -> Result<Vec<Value>> {
         let (mut window, mut cursor, mut out) = (MAX_LOG_WINDOW, from, Vec::new());
         while cursor <= to {
             let end = (cursor + window - 1).min(to);
-            let filter = json!([{ "address": address, "topics": [topic], "fromBlock": hex_number(cursor), "toBlock": hex_number(end) }]);
+            let filter = json!([{ "address": address, "topics": topics, "fromBlock": hex_number(cursor), "toBlock": hex_number(end) }]);
             match self.call_at(&self.logs_url, "eth_getLogs", filter).await {
                 Ok(result) => {
                     out.extend(
