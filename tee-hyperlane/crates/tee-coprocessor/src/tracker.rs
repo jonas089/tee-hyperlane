@@ -420,9 +420,9 @@ impl Tracker {
             .collect::<Result<Vec<_>>>()?;
 
         let mut state = State {
-            messages: read_json(&dir.join("messages.json")).unwrap_or_default(),
-            watches: read_json(&dir.join("watches.json")).unwrap_or_default(),
-            inbox: read_json(&dir.join("inbox.json")).unwrap_or_default(),
+            messages: load(&dir.join("messages.json")),
+            watches: load(&dir.join("watches.json")),
+            inbox: load(&dir.join("inbox.json")),
             ..Default::default()
         };
         for route in &routes {
@@ -458,6 +458,7 @@ impl Tracker {
         self.state.lock().unwrap_or_else(|p| p.into_inner())
     }
 
+    /// Writes run one at a time: the state lock is held until the last file is renamed.
     pub fn save(&self) {
         let state = self.lock();
         for (file, result) in [
@@ -858,11 +859,38 @@ pub fn read_json<T: serde::de::DeserializeOwned>(path: &std::path::Path) -> Opti
     serde_json::from_slice(&std::fs::read(path).ok()?).ok()
 }
 
+/// Flushed before the rename, so a crash leaves the old file or the new one, never half of one.
 fn write_atomic(path: &std::path::Path, bytes: &[u8]) -> Result<()> {
+    use std::io::Write;
     let tmp = path.with_extension("tmp");
-    std::fs::write(&tmp, bytes)?;
+    let mut file = std::fs::File::create(&tmp)?;
+    file.write_all(bytes)?;
+    file.sync_all()?;
     std::fs::rename(tmp, path)?;
     Ok(())
+}
+
+/// A saved state file, or empty when there is none. One that exists but does not parse is
+/// moved aside and reported rather than quietly replaced: the tracker then rebuilds from the
+/// chains, which costs a rescan, and the old file is still there to look at.
+fn load<T: serde::de::DeserializeOwned + Default>(path: &std::path::Path) -> T {
+    let Ok(bytes) = std::fs::read(path) else {
+        return T::default();
+    };
+    match serde_json::from_slice(&bytes) {
+        Ok(value) => value,
+        Err(e) => {
+            let aside = path.with_extension(format!("unreadable-{}", now()));
+            let _ = std::fs::rename(path, &aside);
+            tracing::error!(
+                file = %path.display(),
+                moved_to = %aside.display(),
+                error = %e,
+                "tracker state unreadable; starting it afresh"
+            );
+            T::default()
+        }
+    }
 }
 
 #[cfg(test)]
@@ -883,6 +911,20 @@ mod tests {
             show_account("celestia", &wide),
             format!("0x{}", "11".repeat(32))
         );
+    }
+
+    #[test]
+    fn an_unreadable_state_file_is_set_aside_not_lost() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("inbox.json");
+        assert!(load::<Vec<u8>>(&path).is_empty(), "absent is empty");
+        write_atomic(&path, b"[1,2]").unwrap();
+        assert_eq!(load::<Vec<u8>>(&path), vec![1, 2]);
+        std::fs::write(&path, b"[1,").unwrap();
+        assert!(load::<Vec<u8>>(&path).is_empty());
+        assert!(!path.exists());
+        let aside: Vec<_> = std::fs::read_dir(dir.path()).unwrap().flatten().collect();
+        assert_eq!(aside.len(), 1, "the broken file is kept");
     }
 
     #[test]
