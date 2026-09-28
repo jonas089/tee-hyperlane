@@ -130,11 +130,12 @@ for family in ${FAMILIES}; do
 done
 
 # Each ISM pins the identity of the family that attests its origin, so record all three now
-# rather than re-reading them in every script that needs one.
+# rather than re-reading them in every script that needs one. Read from the quote, and only
+# after the event log replays to the RTMRs the hardware signed.
+(cd "${REPO_DIR}/tee-hyperlane" && cargo build --quiet --release -p tee-coprocessor)
 for family in ${FAMILIES}; do
   url="$(load "enclave-url-${family}")"
-  (cd "${REPO_DIR}/tee-circuit" && cargo run --quiet -p circuit-tool -- identity \
-    --url "${url}" --json "${OUT_DIR}/identity-${family}.json") >/dev/null \
+  "${COPROCESSOR_BIN}" identity --url "${url}" --json "${OUT_DIR}/identity-${family}.json" \
     || die "could not read ${family} identity from ${url}"
   digest="$("${BIN_DIR}/teeism-identity" -identity "${OUT_DIR}/identity-${family}.json")"
   [ -n "${digest}" ] || die "no identity digest for ${family}"

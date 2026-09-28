@@ -5,10 +5,10 @@ use alloy_primitives::{keccak256, B256, U256};
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use serde_json::{json, Value};
-use tee_attestation::IsmState;
 use tee_node::ethereum::arbitrum::{
     ARBITRUM, ASSERTIONS_SLOT, LATEST_CONFIRMED_SLOT, ROLLUP, TREE_SLOT,
 };
+use tee_node::state::IsmState;
 
 use super::l2_shared::L2;
 use crate::evm::{account, hex_number};

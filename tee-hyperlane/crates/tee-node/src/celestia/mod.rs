@@ -10,6 +10,7 @@
 #[cfg(feature = "evolve")]
 pub mod eden;
 
+use crate::state::IsmState;
 use alloy_primitives::B256;
 use hyperlane_types::{MerkleTree, TREE_DEPTH};
 use ics23::commitment_proof::Proof;
@@ -19,7 +20,6 @@ use ics23::{
 use prost::Message;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use tee_attestation::IsmState;
 use tendermint_light_client_verifier::options::Options;
 use tendermint_light_client_verifier::types::{LightBlock, TrustThreshold};
 use tendermint_light_client_verifier::{ProdVerifier, Verdict, Verifier};

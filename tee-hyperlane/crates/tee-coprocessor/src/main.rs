@@ -4,10 +4,11 @@
 //! tee-hyperlane --config coprocessor.toml
 //! ```
 //!
-//! One other mode, for creating an ISM, which needs a genesis state before any route exists:
+//! Two setup modes, both used by the deploy scripts before any route exists:
 //!
 //! ```text
 //! tee-hyperlane --config coprocessor.toml genesis --chain sepolia --identity 0x... [--height N]
+//! tee-hyperlane identity --url https://<app-id>-8080.<gateway> --json identity.json
 //! ```
 
 use anyhow::Result;
@@ -19,11 +20,11 @@ struct Cli {
     #[arg(long, default_value = "coprocessor.toml")]
     config: String,
     #[command(subcommand)]
-    genesis: Option<Genesis>,
+    mode: Option<Mode>,
 }
 
 #[derive(Subcommand)]
-enum Genesis {
+enum Mode {
     /// Print the genesis state for a new ISM whose origin is `chain`.
     Genesis {
         #[arg(long)]
@@ -34,6 +35,13 @@ enum Genesis {
         /// Anchor at this origin height instead of the current head, where the chain allows it.
         #[arg(long)]
         height: Option<u64>,
+    },
+    /// Write the identity a new ISM pins for the enclave at `url`, read from its quote.
+    Identity {
+        #[arg(long)]
+        url: String,
+        #[arg(long)]
+        json: std::path::PathBuf,
     },
 }
 
@@ -47,10 +55,17 @@ async fn main() -> Result<()> {
         )
         .init();
     let cli = Cli::parse();
+    if let Some(Mode::Identity { url, json }) = &cli.mode {
+        let identity = tee_coprocessor::identity::Identity::fetch(url).await?;
+        std::fs::write(json, serde_json::to_vec_pretty(&identity)?)?;
+        eprintln!("compose hash {} from {url}", identity.compose_hash);
+        return Ok(());
+    }
     let config = Config::load(&cli.config)?;
-    match cli.genesis {
+    match cli.mode {
         None => tee_coprocessor::route::serve(config).await,
-        Some(Genesis::Genesis {
+        Some(Mode::Identity { .. }) => unreachable!("handled above"),
+        Some(Mode::Genesis {
             chain,
             identity,
             height,
@@ -64,10 +79,7 @@ async fn main() -> Result<()> {
                 state.height,
                 hex::encode(state.state_root)
             );
-            println!(
-                "0x{}",
-                hex::encode(tee_attestation::encode_ism_state(&state))
-            );
+            println!("0x{}", hex::encode(state.encode()));
             Ok(())
         }
     }

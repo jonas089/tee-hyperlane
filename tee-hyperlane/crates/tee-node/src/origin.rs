@@ -19,10 +19,10 @@
 //!   prove it honestly.
 //! * **Never take the clock from the input.** A chain that needs wall time reads the enclave's.
 
+use crate::state::IsmState;
 use alloy_primitives::B256;
 use hyperlane_types::MerkleTree;
 use serde_json::Value;
-use tee_attestation::IsmState;
 
 pub trait Origin: Sync {
     /// Authenticate the head `input` describes, starting from what the ISM already trusts.

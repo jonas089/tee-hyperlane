@@ -17,7 +17,7 @@ use std::path::PathBuf;
 use anyhow::Result;
 use async_trait::async_trait;
 use serde_json::Value;
-use tee_attestation::IsmState;
+use tee_node::state::IsmState;
 
 #[async_trait]
 pub trait Indexer: Send + Sync {

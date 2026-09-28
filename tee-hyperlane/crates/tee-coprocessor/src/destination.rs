@@ -13,7 +13,7 @@ use anyhow::{Context, Result};
 use async_trait::async_trait;
 use base64::Engine as _;
 use serde_json::Value;
-use tee_attestation::{decode_ism_state, IsmState};
+use tee_node::state::IsmState;
 use tokio::process::Command;
 use tracing::info;
 
@@ -135,7 +135,7 @@ impl Destination for Evm {
             &["call", &self.ism, "state()(bytes)", "--rpc-url", &self.rpc],
         )
         .await?;
-        Ok(decode_ism_state(&hex::decode(
+        Ok(IsmState::decode(&hex::decode(
             hex_state.trim_start_matches("0x"),
         )?)?)
     }
@@ -336,7 +336,7 @@ impl Destination for Celestia {
         let ism = self.query(&["teeism", "ism", &self.ism]).await?;
         let raw = base64::engine::general_purpose::STANDARD
             .decode(ism["ism"]["state"].as_str().context("ism.state")?)?;
-        Ok(decode_ism_state(&raw)?)
+        Ok(IsmState::decode(&raw)?)
     }
 
     async fn submit(&self, batch: &Batch) -> Result<()> {

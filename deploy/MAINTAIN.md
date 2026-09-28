@@ -28,7 +28,7 @@ For UI changes, also rebuild the UI ([DEPLOY step 11](DEPLOY.md#11-ui-and-gatewa
 
 ## Update: enclave code
 
-For changes to `crates/tee-node`, `hyperlane-types`, `tee-attestation` or `Cargo.lock`. Each
+For changes to `crates/tee-node`, `crates/hyperlane-types` or `Cargo.lock`. Each
 changed enclave needs new ISMs. The scripts only redo what changed.
 
 In-flight transfers are kept; see [No message is lost](#no-message-is-lost).

@@ -13,13 +13,13 @@
 pub mod exec;
 pub mod trie;
 
+use crate::state::IsmState;
 use alloy_primitives::{hex, B256};
 use celestia_types::namespace_data::{NamespaceData, NamespaceDataId};
 use celestia_types::nmt::Namespace;
 use celestia_types::{Blob, DataAvailabilityHeader};
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use serde_json::Value;
-use tee_attestation::IsmState;
 
 use super::Celestia;
 use crate::origin::{self, Chain, Head, Origin, Tree};

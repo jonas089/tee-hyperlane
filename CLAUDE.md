@@ -82,8 +82,8 @@ Only the Base route uses a metered RPC: an Alchemy key (`ALCHEMY_BASE_KEY` in `d
   verification is an Osaka precompile. Under Prague it reverts with empty data.
 - **The per-family split bounds origin-specific changes only.** `flake.nix` gives each family
   its own source filter, so editing `celestia/eden.rs` or `celestia/eden/` moves the evolve
-  digest alone. `Cargo.lock` and the shared modules (`attest.rs`, `origin.rs`, `evm.rs`) are in
-  every image's source, so touching those still moves all three.
+  digest alone. `Cargo.lock` and the shared modules (`attest.rs`, `origin.rs`, `state.rs`,
+  `evm.rs`) are in every image's source, so touching those still moves all three.
 - **A replacement ISM resumes, it never re-anchors.** `80-evm-isms.sh` and
   `85-celestia-isms.sh` start a replacement from the old ISM's last state with only the identity
   (last 32 bytes) swapped, so nothing in flight is lost, and stop rather than fall back to the

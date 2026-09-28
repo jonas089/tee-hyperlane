@@ -81,7 +81,7 @@ async fn attest(
     })?;
 
     let quote = dstack
-        .get_quote(tee_attestation::hash_attested_update(&update))
+        .get_quote(update.hash())
         .await
         .map_err(|e| reject(StatusCode::INTERNAL_SERVER_ERROR, e))?;
 
@@ -94,7 +94,7 @@ async fn attest(
         quote: quote.quote,
         event_log: quote.event_log,
         payload: hex::encode(&payload),
-        new_state: hex::encode(tee_attestation::encode_ism_state(&update.new_state)),
+        new_state: hex::encode(update.new_state.encode()),
         message_ids: update.message_ids.iter().map(hex::encode).collect(),
     }))
 }

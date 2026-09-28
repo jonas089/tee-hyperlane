@@ -22,9 +22,9 @@ use celestia_types::namespace_data::NamespaceData;
 use celestia_types::DataAvailabilityHeader;
 use serde::Deserialize;
 use serde_json::{json, Value};
-use tee_attestation::IsmState;
 use tee_node::celestia::eden::{Eden as EdenChain, SignedHeader, EDEN, TREE_SLOT};
 use tee_node::celestia::CelestiaStore;
+use tee_node::state::IsmState;
 use tendermint_light_client_verifier::types::LightBlock;
 use tracing::{debug, info, warn};
 

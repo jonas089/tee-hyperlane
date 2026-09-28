@@ -10,6 +10,7 @@ pub mod arbitrum;
 pub mod base;
 mod l2_shared;
 
+use crate::state::IsmState;
 use alloy_primitives::B256;
 use helios_consensus_core::consensus_spec::MainnetConsensusSpec;
 use helios_consensus_core::types::{FinalityUpdate, Forks, LightClientStore, Update};
@@ -19,7 +20,6 @@ use helios_consensus_core::{
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use ssz::Encode;
-use tee_attestation::IsmState;
 use tree_hash::TreeHash;
 
 use crate::origin::{self, AttestedRoot, Chain, Head, Origin, Tree};

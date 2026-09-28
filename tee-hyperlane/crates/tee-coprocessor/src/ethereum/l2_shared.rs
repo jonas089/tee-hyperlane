@@ -5,8 +5,8 @@ use alloy_primitives::{Address, B256};
 use anyhow::{Context, Result};
 use serde::Deserialize;
 use serde_json::{json, Value};
-use tee_attestation::IsmState;
 use tee_node::origin::Chain;
+use tee_node::state::IsmState;
 
 use super::{Ethereum, L1Step};
 use crate::evm::{hex_number, quantity, Rpc};

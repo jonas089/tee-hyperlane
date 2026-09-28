@@ -11,6 +11,7 @@ pub mod api;
 pub mod config;
 pub mod destination;
 pub mod evm;
+pub mod identity;
 pub mod origin;
 pub mod route;
 

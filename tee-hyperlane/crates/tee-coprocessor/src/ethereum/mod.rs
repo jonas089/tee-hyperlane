@@ -18,8 +18,8 @@ use helios_consensus_core::types::{
 use helios_consensus_core::{apply_bootstrap, verify_bootstrap};
 use serde::Deserialize;
 use serde_json::{json, Value};
-use tee_attestation::IsmState;
 use tee_node::ethereum::{EthereumStore, Spec, ETHEREUM, TREE_SLOT};
+use tee_node::state::IsmState;
 use tracing::{debug, info};
 use tree_hash::TreeHash;
 

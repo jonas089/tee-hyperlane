@@ -8,9 +8,9 @@
 //! The registry adopts a game only once its five-day dispute window has closed, so a transfer
 //! from Base cannot land sooner than that. Slow by design, not stuck.
 
+use crate::state::IsmState;
 use alloy_primitives::{address, keccak256, Address, Bytes, B256, U256};
 use serde_json::Value;
-use tee_attestation::IsmState;
 
 use super::l2_shared::{l2_head, Header, Input};
 use super::Ethereum;

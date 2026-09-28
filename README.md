@@ -25,7 +25,6 @@ The enclave stores nothing; its state lives in the ISM on chain.
 tee-hyperlane/crates/tee-node/          the enclave
 tee-hyperlane/crates/tee-coprocessor/   the service: every route, the API, the faucet
 tee-hyperlane/contracts/                TeeDcapIsm.sol
-tee-circuit/tee-attestation/            the enclave identity check both ISMs share
 bridge-app/                             React UI, MetaMask + Keplr
 devnet/                                 scripts that deploy everything, and the gateway
 deploy/                                 the guides, the measured compose files, systemd units
@@ -140,7 +139,6 @@ teeism-gas-oracle  systemd  paymaster upkeep
 ## Tests
 
 ```sh
-cd tee-circuit   && cargo test                        # attestation, identity
 cd tee-hyperlane && cargo test                        # state proofs, trees, L2 roots, Eden execution
 cd tee-hyperlane && cargo test -p tee-coprocessor --test live -- --ignored   # live chains; set EDEN_DA_RPC, BASE_ARCHIVE_RPC
 cd tee-hyperlane/contracts && forge test              # TeeDcapIsm.sol

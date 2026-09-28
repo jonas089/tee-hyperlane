@@ -11,9 +11,9 @@
 //! Nothing is written to disk and nothing is kept between requests: the destination chain's
 //! ISM state *is* the light client's database.
 
+use crate::state::{AttestedUpdate, IsmState};
 use serde::Deserialize;
 use serde_json::Value;
-use tee_attestation::{encode_attested_update, AttestedUpdate, IsmState};
 
 use crate::origin;
 use hyperlane_types::{get_tree_root, insert_leaf, MerkleTree};
@@ -52,14 +52,14 @@ pub struct AttestRequest {
 }
 
 mod hex_ism_state {
+    use crate::state::IsmState;
     use serde::{Deserialize, Deserializer};
-    use tee_attestation::{decode_ism_state, IsmState};
 
     pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<IsmState, D::Error> {
         let text = String::deserialize(d)?;
         let raw = hex::decode(text.strip_prefix("0x").unwrap_or(&text))
             .map_err(serde::de::Error::custom)?;
-        decode_ism_state(&raw).map_err(serde::de::Error::custom)
+        IsmState::decode(&raw).map_err(serde::de::Error::custom)
     }
 }
 
@@ -130,7 +130,7 @@ pub fn attest_with(
         attested_at: head.attested_at,
         message_ids: request.message_ids,
     };
-    let payload = encode_attested_update(&update);
+    let payload = update.encode();
     Ok((update, payload))
 }
 
