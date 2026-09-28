@@ -285,6 +285,19 @@ Pitfalls:
 - Eden accepts TCB info only in the V1 DAO
 - `openzeppelin-contracts` must be v5.0.2
 
+The deployed addresses differ per chain. `devnet/.state/out/pccs-<chain>.json` is the record
+the scripts and ISMs read:
+
+| contract | Sepolia | Arbitrum | Base | Eden |
+|---|---|---|---|---|
+| AttestationEntrypoint | `0x961D4408f512D4a169bD76433460d2981a70c71F` | same | same | `0x6d748C482E0Eae5b63b5664CDaBE2C4F0461B6B8` |
+| V4QuoteVerifier | `0xFFd8Ddff9b7e9ce124A7fdddcd817bA4d8B37ab7` | same | same | `0x0D00346F2FE363BBf086f1F753f6A3426627Ea92` |
+| PCCSRouter | `0xdA7336571D634bE002035Af6ec55F0816A2Ed263` | same | same | `0x2c86Cb1a65079D6389c7bb0cf375651a36e8E992` |
+| PcsDao | `0x3c3fF9105e62228c7dA62C3bA04d24D320c4433C` | same | same | same |
+| EnclaveIdentityDaoVersioned | `0x426B9aC0e424dEcC66e4C3a7d9293839e16D8fc1` | same | same | `0x4108d529200FE300EF38E7E68447E34bc8d4b891` |
+| FmspcTcbDaoVersioned | `0x7BDA83918CAAD9b5EC7F88A24660167E90053690` | `0xe08E2eE491666702312Fc71566420e2C221DdeC3` | `0x06D080A8642803465500D6C9004Cc9CF48094EeD` | `0x61F9E7c62B7c3ade50aeD35065Ea7a8733417471` (V1) |
+| TcbEvalDao | `0x03b1B658C34Bb7919A9cA2067d0055f7dD5C5495` | same | same | `0xDd0F2b5B38391f1Bdf47c670aA161d5Aed7310d7` |
+
 ### D. Endpoints
 
 Defaults, each overridable in `devnet/.env`:
