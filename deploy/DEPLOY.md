@@ -263,7 +263,6 @@ Then register it:
 Rules:
 - Contract addresses, storage slots and keys are constants in the chain's file, never inputs.
 - The time is never an input.
-- Test the chain against live data with `tests/live.rs`.
 
 **As a destination**, an EVM chain reuses `tee-coprocessor/src/destination/evm.rs` and
 `TeeDcapIsm.sol` unchanged. Any other kind of chain needs an ISM that behaves like

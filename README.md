@@ -142,7 +142,6 @@ teeism-gas-oracle  systemd  paymaster upkeep
 
 ```sh
 cd tee-hyperlane && cargo test                        # state proofs, trees, L2 roots, Eden execution
-cd tee-hyperlane && cargo test -p tee-coprocessor --test live -- --ignored   # live chains; set EDEN_DA_RPC, BASE_ARCHIVE_RPC
 cd tee-hyperlane/contracts && forge test              # TeeDcapIsm.sol
 cd ../celestia-app-local && go test ./x/teeism/...    # the Celestia verifier
 ```
