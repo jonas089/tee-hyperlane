@@ -332,6 +332,43 @@ fn conditions(tracker: &Tracker, at: u64) -> Vec<Condition> {
         }
     }
 
+    // A gas wallet running dry stops its destination's routes, so it is reported before it does.
+    for w in &tracker.wallets {
+        let reading = state.wallets.get(&w.chain).cloned().unwrap_or_default();
+        let (level, _, problem) = crate::wallets::judge(w, &reading);
+        let severity = match level {
+            crate::wallets::Level::Critical => Some(Severity::Critical),
+            crate::wallets::Level::Low => Some(Severity::Warning),
+            _ => None,
+        };
+        if let (Some(severity), Some(detail)) = (severity, problem) {
+            out.push(Condition {
+                key: format!("wallet-low:{}", w.chain),
+                severity,
+                subject: Subject::Chain,
+                subject_id: w.chain.clone(),
+                title: format!("Top up the relayer on {}", w.chain),
+                detail: format!(
+                    "{detail}; address {}",
+                    reading.address.as_deref().unwrap_or("unknown")
+                ),
+            });
+        }
+        if reading
+            .failing_since
+            .is_some_and(|s| at.saturating_sub(s) > FAILING_GRACE)
+        {
+            out.push(Condition {
+                key: format!("wallet-unreadable:{}", w.chain),
+                severity: Severity::Warning,
+                subject: Subject::Chain,
+                subject_id: w.chain.clone(),
+                title: format!("Cannot read the relayer's wallet on {}", w.chain),
+                detail: reading.error.clone().unwrap_or_default(),
+            });
+        }
+    }
+
     // An origin the tracker cannot watch is a blind spot: a transfer from it could be stuck
     // with nothing else saying so.
     // Every origin counts, including one whose watcher has never finished a read, which has no
@@ -505,6 +542,9 @@ mod tests {
             anyhow::bail!("unused")
         }
         async fn delivered(&self, _: &str) -> anyhow::Result<bool> {
+            anyhow::bail!("unused")
+        }
+        async fn wallet(&self) -> anyhow::Result<crate::destination::Wallet> {
             anyhow::bail!("unused")
         }
     }

@@ -7,7 +7,7 @@ use serde_json::Value;
 use tee_node::state::IsmState;
 use tracing::debug;
 
-use super::{run, Batch, Delivery, Destination, Outcome};
+use super::{run, Batch, Delivery, Destination, Outcome, Wallet};
 
 /// An EVM chain: `TeeDcapIsm.submitAttestation`, then `Mailbox.process` per message.
 pub struct Evm {
@@ -282,5 +282,14 @@ impl Destination for Evm {
 
     async fn delivered(&self, id: &str) -> Result<bool> {
         self.is_delivered(id).await
+    }
+
+    async fn wallet(&self) -> Result<Wallet> {
+        let address = self.sender().await?;
+        let balance = run("cast", &["balance", &address, "--rpc-url", &self.rpc])
+            .await?
+            .parse()
+            .context("cast balance did not print a number")?;
+        Ok(Wallet { address, balance })
     }
 }

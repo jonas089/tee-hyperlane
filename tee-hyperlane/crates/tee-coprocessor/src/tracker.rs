@@ -184,6 +184,7 @@ pub struct State {
     pub isms: BTreeMap<String, IsmReading>,
     pub watches: BTreeMap<String, Watch>,
     pub inbox: Vec<crate::monitor::Notification>,
+    pub wallets: BTreeMap<String, crate::wallets::WalletReading>,
     pub last_sweep_at: Option<u64>,
 }
 
@@ -354,6 +355,7 @@ impl Watcher {
 pub struct Tracker {
     dir: PathBuf,
     pub routes: Vec<TrackedRoute>,
+    pub wallets: Vec<crate::wallets::WatchedWallet>,
     pub chains: BTreeMap<String, ChainInfo>,
     watchers: Vec<Watcher>,
     pub track_secs: u64,
@@ -423,14 +425,17 @@ impl Tracker {
             messages: load(&dir.join("messages.json")),
             watches: load(&dir.join("watches.json")),
             inbox: load(&dir.join("inbox.json")),
+            wallets: load(&dir.join("wallets.json")),
             ..Default::default()
         };
         for route in &routes {
             backfill(route, &chains, &mut state.messages);
         }
+        let wallets = watched_wallets(config, &chains)?;
         let tracker = Arc::new(Self {
             dir,
             routes,
+            wallets,
             chains,
             watchers,
             track_secs: config.track_secs.max(1),
@@ -465,6 +470,7 @@ impl Tracker {
             ("messages.json", serde_json::to_vec(&state.messages)),
             ("watches.json", serde_json::to_vec(&state.watches)),
             ("inbox.json", serde_json::to_vec(&state.inbox)),
+            ("wallets.json", serde_json::to_vec(&state.wallets)),
         ] {
             let saved = result
                 .map_err(anyhow::Error::from)
@@ -501,6 +507,37 @@ impl Tracker {
                 }
             });
         }
+        let tracker = Arc::clone(self);
+        tasks.spawn(async move {
+            let mut streaks: BTreeMap<String, crate::Streak> = BTreeMap::new();
+            loop {
+                let readings = crate::wallets::check(&tracker.wallets).await;
+                let at = now();
+                {
+                    let mut state = tracker.lock();
+                    for (chain, reading) in readings {
+                        let streak = streaks.entry(chain.clone()).or_default();
+                        let entry = state.wallets.entry(chain.clone()).or_default();
+                        match reading {
+                            Ok(w) => {
+                                entry.record(w.address, w.balance, at);
+                                streak.ok();
+                            }
+                            Err(e) => {
+                                let error = crate::brief(&format!("{e:#}"));
+                                if streak.fail(&error).is_some() {
+                                    warn!(chain, error, "cannot read the relayer's gas wallet");
+                                }
+                                entry.failing_since.get_or_insert(at);
+                                entry.error = Some(error);
+                            }
+                        }
+                    }
+                }
+                tracker.save();
+                tokio::time::sleep(Duration::from_secs(crate::wallets::CHECK_EVERY)).await;
+            }
+        });
         let tracker = Arc::clone(self);
         tasks.spawn(async move {
             // The first status line waits one interval, so the watchers have read every origin.
@@ -748,6 +785,38 @@ fn tracked_route(config: &Config, r: &config::Route) -> Result<TrackedRoute> {
         dir: config.proof_dir().join(&r.name),
         destination: config.destination(&r.to, &r.ism)?,
     })
+}
+
+/// One gas wallet per chain some route delivers to.
+fn watched_wallets(
+    config: &Config,
+    chains: &BTreeMap<String, ChainInfo>,
+) -> Result<Vec<crate::wallets::WatchedWallet>> {
+    let mut out: Vec<crate::wallets::WatchedWallet> = Vec::new();
+    for r in &config.routes {
+        if out.iter().any(|w| w.chain == r.to) {
+            continue;
+        }
+        let kind = chains.get(&r.to).map_or("", |c| c.kind.as_str());
+        let (symbol, decimals, low) = crate::wallets::defaults(kind);
+        let table = config.chains.get(&r.to);
+        let field = |k: &str| table.and_then(|t| t.get(k));
+        out.push(crate::wallets::WatchedWallet {
+            chain: r.to.clone(),
+            symbol: field("gas_symbol")
+                .and_then(|v| v.as_str())
+                .unwrap_or(symbol)
+                .to_string(),
+            decimals: field("gas_decimals")
+                .and_then(|v| v.as_integer())
+                .map_or(decimals, |d| d as u32),
+            low: field("low_balance")
+                .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
+                .unwrap_or(low),
+            destination: config.destination(&r.to, &r.ism)?,
+        });
+    }
+    Ok(out)
 }
 
 fn default_explorer(domain: u32) -> Option<&'static str> {

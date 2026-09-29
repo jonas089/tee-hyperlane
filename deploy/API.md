@@ -26,10 +26,11 @@ A test fails if a served field and the spec disagree.
 | `GET /api/v1/routes` | every route: ISM height, origin head, loop failures, staged batch, transfer counts, its notifications |
 | `GET /api/v1/routes/{name}` | one route |
 | `GET /api/v1/chains` | every chain, and the tracker's watch on each origin |
+| `GET /api/v1/wallets` | the relayer's gas wallet on each destination: balance, spend per day over the last week, days left, and whether to top up |
 | `GET /api/v1/messages[?status=&route=&limit=&offset=]` | transfers, problems first, then newest. `status` is comma-separated. `limit` defaults to 50, max 500 |
 | `GET /api/v1/messages/{id}` | one transfer, with its timeline, verdict, failure and explorer links |
 | `GET /api/v1/search?q=` | transfers matching a message id, a transaction hash (origin or delivery), or an account (sender or recipient; hex or `celestia1…`) |
-| `GET /metrics` | Prometheus: `teeism_notifications_open{severity}`, `teeism_messages{route,status}`, `teeism_ism_height{route}`, `teeism_last_sweep_seconds` |
+| `GET /metrics` | Prometheus: `teeism_notifications_open{severity}`, `teeism_messages{route,status}`, `teeism_ism_height{route}`, `teeism_wallet_balance{chain}`, `teeism_wallet_days_left{chain}`, `teeism_last_sweep_seconds` |
 
 ## Transfer status
 
@@ -60,7 +61,16 @@ is about.
 | `route-staged:<route>` | an attested batch has been submitting for 30m |
 | `ism-unreadable:<route>` | the ISM could not be read for 10m |
 | `watch-failing:<chain>` | the tracker could not read an origin for 10m: its transfers are unwatched |
+| `wallet-low:<chain>` | the relayer's gas wallet is below its warning level or under 7 days from empty (critical: empty, or under 2 days) |
+| `wallet-unreadable:<chain>` | the wallet's balance could not be read for 10m |
 | `monitor-silent` | the monitor itself has stopped |
+
+## Gas wallets
+
+Read every 5 minutes. Spend is the sum of drops between readings over the last week, so a
+top-up does not count, and there is no estimate before 6 hours of readings. The warning level
+defaults to 0.05 ETH on Sepolia, 0.01 ETH on the L2s, 1 TIA on Eden and 5 TIA on Celestia; set
+`low_balance` (whole tokens) on a chain in the coprocessor config to change it.
 
 ## Examples
 
@@ -70,6 +80,7 @@ curl -s $B/api/v1/inbox | jq '.notifications[] | {severity, title, detail}'
 curl -s "$B/api/v1/messages?status=overdue,failed" | jq '.messages[] | {id, route, problem}'
 curl -s "$B/api/v1/search?q=0x318d22faa1e0f29eac7ef644a8fac676f6688d1e" | jq '.messages[] | {id, status}'
 curl -s $B/api/v1/routes | jq '.[] | {name, status, ism: .ismReading.height}'
+curl -s $B/api/v1/wallets | jq '.[] | {chain, display, symbol, daysLeft, level}'
 ```
 
 For alerting, probe `/api/v1/health` from outside the host: any non-200 is a problem, and no
