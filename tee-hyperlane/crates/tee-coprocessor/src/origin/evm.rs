@@ -210,6 +210,44 @@ impl Rpc {
         Ok(out)
     }
 
+    /// The newest log from `address` matching `topics` at or below block `from`, scanning
+    /// backwards in windows as wide as the endpoint accepts, narrowed on refusal. No bound: it
+    /// stops at the first match or at genesis, so it holds for any interval on any network.
+    pub async fn last_log(
+        &self,
+        address: Address,
+        topics: Value,
+        from: u64,
+    ) -> Result<Option<Value>> {
+        let (mut window, mut end) = (MAX_LOG_WINDOW, from);
+        loop {
+            let start = end.saturating_sub(window - 1);
+            let filter = json!([{ "address": address, "topics": topics, "fromBlock": hex_number(start), "toBlock": hex_number(end) }]);
+            match self.call_at(&self.logs_url, "eth_getLogs", filter).await {
+                Ok(result) => {
+                    let found = result
+                        .as_array()
+                        .context("eth_getLogs did not return an array")?;
+                    if let Some(log) = found.last() {
+                        return Ok(Some(log.clone()));
+                    }
+                    if start == 0 {
+                        return Ok(None);
+                    }
+                    end = start - 1;
+                }
+                Err(e) => {
+                    anyhow::ensure!(
+                        window > MIN_LOG_WINDOW,
+                        "eth_getLogs refuses even {MIN_LOG_WINDOW} blocks at {start}: {e}"
+                    );
+                    window = (window / 4).max(MIN_LOG_WINDOW);
+                    debug!(window, block = start, "narrowing the log window");
+                }
+            }
+        }
+    }
+
     /// `eth_getLogs` over any range, narrowing the window when the endpoint refuses. A pruned
     /// endpoint answers an old range with an empty array rather than an error; the route's
     /// leaf-count check is what catches that.

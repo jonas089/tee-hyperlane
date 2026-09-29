@@ -1,5 +1,9 @@
-//! Arbitrum Sepolia as an origin: finding the proof that reads its confirmed root out of L1,
-//! which the enclave's `ethereum::arbitrum::Arbitrum` verifies.
+//! Arbitrum as an origin: finding the proof that reads its confirmed root out of L1, which the
+//! enclave's `ethereum::arbitrum::Arbitrum` verifies.
+//!
+//! Nothing here depends on how often Arbitrum posts or how long it takes to confirm: the
+//! confirmed assertion's own storage says which L1 block created it, so its preimage is one
+//! single-block log read on any network.
 
 use alloy_primitives::{keccak256, B256, U256};
 use anyhow::{Context, Result};
@@ -13,6 +17,7 @@ use tee_node::state::IsmState;
 use super::l2_shared::L2;
 use crate::origin::evm::{account, hex_number};
 use crate::origin::{Indexer, Message, Step};
+use tracing::warn;
 
 /// `AssertionCreated(bytes32 indexed assertionHash, bytes32 indexed parentAssertionHash, ...)`.
 const ASSERTION_CREATED_TOPIC: &str =
@@ -20,9 +25,15 @@ const ASSERTION_CREATED_TOPIC: &str =
 /// Where the after-state and the inbox accumulator sit in the event's data, in 32-byte words.
 const AFTER_STATE_WORD: usize = 13;
 const INBOX_ACC_WORD: usize = 19;
-/// How far back to look for the confirmed assertion's creation. BoLD confirms within days;
-/// five thousand L1 blocks is well past that.
-const ASSERTION_SEARCH_BLOCKS: u64 = 5_000;
+/// `AssertionNode.createdAtBlock`: 8 bytes, 16 bytes up the packed slot whose byte 25 is the
+/// status the enclave checks (`firstChildBlock`, `secondChildBlock`, `createdAtBlock`,
+/// `isFirstChild`, `status`).
+const CREATED_AT_BYTE: usize = 16;
+
+/// The L1 block an assertion node says it was created in.
+fn created_at(slot_value: U256) -> u64 {
+    (slot_value >> (CREATED_AT_BYTE * 8)).to::<u128>() as u64
+}
 
 pub struct Arbitrum(pub L2);
 
@@ -30,7 +41,7 @@ impl Arbitrum {
     /// Read Arbitrum's confirmed root out of L1 at `l1_block`: which assertion is confirmed,
     /// its status, its preimage from the `AssertionCreated` event, and the L2 header it names.
     /// Returns the enclave's `RootProof` and the L2 block it confirms.
-    async fn root_proof(&self, l1_block: u64) -> Result<(Value, Value)> {
+    async fn root_proof(&self, l1_block: u64) -> Result<(Value, Value, B256)> {
         let l1 = self.0.l1.history();
         let at = hex_number(l1_block);
         let latest_slot = B256::from(U256::from(LATEST_CONFIRMED_SLOT));
@@ -57,22 +68,13 @@ impl Arbitrum {
         );
 
         // The preimage of the confirmed assertion, from the event that created it.
-        let head = l1.block_number().await?;
-        let logs = l1
-            .call(
-                "eth_getLogs",
-                json!([{
-                    "address": ROLLUP,
-                    "topics": [ASSERTION_CREATED_TOPIC, confirmed],
-                    "fromBlock": hex_number(head.saturating_sub(ASSERTION_SEARCH_BLOCKS)),
-                    "toBlock": "latest",
-                }]),
-            )
+        let slot_value: U256 = slots[1]["value"]
+            .as_str()
+            .context("assertion node value")?
+            .parse()?;
+        let log = self
+            .assertion_created(confirmed, created_at(slot_value))
             .await?;
-        let log = logs
-            .as_array()
-            .and_then(|l| l.first())
-            .with_context(|| format!("no AssertionCreated for {confirmed} in the last {ASSERTION_SEARCH_BLOCKS} L1 blocks"))?;
         let data = log["data"]
             .as_str()
             .context("log data")?
@@ -107,20 +109,76 @@ impl Arbitrum {
             "inbox_accumulator": word(INBOX_ACC_WORD)?,
             "l2_header_rlp": format!("0x{}", hex::encode(header_rlp)),
         });
-        Ok((root_proof, l2_block))
+        Ok((root_proof, l2_block, confirmed))
+    }
+
+    /// The `AssertionCreated` event for `assertion`, at the block its node names.
+    ///
+    /// Checked against the hash either way, so a wrong block finds nothing rather than the
+    /// wrong event. If it finds nothing (a layout change would do it), the chain is searched
+    /// backwards from the head without bound, and the block is remembered so that happens once
+    /// per assertion.
+    async fn assertion_created(&self, assertion: B256, created: u64) -> Result<Value> {
+        let l1 = self.0.l1.history();
+        let topics = json!([ASSERTION_CREATED_TOPIC, assertion]);
+        let hint = format!("assertion-{assertion}");
+        let remembered = self.0.cache.read(&hint).and_then(|b| b.parse::<u64>().ok());
+        for block in remembered.into_iter().chain([created]) {
+            let at = json!([{ "address": ROLLUP, "topics": topics, "fromBlock": hex_number(block), "toBlock": hex_number(block) }]);
+            if let Some(log) = l1
+                .call("eth_getLogs", at)
+                .await?
+                .as_array()
+                .and_then(|l| l.first())
+            {
+                return Ok(log.clone());
+            }
+        }
+        warn!(%assertion, created, "AssertionCreated is not at the block its node names; searching back from the head");
+        let head = l1.block_number().await?;
+        let log = l1
+            .last_log(ROLLUP, topics, head)
+            .await?
+            .with_context(|| format!("no AssertionCreated for {assertion} anywhere on L1"))?;
+        if let Ok(block) = crate::origin::evm::quantity(&log["blockNumber"]) {
+            self.0.cache.write(&hint, &block.to_string());
+        }
+        Ok(log)
+    }
+
+    /// The confirmed assertion at L1's finalized block: what the proof would read.
+    async fn marker(&self) -> Result<B256> {
+        let slot = B256::from(U256::from(LATEST_CONFIRMED_SLOT));
+        Ok(self
+            .0
+            .l1
+            .history()
+            .call("eth_getStorageAt", json!([ROLLUP, slot, "finalized"]))
+            .await?
+            .as_str()
+            .context("eth_getStorageAt")?
+            .parse()?)
     }
 }
 
 #[async_trait]
 impl Indexer for Arbitrum {
     async fn gather(&self, trusted: &IsmState) -> Result<Step> {
+        if let Some(step) = self.0.unchanged(trusted, self.marker()).await? {
+            return Ok(step);
+        }
         let Some(l1) = self.0.l1.l1_step(trusted).await? else {
-            return Ok(Step::idle(trusted.height));
+            let step = Step::idle(trusted.height);
+            self.0.checked(trusted, None, &step);
+            return Ok(step);
         };
-        let (proof, l2_block) = self.root_proof(l1.block).await?;
-        self.0
+        let (proof, l2_block, confirmed) = self.root_proof(l1.block).await?;
+        let step = self
+            .0
             .step(&ARBITRUM, TREE_SLOT, trusted, l1, proof, &l2_block)
-            .await
+            .await?;
+        self.0.checked(trusted, Some(confirmed), &step);
+        Ok(step)
     }
 
     async fn index(&self, from: u64, to: u64) -> Result<Vec<Message>> {
@@ -129,7 +187,23 @@ impl Indexer for Arbitrum {
 
     async fn bootstrap(&self, identity: [u8; 32], _height: Option<u64>) -> Result<IsmState> {
         let store = self.0.l1.genesis_store().await?;
-        let (_, l2_block) = self.root_proof(store.root()?.height).await?;
+        let (_, l2_block, _) = self.root_proof(store.root()?.height).await?;
         L2::genesis(&ARBITRUM, &store, &l2_block, identity)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Read off Arbitrum Sepolia: the confirmed assertion
+    /// 0x61104f81…d8f872's node slot, whose creation event is in L1 block 11,807,400.
+    #[test]
+    fn the_creation_block_is_read_out_of_the_node_slot() {
+        let slot: U256 = "0x00000000000002010000000000b42aa800000000000000000000000000b42b3e"
+            .parse()
+            .unwrap();
+        assert_eq!(created_at(slot), 11_807_400);
+        assert_eq!((slot >> 200u32).to::<u8>(), 2, "status, byte 25: confirmed");
     }
 }
