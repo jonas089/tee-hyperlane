@@ -26,7 +26,7 @@ code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-
 header { position: sticky; top: 0; z-index: 5; background: var(--panel); border-bottom: 1px solid var(--line); }
 .bar { max-width: 1180px; margin: 0 auto; padding: 10px 16px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
 .brand { font-weight: 700; font-size: 16px; color: var(--text); white-space: nowrap; }
-.search { flex: 1 1 320px; display: flex; min-width: 0; }
+.search { flex: 1 1 320px; display: flex; min-width: 0; margin: 0; }
 .search input { flex: 1; min-width: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px 0 0 8px;
   background: var(--bg); color: var(--text); font: inherit; }
 .search button { padding: 8px 14px; border: 1px solid var(--accent); background: var(--accent); color: #fff;
@@ -44,11 +44,23 @@ main { max-width: 1180px; margin: 0 auto; padding: 16px; }
 h1 { font-size: 20px; margin: 4px 0 14px; }
 h2 { font-size: 15px; margin: 22px 0 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
 .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
-.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
-.card { padding: 12px 14px; display: block; color: var(--text); }
-.card:hover { border-color: var(--accent); text-decoration: none; }
-.card .top { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; }
-.card .name { font-weight: 650; overflow-wrap: anywhere; }
+.nav { display: flex; gap: 4px; }
+.nav a { padding: 6px 12px; border-radius: 8px; color: var(--muted); font-weight: 600; }
+.nav a.on { background: var(--bg); color: var(--text); }
+.nav a:hover { text-decoration: none; color: var(--text); }
+.spacer { flex: 1; }
+.toolbar { display: flex; gap: 8px; margin-bottom: 12px; }
+.toolbar[hidden] { display: none; }
+.addr { display: flex; gap: 6px; align-items: center; }
+.addr code { overflow-wrap: anywhere; }
+.copy { flex: none; padding: 2px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel);
+  color: var(--muted); font: inherit; font-size: 12px; cursor: pointer; }
+.copy:hover { color: var(--text); border-color: var(--accent); }
+.copy.done { color: var(--ok); border-color: var(--ok); }
+td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+th.num { text-align: right; }
+.bad-text { color: var(--bad); }
+.pager { display: flex; gap: 10px; align-items: center; justify-content: flex-end; margin-top: 10px; color: var(--muted); }
 .kv { display: grid; grid-template-columns: max-content 1fr; gap: 3px 12px; font-size: 13px; }
 .kv dt { color: var(--muted); }
 .kv dd { margin: 0; overflow-wrap: anywhere; }
@@ -103,16 +115,24 @@ pre { margin: 0; padding: 12px 14px; background: var(--code); overflow-x: auto; 
 <header>
   <div class="bar">
     <a class="brand" href="#/">TEE Bridge Explorer</a>
-    <form class="search" id="search">
-      <input id="q" placeholder="Message id, transaction hash, or address" autocomplete="off" spellcheck="false">
-      <button type="submit">Search</button>
-    </form>
+    <nav class="nav">
+      <a href="#/" id="nav-chains">Chains</a>
+      <a href="#/transfers" id="nav-transfers">Transfers</a>
+    </nav>
+    <span class="spacer"></span>
     <span id="health"></span>
     <button class="inbox-btn" id="inbox-btn" type="button">Inbox<span class="badge" id="unread">0</span></button>
   </div>
 </header>
 <main>
   <div id="api-banner"></div>
+  <!-- Outside #view, which is redrawn every refresh, so what you are typing survives it. -->
+  <div class="toolbar" id="toolbar" hidden>
+    <form class="search" id="search">
+      <input id="q" placeholder="Message id, transaction hash, or address" autocomplete="off" spellcheck="false">
+      <button type="submit">Search</button>
+    </form>
+  </div>
   <div id="view"><div class="empty">Loading…</div></div>
   <div class="foot" id="foot"></div>
 </main>
@@ -234,62 +254,108 @@ function messageRows(messages, showRoute = true) {
       ${showRoute ? `<td>${esc(m.route)}</td>` : ""}
       <td class="hide-sm mono">${esc(m.transfer ? m.transfer.amount : "")}</td>
       <td class="hide-sm mono" title="${esc(m.transfer ? m.transfer.recipient : "")}">${esc(short(m.transfer ? m.transfer.recipient : ""))}</td>
-      <td>${when(m.dispatch ? m.dispatch.timestamp : m.firstSeenAt)}</td>
+      <td style="white-space:nowrap">${when(m.dispatch ? m.dispatch.timestamp : m.firstSeenAt)}</td>
       <td class="muted">${esc(m.problem || m.waitingOn || "")}</td></tr>`).join("");
   return `<div class="panel scroll"><table><thead><tr><th>Status</th><th>Message</th>${showRoute ? "<th>Route</th>" : ""}
     <th class="hide-sm">Amount (base units)</th><th class="hide-sm">Recipient</th><th>Sent</th><th>Detail</th></tr></thead>
     <tbody>${rows}</tbody></table></div>`;
 }
 
-function routeCard(r) {
-  const c = r.counts;
-  return `<a class="panel card" href="#/route/${esc(r.name)}">
-    <div class="top"><span class="name">${esc(r.from.name)} to ${esc(r.to.name)}</span>${pill(r.status)}</div>
-    <dl class="kv">
-      <dt>ISM height</dt><dd>${esc(r.ismReading.height ?? "unread")}</dd>
-      <dt>Origin head</dt><dd>${r.originHead ? `${esc(r.originHead.height)} (${when(r.originHead.reportedAt)})` : "not reported"}</dd>
-      <dt>Transfers</dt><dd>${c.pending + c.verified} in flight, ${c.delivered} delivered${c.failed + c.overdue ? `, <b style="color:var(--bad)">${c.failed + c.overdue} stuck</b>` : ""}</dd>
-      ${r.failing ? `<dt>Failing</dt><dd style="color:var(--bad)">${esc(r.failing.consecutiveFailures)}x since ${when(r.failing.since)}</dd>` : ""}
-    </dl></a>`;
-}
-
 function days(d) {
-  if (d == null) return "not enough history yet";
-  if (d > 365) return "over a year at the current spend";
-  return `about ${d < 10 ? d.toFixed(1) : Math.round(d)} days at the current spend`;
+  if (d == null) return `<span class="muted">not enough history yet</span>`;
+  if (d > 365) return "over a year";
+  return `${d < 10 ? d.toFixed(1) : Math.round(d)} days`;
 }
 
-function walletCard(w) {
-  const bal = w.display != null ? `${esc(w.display)} ${esc(w.symbol)}` : `<span class="muted">not read yet</span>`;
-  return `<div class="panel card">
-    <div class="top"><span class="name">${esc(w.chain)}</span>${pill(w.level)}</div>
-    <dl class="kv">
-      <dt>Balance</dt><dd><b>${bal}</b></dd>
-      <dt>Lasts</dt><dd>${esc(days(w.daysLeft))}</dd>
-      <dt>Spend</dt><dd>${w.spentPerDay != null ? `${esc(w.spentPerDay.toPrecision(3))} ${esc(w.symbol)} a day` : "unknown yet"}</dd>
-      <dt>Warns below</dt><dd>${esc(w.lowAt)} ${esc(w.symbol)}</dd>
-      <dt>Address</dt><dd class="mono">${w.address ? (w.explorer ? `<a href="${esc(w.explorer)}" target="_blank" rel="noopener">${esc(short(w.address))}</a>` : `<span title="${esc(w.address)}">${esc(short(w.address))}</span>`) : ""}</dd>
-      ${w.error ? `<dt>Error</dt><dd style="color:var(--bad)">${esc(w.error)}</dd>` : ""}
-      ${w.problem ? `<dt>Top up</dt><dd style="color:var(--bad)">${esc(w.problem)}</dd>` : ""}
-    </dl></div>`;
+function copyable(text) {
+  if (!text) return `<span class="muted">not read yet</span>`;
+  return `<span class="addr"><code>${esc(text)}</code><button class="copy" type="button" data-copy="${esc(text)}">Copy</button></span>`;
 }
 
-let filter = store("teeism.filter", "");
-async function overview() {
-  const [routes, page, wallets] = await Promise.all([get("/routes"), get(`/messages?limit=50${filter ? "&status=" + filter : ""}`), get("/wallets")]);
-  const open = (cache.inbox || []).filter((n) => !n.resolvedAt);
+const RANK = { critical: 3, down: 3, low: 2, warning: 2, degraded: 2, unknown: 1, ok: 0 };
+const worst = (list) => list.reduce((w, s) => (RANK[s] ?? 0) > (RANK[w] ?? 0) ? s : w, "ok");
+const asHealth = (s) => ({ critical: "down", low: "degraded", warning: "degraded" }[s] || s);
+
+/// A chain's status: the worst of its own wallet and its own notifications (its watch, its
+/// wallet). Routes are left out: every route touches Celestia, so it would inherit all of them,
+/// and the routes table says which route is in trouble.
+function chainStatus(name, wallet, open) {
+  const levels = [];
+  if (wallet) levels.push(wallet.level === "unknown" ? "ok" : wallet.level);
+  for (const n of open) if (n.subject === "chain" && n.subjectId === name) levels.push(n.severity);
+  return asHealth(worst(levels));
+}
+
+function summaryBanner(open) {
   const h = cache.health;
-  const summary = !h ? "" : h.status === "ok"
-    ? `<div class="banner ok">All routes healthy. Nothing is stuck.</div>`
-    : `<div class="banner ${h.status === "down" ? "bad" : "warn"}">${h.open.critical} critical and ${h.open.warning} warning notification${h.open.critical + h.open.warning === 1 ? "" : "s"} open. <a href="#/inbox">Open the inbox</a></div>`;
+  if (!h) return "";
+  if (h.status === "ok") return `<div class="banner ok">Everything is healthy. Nothing is stuck.</div>`;
+  const list = open.slice(0, 5);
+  return `<div class="banner ${h.status === "down" ? "bad" : "warn"}">${h.open.critical} critical and ${h.open.warning} warning notification${h.open.critical + h.open.warning === 1 ? "" : "s"} open. <a href="#/inbox">Open the inbox</a></div>
+    ${inboxList(list, "")}${open.length > list.length ? `<p><a href="#/inbox">All ${open.length} open notifications</a></p>` : ""}`;
+}
+
+async function chainsPage() {
+  const [chains, wallets, routes] = await Promise.all([get("/chains"), get("/wallets"), get("/routes")]);
+  const open = (cache.inbox || []).filter((n) => !n.resolvedAt);
+  const walletOf = (name) => wallets.find((w) => w.chain === name);
+  const inRoutes = chains.filter((c) => walletOf(c.name) || c.watch);
+  const chainRows = inRoutes.map((c) => {
+    const w = walletOf(c.name), watch = c.watch;
+    const status = chainStatus(c.name, w, open);
+    const watchCell = !watch ? `<span class="muted">not an origin</span>`
+      : watch.error ? `<span class="bad-text">${esc(watch.error)}</span>`
+      : `read ${when(watch.lastOkAt)}`;
+    return `<tr>
+      <td><a href="#/chain/${esc(c.name)}"><b>${esc(c.name)}</b></a><div class="muted">${esc(c.kind)}, ${esc(c.domain)}</div></td>
+      <td>${pill(status)}</td>
+      <td>${w ? copyable(w.address) : `<span class="muted">not a destination</span>`}${w && w.error ? `<div class="bad-text">${esc(w.error)}</div>` : ""}</td>
+      <td class="num">${w && w.display != null ? `<b>${esc(w.display)}</b> ${esc(w.symbol)}` : ""}${w && w.problem ? `<div class="bad-text">top up</div>` : ""}</td>
+      <td class="num">${w ? days(w.daysLeft) : ""}</td>
+      <td>${watchCell}</td></tr>`;
+  }).join("");
+  const routeRows = routes.map((r) => {
+    const c = r.counts, stuck = c.failed + c.overdue;
+    return `<tr class="click" data-href="#/route/${esc(r.name)}">
+      <td><a href="#/route/${esc(r.name)}">${esc(r.from.name)} to ${esc(r.to.name)}</a></td>
+      <td>${pill(r.status)}</td>
+      <td class="num">${esc(r.ismReading.height ?? "unread")}</td>
+      <td class="num">${r.originHead ? esc(r.originHead.height) : ""}</td>
+      <td class="num">${c.pending + c.verified}</td>
+      <td class="num">${stuck ? `<b class="bad-text">${stuck}</b>` : "0"}</td>
+      <td class="num">${c.delivered}</td>
+      <td>${r.failing ? `<span class="bad-text">failing ${esc(r.failing.consecutiveFailures)}x since ${when(r.failing.since)}</span>` : `<span class="muted">healthy</span>`}</td></tr>`;
+  }).join("");
+  return `${summaryBanner(open)}
+    <h2>Chains</h2>
+    <div class="panel scroll"><table><thead><tr><th>Chain</th><th>Status</th><th>Relayer address</th>
+      <th class="num">Gas balance</th><th class="num">Lasts</th><th>Watching transfers</th></tr></thead>
+      <tbody>${chainRows}</tbody></table></div>
+    <h2>Routes</h2>
+    <div class="panel scroll"><table><thead><tr><th>Route</th><th>Status</th><th class="num">ISM height</th>
+      <th class="num">Origin head</th><th class="num">In flight</th><th class="num">Stuck</th><th class="num">Delivered</th><th>Loop</th></tr></thead>
+      <tbody>${routeRows}</tbody></table></div>`;
+}
+
+const PAGE = 100;
+let filter = store("teeism.filter", "");
+let offset = 0;
+async function transfersPage(q) {
+  const input = document.getElementById("q");
+  if (document.activeElement !== input) input.value = q || "";
+  if (q) {
+    const r = await get(`/search?q=${encodeURIComponent(q)}`);
+    const how = r.matched.filter((m) => m !== "none");
+    return `<p class="muted">${how.length ? `Matched ${esc(how.join(", "))}` : "No transfer matches"} <code>${esc(q)}</code>. <a href="#/transfers">Show all</a></p>${messageRows(r.messages)}`;
+  }
+  const page = await get(`/messages?limit=${PAGE}&offset=${offset}${filter ? "&status=" + filter : ""}`);
   const chips = [["", "All"], ["overdue,failed", "Stuck"], ["pending,verified", "In flight"], ["delivered", "Delivered"]]
     .map(([v, l]) => `<button class="chip${filter === v ? " on" : ""}" data-filter="${v}">${l}</button>`).join("");
-  return `${summary}
-    ${open.length ? `<h2>Open problems</h2>${inboxList(open.slice(0, 5), "")}${open.length > 5 ? `<p><a href="#/inbox">All ${open.length} open notifications</a></p>` : ""}` : ""}
-    <h2>Routes</h2><div class="grid">${routes.map(routeCard).join("")}</div>
-    <h2>Relayer gas</h2><div class="grid">${wallets.map(walletCard).join("")}</div>
-    <h2>Transfers <span class="muted" style="text-transform:none">(${page.total})</span></h2>
-    <div class="chips">${chips}</div>${messageRows(page.messages)}`;
+  const last = Math.min(offset + PAGE, page.total);
+  const pager = page.total > PAGE ? `<div class="pager">${offset + 1} to ${last} of ${page.total}
+    <button class="chip" data-page="-1" ${offset === 0 ? "disabled" : ""}>Newer</button>
+    <button class="chip" data-page="1" ${last >= page.total ? "disabled" : ""}>Older</button></div>` : "";
+  return `<div class="chips">${chips}</div>${messageRows(page.messages)}${pager}`;
 }
 
 let showResolved = false;
@@ -388,14 +454,16 @@ async function chainView(name) {
       <dt>Last good read</dt><dd>${when(w.lastOkAt)}</dd>
       ${w.error ? `<dt>Error</dt><dd style="color:var(--bad)">${esc(w.error)} (since ${when(w.failingSince)})</dd>` : ""}` : "<dt>Watched</dt><dd>no, not an origin</dd>"}
   </dl></div>
-  ${wallet ? `<h2>Relayer gas</h2><div class="grid">${walletCard(wallet)}</div>` : ""}`;
-}
-
-async function searchView(q) {
-  document.getElementById("q").value = q;
-  const r = await get(`/search?q=${encodeURIComponent(q)}`);
-  const how = r.matched.filter((m) => m !== "none");
-  return `<h1>Search</h1><p class="muted">${how.length ? `Matched ${esc(how.join(", "))}` : "No transfer matches"} <code>${esc(q)}</code>.</p>${messageRows(r.messages)}`;
+  ${wallet ? `<h2>Relayer gas</h2><div class="panel pad"><dl class="kv">
+    <dt>Address</dt><dd>${copyable(wallet.address)}</dd>
+    <dt>Balance</dt><dd>${wallet.display != null ? `<b>${esc(wallet.display)}</b> ${esc(wallet.symbol)}` : "not read yet"} ${pill(wallet.level)}</dd>
+    <dt>Lasts</dt><dd>${days(wallet.daysLeft)}</dd>
+    <dt>Spend</dt><dd>${wallet.spentPerDay != null ? `${esc(wallet.spentPerDay.toPrecision(3))} ${esc(wallet.symbol)} a day` : "unknown yet"}</dd>
+    <dt>Warns below</dt><dd>${esc(wallet.lowAt)} ${esc(wallet.symbol)}</dd>
+    ${wallet.explorer ? `<dt>Explorer</dt><dd><a href="${esc(wallet.explorer)}" target="_blank" rel="noopener">address page</a></dd>` : ""}
+    ${wallet.problem ? `<dt>Top up</dt><dd class="bad-text">${esc(wallet.problem)}</dd>` : ""}
+    ${wallet.error ? `<dt>Error</dt><dd class="bad-text">${esc(wallet.error)}</dd>` : ""}
+  </dl></div>` : ""}`;
 }
 
 // ---------------------------------------------------------------- routing
@@ -407,13 +475,17 @@ async function route() {
   const view = document.getElementById("view");
   const [, kind, ...rest] = (location.hash || "#/").slice(1).split("/");
   const arg = decodeURIComponent(rest.join("/"));
+  const onTransfers = kind === "transfers" || kind === "search";
+  document.getElementById("toolbar").hidden = !onTransfers;
+  document.getElementById("nav-transfers").className = onTransfers ? "on" : "";
+  document.getElementById("nav-chains").className = !kind ? "on" : "";
   try {
     const html = kind === "inbox" ? await inboxView()
       : kind === "message" ? await messageView(arg)
       : kind === "route" ? await routeView(arg)
       : kind === "chain" ? await chainView(arg)
-      : kind === "search" ? await searchView(arg)
-      : await overview();
+      : onTransfers ? await transfersPage(kind === "search" ? arg : "")
+      : await chainsPage();
     const open = view.querySelector("details[open]") !== null;
     view.innerHTML = html;
     if (open) view.querySelector("details")?.setAttribute("open", "");
@@ -429,13 +501,29 @@ document.getElementById("search").addEventListener("submit", (e) => {
 });
 document.getElementById("inbox-btn").addEventListener("click", () => { location.hash = "#/inbox"; });
 document.getElementById("view").addEventListener("click", (e) => {
+  const copy = e.target.closest("[data-copy]");
+  if (copy) { copyText(copy.dataset.copy, copy); return; }
   const chip = e.target.closest("[data-filter]");
-  if (chip) { filter = chip.dataset.filter; save("teeism.filter", filter); route(); return; }
+  if (chip) { filter = chip.dataset.filter; offset = 0; save("teeism.filter", filter); route(); return; }
+  const pg = e.target.closest("[data-page]");
+  if (pg && !pg.disabled) { offset = Math.max(0, offset + Number(pg.dataset.page) * PAGE); route(); return; }
   if (e.target.id === "toggle-resolved") { showResolved = !showResolved; route(); return; }
   if (e.target.id === "enable-alerts") { Notification.requestPermission().then(() => route()); return; }
   const row = e.target.closest("tr[data-href]");
   if (row && !e.target.closest("a")) location.hash = row.dataset.href;
 });
+async function copyText(text, button) {
+  try { await navigator.clipboard.writeText(text); }
+  catch {
+    // Served over plain http the clipboard API is refused; select the text instead.
+    const range = document.createRange();
+    range.selectNodeContents(button.previousElementSibling);
+    const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range);
+    try { document.execCommand("copy"); } catch {}
+  }
+  button.textContent = "Copied"; button.classList.add("done");
+  setTimeout(() => { button.textContent = "Copy"; button.classList.remove("done"); }, 1500);
+}
 window.addEventListener("hashchange", () => { window.scrollTo(0, 0); route(); });
 refresh();
 setInterval(refresh, POLL_MS);
