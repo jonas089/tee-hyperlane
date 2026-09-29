@@ -31,6 +31,7 @@ pub fn router(tracker: Arc<Tracker>) -> Router {
         .route("/api/v1/routes", get(routes))
         .route("/api/v1/routes/{name}", get(route))
         .route("/api/v1/chains", get(chains))
+        .route("/api/v1/wallets", get(wallets))
         .route("/api/v1/messages", get(messages))
         .route("/api/v1/messages/{id}", get(message))
         .route("/api/v1/search", get(search))
@@ -171,6 +172,29 @@ pub struct MessageView {
     pub failure: Option<Failure>,
     pub links: Links,
     pub notifications: Vec<Notification>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WalletView {
+    pub chain: String,
+    pub address: Option<String>,
+    pub symbol: String,
+    pub decimals: u32,
+    /// Base units, decimal.
+    pub balance: Option<String>,
+    /// The same, in whole tokens, rounded for display.
+    pub display: Option<String>,
+    /// The warning level, in whole tokens.
+    pub low_at: f64,
+    /// Whole tokens spent per day over the last week, when there is enough history to say.
+    pub spent_per_day: Option<f64>,
+    pub days_left: Option<f64>,
+    pub level: crate::wallets::Level,
+    pub problem: Option<String>,
+    pub checked_at: Option<u64>,
+    pub error: Option<String>,
+    pub explorer: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -358,6 +382,8 @@ fn route_view(
             Subject::Message => views
                 .iter()
                 .any(|v| v.record.id == n.subject_id && v.record.route == route.name),
+            // A gas wallet pays for delivering to its chain; a watch reads transfers from it.
+            Subject::Chain if n.key.starts_with("wallet-") => n.subject_id == route.to,
             Subject::Chain => n.subject_id == route.from,
             Subject::Monitor => true,
         })
@@ -600,6 +626,44 @@ async fn chains(State(tracker): State<Arc<Tracker>>) -> Json<Vec<ChainView>> {
     )
 }
 
+fn wallet_views(tracker: &Tracker) -> Vec<WalletView> {
+    let readings = tracker.lock().wallets.clone();
+    tracker
+        .wallets
+        .iter()
+        .map(|w| {
+            let r = readings.get(&w.chain).cloned().unwrap_or_default();
+            let (level, days_left, problem) = crate::wallets::judge(w, &r);
+            let balance = r.balance.as_ref().and_then(|b| b.parse::<u128>().ok());
+            WalletView {
+                chain: w.chain.clone(),
+                symbol: w.symbol.clone(),
+                decimals: w.decimals,
+                display: balance.map(|b| crate::wallets::show(b, w.decimals)),
+                low_at: w.low,
+                spent_per_day: r.spend_per_day().map(|s| s / 10f64.powi(w.decimals as i32)),
+                days_left,
+                level,
+                problem,
+                checked_at: r.checked_at,
+                error: r.error.clone(),
+                explorer: tracker.chain(&w.chain).and_then(|c| {
+                    let a = r.address.as_ref()?;
+                    c.explorer
+                        .as_ref()
+                        .map(|e| format!("{}/address/{a}", e.trim_end_matches('/')))
+                }),
+                address: r.address,
+                balance: r.balance,
+            }
+        })
+        .collect()
+}
+
+async fn wallets(State(tracker): State<Arc<Tracker>>) -> Json<Vec<WalletView>> {
+    Json(wallet_views(&tracker))
+}
+
 #[derive(Deserialize)]
 struct MessageQuery {
     status: Option<String>,
@@ -744,6 +808,27 @@ async fn metrics(State(tracker): State<Arc<Tracker>>) -> impl IntoResponse {
     for (route, ism) in tracker.lock().isms.iter() {
         if let Some(h) = ism.height {
             out.push_str(&format!("teeism_ism_height{{route=\"{route}\"}} {h}\n"));
+        }
+    }
+    out.push_str(
+        "# HELP teeism_wallet_balance The relayer's gas balance per chain, in whole tokens.\n",
+    );
+    out.push_str("# TYPE teeism_wallet_balance gauge\n");
+    out.push_str("# HELP teeism_wallet_days_left Days of gas left at the last week's spend.\n");
+    out.push_str("# TYPE teeism_wallet_days_left gauge\n");
+    for w in wallet_views(&tracker) {
+        if let Some(b) = w.balance.as_ref().and_then(|b| b.parse::<u128>().ok()) {
+            out.push_str(&format!(
+                "teeism_wallet_balance{{chain=\"{}\"}} {}\n",
+                w.chain,
+                crate::wallets::whole(b, w.decimals)
+            ));
+        }
+        if let Some(days) = w.days_left {
+            out.push_str(&format!(
+                "teeism_wallet_days_left{{chain=\"{}\"}} {days:.2}\n",
+                w.chain
+            ));
         }
     }
     out.push_str("# HELP teeism_last_sweep_seconds When the monitor last ran.\n");
@@ -941,6 +1026,26 @@ mod tests {
             .unwrap(),
         );
         check("Watch", serde_json::to_value(Watch::default()).unwrap());
+        check(
+            "Wallet",
+            serde_json::to_value(WalletView {
+                chain: "c".into(),
+                address: Some("a".into()),
+                symbol: "ETH".into(),
+                decimals: 18,
+                balance: Some("1".into()),
+                display: Some("0".into()),
+                low_at: 0.01,
+                spent_per_day: Some(0.1),
+                days_left: Some(3.0),
+                level: crate::wallets::Level::Low,
+                problem: Some("p".into()),
+                checked_at: Some(1),
+                error: None,
+                explorer: None,
+            })
+            .unwrap(),
+        );
         check(
             "MessagePage",
             serde_json::to_value(MessagePage {

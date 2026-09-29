@@ -246,7 +246,7 @@
     "/metrics": {
       "get": {
         "summary": "Prometheus metrics",
-        "description": "teeism_notifications_open{severity}, teeism_messages{route,status}, teeism_ism_height{route}, teeism_last_sweep_seconds.",
+        "description": "teeism_notifications_open{severity}, teeism_messages{route,status}, teeism_ism_height{route}, teeism_last_sweep_seconds, teeism_wallet_balance{chain}, teeism_wallet_days_left{chain}.",
         "responses": {
           "200": {
             "description": "Prometheus text format",
@@ -254,6 +254,26 @@
               "text/plain": {
                 "schema": {
                   "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/wallets": {
+      "get": {
+        "summary": "The relayer's gas wallets",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Wallet"
+                  }
                 }
               }
             }
@@ -479,7 +499,7 @@
           },
           "key": {
             "type": "string",
-            "description": "The condition; at most one open notification per key. Kinds: message-overdue, message-failed, route-failing, route-silent, route-staged, ism-unreadable, watch-failing, monitor-silent."
+            "description": "The condition; at most one open notification per key. Kinds: message-overdue, message-failed, route-failing, route-silent, route-staged, ism-unreadable, watch-failing, wallet-low, wallet-unreadable, monitor-silent."
           },
           "severity": {
             "type": "string",
@@ -1167,6 +1187,140 @@
             "items": {
               "$ref": "#/components/schemas/Notification"
             }
+          }
+        }
+      },
+      "Wallet": {
+        "type": "object",
+        "description": "The relayer's gas wallet on one destination chain, read every 5 minutes.",
+        "additionalProperties": false,
+        "required": [
+          "chain",
+          "symbol",
+          "decimals",
+          "lowAt",
+          "level"
+        ],
+        "properties": {
+          "chain": {
+            "type": "string"
+          },
+          "address": {
+            "anyOf": [
+              {
+                "type": "string",
+                "description": "The relayer's account on this chain."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "symbol": {
+            "type": "string",
+            "description": "Gas token."
+          },
+          "decimals": {
+            "type": "integer"
+          },
+          "balance": {
+            "anyOf": [
+              {
+                "type": "string",
+                "description": "Base units, decimal."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "display": {
+            "anyOf": [
+              {
+                "type": "string",
+                "description": "Whole tokens, rounded."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "lowAt": {
+            "type": "number",
+            "description": "Warning level, whole tokens."
+          },
+          "spentPerDay": {
+            "anyOf": [
+              {
+                "type": "number",
+                "description": "Whole tokens a day over the last week; null with under 6h of readings."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "daysLeft": {
+            "anyOf": [
+              {
+                "type": "number",
+                "description": "Balance over spentPerDay."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "level": {
+            "type": "string",
+            "description": "`low` below lowAt or under 7 days left; `critical` empty or under 2 days; `unknown` not read yet.",
+            "enum": [
+              "ok",
+              "low",
+              "critical",
+              "unknown"
+            ]
+          },
+          "problem": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "checkedAt": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "explorer": {
+            "anyOf": [
+              {
+                "type": "string",
+                "description": "Address page on the chain's explorer."
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         }
       }

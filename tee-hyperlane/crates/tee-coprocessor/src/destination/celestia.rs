@@ -8,7 +8,7 @@ use serde_json::Value;
 use tee_node::state::IsmState;
 use tracing::debug;
 
-use super::{run, Batch, Delivery, Destination, Outcome};
+use super::{run, Batch, Delivery, Destination, Outcome, Wallet};
 
 /// Celestia: `x/teeism` submit-attestation, with fresh Intel collateral carried in the
 /// transaction, then `hyperlane mailbox process` per message.
@@ -203,5 +203,31 @@ impl Destination for Celestia {
 
     async fn delivered(&self, id: &str) -> Result<bool> {
         self.is_delivered(id).await
+    }
+
+    async fn wallet(&self) -> Result<Wallet> {
+        let address = run(
+            &Self::appd(),
+            &[
+                "keys",
+                "show",
+                &self.key,
+                "-a",
+                "--home",
+                &self.home,
+                "--keyring-backend",
+                "test",
+            ],
+        )
+        .await?;
+        let reply = self.query(&["bank", "balance", &address, "utia"]).await?;
+        let amount = reply["balance"]["amount"]
+            .as_str()
+            .context("no utia balance in the reply")?
+            .parse()?;
+        Ok(Wallet {
+            address,
+            balance: amount,
+        })
     }
 }

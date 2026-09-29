@@ -19,6 +19,7 @@ pub mod origin;
 pub mod route;
 pub mod tracker;
 pub mod v1;
+pub mod wallets;
 
 /// A run of failures of one thing, so the log says it failed once, then again only every
 /// `STREAK_REPEAT` or when the error changes, then that it recovered: one line per event

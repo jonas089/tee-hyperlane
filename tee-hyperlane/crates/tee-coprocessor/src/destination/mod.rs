@@ -32,6 +32,15 @@ pub trait Destination: Send + Sync {
     async fn deliver(&self, message: &[u8]) -> Result<Outcome>;
     /// Whether the mailbox has processed message `id` (hex, no prefix), by anyone.
     async fn delivered(&self, id: &str) -> Result<bool>;
+    /// The relayer's own account on this chain and its balance of the gas token, in base units.
+    async fn wallet(&self) -> Result<Wallet>;
+}
+
+/// The account that pays this destination's gas.
+#[derive(Debug, Clone)]
+pub struct Wallet {
+    pub address: String,
+    pub balance: u128,
 }
 
 /// What became of one message of a batch.

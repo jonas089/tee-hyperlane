@@ -57,7 +57,8 @@ h2 { font-size: 15px; margin: 22px 0 10px; color: var(--muted); text-transform: 
 .s-degraded, .s-warning, .s-pending, .s-verified { background: var(--info-bg); color: var(--info); }
 .s-degraded, .s-warning { background: var(--warn-bg); color: var(--warn); }
 .s-down, .s-critical, .s-failed, .s-overdue { background: var(--bad-bg); color: var(--bad); }
-.s-resolved { background: var(--line); color: var(--muted); }
+.s-resolved, .s-unknown { background: var(--line); color: var(--muted); }
+.s-low { background: var(--warn-bg); color: var(--warn); }
 table { width: 100%; border-collapse: collapse; }
 th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
 th { font-size: 12px; color: var(--muted); font-weight: 600; }
@@ -252,9 +253,30 @@ function routeCard(r) {
     </dl></a>`;
 }
 
+function days(d) {
+  if (d == null) return "not enough history yet";
+  if (d > 365) return "over a year at the current spend";
+  return `about ${d < 10 ? d.toFixed(1) : Math.round(d)} days at the current spend`;
+}
+
+function walletCard(w) {
+  const bal = w.display != null ? `${esc(w.display)} ${esc(w.symbol)}` : `<span class="muted">not read yet</span>`;
+  return `<div class="panel card">
+    <div class="top"><span class="name">${esc(w.chain)}</span>${pill(w.level)}</div>
+    <dl class="kv">
+      <dt>Balance</dt><dd><b>${bal}</b></dd>
+      <dt>Lasts</dt><dd>${esc(days(w.daysLeft))}</dd>
+      <dt>Spend</dt><dd>${w.spentPerDay != null ? `${esc(w.spentPerDay.toPrecision(3))} ${esc(w.symbol)} a day` : "unknown yet"}</dd>
+      <dt>Warns below</dt><dd>${esc(w.lowAt)} ${esc(w.symbol)}</dd>
+      <dt>Address</dt><dd class="mono">${w.address ? (w.explorer ? `<a href="${esc(w.explorer)}" target="_blank" rel="noopener">${esc(short(w.address))}</a>` : `<span title="${esc(w.address)}">${esc(short(w.address))}</span>`) : ""}</dd>
+      ${w.error ? `<dt>Error</dt><dd style="color:var(--bad)">${esc(w.error)}</dd>` : ""}
+      ${w.problem ? `<dt>Top up</dt><dd style="color:var(--bad)">${esc(w.problem)}</dd>` : ""}
+    </dl></div>`;
+}
+
 let filter = store("teeism.filter", "");
 async function overview() {
-  const [routes, page] = await Promise.all([get("/routes"), get(`/messages?limit=50${filter ? "&status=" + filter : ""}`)]);
+  const [routes, page, wallets] = await Promise.all([get("/routes"), get(`/messages?limit=50${filter ? "&status=" + filter : ""}`), get("/wallets")]);
   const open = (cache.inbox || []).filter((n) => !n.resolvedAt);
   const h = cache.health;
   const summary = !h ? "" : h.status === "ok"
@@ -265,6 +287,7 @@ async function overview() {
   return `${summary}
     ${open.length ? `<h2>Open problems</h2>${inboxList(open.slice(0, 5), "")}${open.length > 5 ? `<p><a href="#/inbox">All ${open.length} open notifications</a></p>` : ""}` : ""}
     <h2>Routes</h2><div class="grid">${routes.map(routeCard).join("")}</div>
+    <h2>Relayer gas</h2><div class="grid">${wallets.map(walletCard).join("")}</div>
     <h2>Transfers <span class="muted" style="text-transform:none">(${page.total})</span></h2>
     <div class="chips">${chips}</div>${messageRows(page.messages)}`;
 }
@@ -353,8 +376,9 @@ async function routeView(name) {
 }
 
 async function chainView(name) {
-  const chains = await get("/chains");
+  const [chains, wallets] = await Promise.all([get("/chains"), get("/wallets")]);
   const c = chains.find((x) => x.name === name);
+  const wallet = wallets.find((w) => w.chain === name);
   if (!c) return `<h1>No chain ${esc(name)}</h1>`;
   const w = c.watch;
   return `<h1>${esc(c.name)}</h1><div class="panel pad"><dl class="kv">
@@ -363,7 +387,8 @@ async function chainView(name) {
     ${w ? `<dt>Scanned to</dt><dd>${esc(w.cursor ?? "not started")} of ${esc(w.tip ?? "?")}</dd>
       <dt>Last good read</dt><dd>${when(w.lastOkAt)}</dd>
       ${w.error ? `<dt>Error</dt><dd style="color:var(--bad)">${esc(w.error)} (since ${when(w.failingSince)})</dd>` : ""}` : "<dt>Watched</dt><dd>no, not an origin</dd>"}
-  </dl></div>`;
+  </dl></div>
+  ${wallet ? `<h2>Relayer gas</h2><div class="grid">${walletCard(wallet)}</div>` : ""}`;
 }
 
 async function searchView(q) {

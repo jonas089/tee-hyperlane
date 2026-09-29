@@ -73,6 +73,10 @@ pub struct Route {
 fn default_tick() -> u64 {
     60
 }
+/// Chain fields only the tracker and the explorer read, removed before a chain's own `Config`
+/// sees its table: `explorer` for links, and the gas wallet's token and warning level.
+pub const REPORTING_KEYS: &[&str] = &["explorer", "gas_symbol", "gas_decimals", "low_balance"];
+
 fn default_track() -> u64 {
     15
 }
@@ -116,7 +120,9 @@ impl Config {
             .clone();
         // Read by the tracker and the explorer, never by the chain's own `Config`.
         table.remove("kind");
-        table.remove("explorer");
+        for key in crate::config::REPORTING_KEYS {
+            table.remove(*key);
+        }
         table.try_into().with_context(|| format!("chain `{name}`"))
     }
 
@@ -169,7 +175,9 @@ impl Config {
             .get(name)
             .with_context(|| format!("no chain `{name}` in the config"))?;
         let mut table = table.clone();
-        table.remove("explorer");
+        for key in crate::config::REPORTING_KEYS {
+            table.remove(*key);
+        }
         let endpoint: Endpoint = table
             .try_into()
             .with_context(|| format!("chain `{name}`"))?;
