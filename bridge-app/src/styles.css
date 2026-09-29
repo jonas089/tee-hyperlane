@@ -163,11 +163,34 @@ body {
   margin-bottom: 0.4rem;
 }
 
+.field-top { align-items: center; }
+
+.panel-label { font-weight: 500; }
+
 .field-row {
   display: flex;
   align-items: center;
   gap: 0.75rem;
 }
+
+/* Balance and Max, under the amount, as on a swap form. */
+.field-bottom {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  min-height: 1.6rem;
+  margin-top: 0.3rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+/* The chain pill sits in the panel's header; the token pill beside the amount. */
+.field-top .chain-select { font-size: 0.85rem; padding: 0.35rem 1.9rem 0.35rem 0.8rem; background-color: var(--surface); }
+.field-row .token-select { background-color: var(--surface); font-weight: 600; }
+
+/* What arrives mirrors what is sent: the fee is paid separately, in the origin's gas token. */
+.amount.received { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.amount.received.empty { color: var(--muted); }
 
 .amount {
   flex: 1;

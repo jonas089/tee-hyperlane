@@ -131,6 +131,26 @@ export default function App() {
   const source = CHAINS[from];
   const destination = CHAINS[to];
 
+  // Every route has Celestia on one side, so choosing a chain on one side decides the other:
+  // any other chain pairs with Celestia, and Celestia pairs with whichever chain was already
+  // in play. Picking the chain already on the other side swaps the two.
+  const pickFrom = (chain: ChainId) => {
+    if (chain === "celestia") {
+      setOutbound(true);
+    } else {
+      setCounterparty(chain);
+      setOutbound(false);
+    }
+  };
+  const pickTo = (chain: ChainId) => {
+    if (chain === "celestia") {
+      setOutbound(false);
+    } else {
+      setCounterparty(chain);
+      setOutbound(true);
+    }
+  };
+
   const accountFor = useCallback(
     (chain: ChainId) => (CHAINS[chain].kind === "evm" ? evm : cosmos),
     [evm, cosmos],
@@ -394,25 +414,12 @@ export default function App() {
           <section className="card">
             <div className="card-head">
               <h1>Bridge</h1>
-              <select
-                className="token-select"
-                value={token}
-                onChange={(e) => setToken(e.target.value as TokenId)}
-              >
-                {TOKENS.map((t) => (
-                  <option key={t} value={t}>{t}</option>
-                ))}
-              </select>
             </div>
 
             <div className="field">
               <div className="field-top">
-                <span>From {source.name}</span>
-                <span className="balance">
-                  {sourceBalance === undefined
-                    ? "-"
-                    : `Balance ${formatAmount(sourceBalance, token)}`}
-                </span>
+                <span className="panel-label">From</span>
+                <ChainPicker value={from} onChange={pickFrom} />
               </div>
               <div className="field-row">
                 <input
@@ -422,64 +429,62 @@ export default function App() {
                   inputMode="decimal"
                   onChange={(e) => setAmount(e.target.value)}
                 />
-                <span className="token-pill">{token}</span>
-              </div>
-              {sourceBalance !== undefined && sourceBalance > 0n && (
-                <button
-                  className="max"
-                  onClick={() => setAmount(formatAmount(sourceBalance, token))}
+                <select
+                  className="token-select"
+                  value={token}
+                  onChange={(e) => setToken(e.target.value as TokenId)}
+                  aria-label="Token"
                 >
-                  Max
-                </button>
-              )}
+                  {TOKENS.map((t) => (
+                    <option key={t} value={t}>{t}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="field-bottom">
+                <span>
+                  {sourceBalance === undefined
+                    ? `Connect ${walletFor(source)} to see your balance`
+                    : `Balance ${formatAmount(sourceBalance, token)} ${token}`}
+                </span>
+                {sourceBalance !== undefined && sourceBalance > 0n && (
+                  <button
+                    className="max"
+                    onClick={() => setAmount(formatAmount(sourceBalance, token))}
+                  >
+                    Max
+                  </button>
+                )}
+              </div>
             </div>
 
-            <button className="flip" onClick={() => setOutbound((v) => !v)} title="Swap direction">
+            <button
+              className="flip"
+              onClick={() => setOutbound((v) => !v)}
+              title="Swap direction"
+              aria-label="Swap direction"
+            >
               ↓
             </button>
 
             <div className="field">
               <div className="field-top">
-                <span>To</span>
-                <span className="balance">
-                  {destinationBalance === undefined
-                    ? "-"
-                    : `Balance ${formatAmount(destinationBalance, token)}`}
-                </span>
+                <span className="panel-label">To</span>
+                <ChainPicker value={to} onChange={pickTo} />
               </div>
               <div className="field-row">
-                {to === "celestia" ? (
-                  <span className="chain-fixed">{CHAINS.celestia.name}</span>
-                ) : (
-                  <select
-                    className="chain-select"
-                    value={counterparty}
-                    onChange={(e) => setCounterparty(e.target.value as ChainId)}
-                  >
-                    {COUNTERPARTIES.map((id) => (
-                      <option key={id} value={id}>{CHAINS[id].name}</option>
-                    ))}
-                  </select>
-                )}
+                <span className={amount ? "amount received" : "amount received empty"}>
+                  {amount || "0"}
+                </span>
+                <span className="token-pill">{token}</span>
+              </div>
+              <div className="field-bottom">
+                <span>
+                  {destinationBalance === undefined
+                    ? `Connect ${walletFor(destination)} to see your balance`
+                    : `Balance ${formatAmount(destinationBalance, token)} ${token}`}
+                </span>
               </div>
             </div>
-
-            {from !== "celestia" && (
-              <div className="field">
-                <div className="field-top"><span>Sending from</span></div>
-                <div className="field-row">
-                  <select
-                    className="chain-select"
-                    value={counterparty}
-                    onChange={(e) => setCounterparty(e.target.value as ChainId)}
-                  >
-                    {COUNTERPARTIES.map((id) => (
-                      <option key={id} value={id}>{CHAINS[id].name}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-            )}
 
             <label className="recipient">
               Recipient on {destination.name}
@@ -560,6 +565,25 @@ export default function App() {
   );
 }
 
+
+const ALL_CHAINS: ChainId[] = ["celestia", ...COUNTERPARTIES];
+
+/// A chain pill, as in a swap form's token picker: every chain on both sides, and the form
+/// works out the other side.
+function ChainPicker({ value, onChange }: { value: ChainId; onChange: (c: ChainId) => void }) {
+  return (
+    <select
+      className="chain-select"
+      value={value}
+      onChange={(e) => onChange(e.target.value as ChainId)}
+      aria-label="Chain"
+    >
+      {ALL_CHAINS.map((id) => (
+        <option key={id} value={id}>{CHAINS[id].name}</option>
+      ))}
+    </select>
+  );
+}
 
 function TransferRow({
   transfer,
