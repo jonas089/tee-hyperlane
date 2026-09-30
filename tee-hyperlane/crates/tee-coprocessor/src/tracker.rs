@@ -540,10 +540,19 @@ impl Tracker {
         });
         let tracker = Arc::clone(self);
         tasks.spawn(async move {
+            // Slack runs in its own task, fed changes as they happen, so a slow or refusing
+            // Slack can never hold up the sweep.
+            let (to_slack, from_monitor) = tokio::sync::mpsc::unbounded_channel();
+            if let Some(slack) = crate::slack::Slack::from_env() {
+                let tracker = Arc::clone(&tracker);
+                tokio::spawn(crate::slack::run(slack, tracker, from_monitor));
+            }
             // The first status line waits one interval, so the watchers have read every origin.
             let mut last_summary = now();
             loop {
-                crate::monitor::sweep(&tracker);
+                for change in crate::monitor::sweep(&tracker) {
+                    let _ = to_slack.send(change);
+                }
                 if now().saturating_sub(last_summary) >= crate::monitor::SUMMARY_EVERY {
                     crate::monitor::log_summary(&tracker);
                     last_summary = now();

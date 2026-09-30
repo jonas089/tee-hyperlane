@@ -155,6 +155,12 @@ cast call 0x2fF5cC82dBf333Ea30D8ee462178ab1707315355 "getAnchorRoot()(bytes32,ui
 
 To decode a four-letter code: `cast call <ism> "describeQuoteError(bytes)(string)" $(cast from-utf8 TCBR)`.
 
+## Slack
+
+Set `SLACK_BOT_TOKEN` and `SLACK_CHANNEL` (and `EXPLORER_URL` for links) in `devnet/.env`, then
+restart the relayer. It posts on start, on every problem opening and resolving, and a status
+every 30 minutes. **No status post for over 30 minutes means the relayer is down.**
+
 ## Check what runs
 
 ```sh

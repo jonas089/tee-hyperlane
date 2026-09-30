@@ -17,6 +17,7 @@ pub mod identity;
 pub mod monitor;
 pub mod origin;
 pub mod route;
+pub mod slack;
 pub mod tracker;
 pub mod v1;
 pub mod wallets;
