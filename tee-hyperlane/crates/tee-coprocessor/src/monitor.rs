@@ -401,8 +401,16 @@ fn conditions(tracker: &Tracker, at: u64) -> Vec<Condition> {
     out
 }
 
-/// Bring the inbox up to date with the conditions that hold now.
-pub fn sweep(tracker: &Tracker) {
+/// A notification that opened or resolved in one sweep, for whoever relays them (Slack).
+#[derive(Debug, Clone)]
+pub enum Change {
+    Opened(Notification),
+    Resolved(Notification),
+}
+
+/// Bring the inbox up to date with the conditions that hold now, and say what changed.
+pub fn sweep(tracker: &Tracker) -> Vec<Change> {
+    let mut changes = Vec::new();
     let at = now();
     let current = conditions(tracker, at);
     let mut state = tracker.lock();
@@ -423,7 +431,7 @@ pub fn sweep(tracker: &Tracker) {
                     Severity::Critical => tracing::error!("PROBLEM {}: {}", c.title, c.detail),
                     Severity::Warning => tracing::warn!("problem {}: {}", c.title, c.detail),
                 }
-                inbox.push(Notification {
+                let opened = Notification {
                     id: format!("{}@{at}", c.key),
                     key: c.key.clone(),
                     severity: c.severity,
@@ -434,7 +442,9 @@ pub fn sweep(tracker: &Tracker) {
                     opened_at: at,
                     updated_at: at,
                     resolved_at: None,
-                });
+                };
+                changes.push(Change::Opened(opened.clone()));
+                inbox.push(opened);
             }
         }
     }
@@ -446,6 +456,7 @@ pub fn sweep(tracker: &Tracker) {
                 n.title
             );
             n.resolved_at = Some(at);
+            changes.push(Change::Resolved(n.clone()));
         }
     }
     inbox.retain(|n| {
@@ -453,45 +464,90 @@ pub fn sweep(tracker: &Tracker) {
             .is_none_or(|r| at.saturating_sub(r) < KEEP_RESOLVED)
     });
     state.last_sweep_at = Some(at);
+    changes
 }
 
 /// How often the log gets a status line, so a quiet log still says the relayer is alive.
 pub const SUMMARY_EVERY: u64 = 5 * 60;
 
-/// One line on how everything is: all good, or which problems are open.
-pub fn log_summary(tracker: &Tracker) {
+/// How everything is, right now: what the status line and the Slack status post both say.
+pub struct Summary {
+    pub routes: usize,
+    pub in_flight: usize,
+    pub delivered_last_hour: usize,
+    /// Open notifications, most severe first.
+    pub open: Vec<Notification>,
+    /// The gas wallet closest to empty, as (chain, days left), when known.
+    pub lowest_gas: Option<(String, f64)>,
+}
+
+impl Summary {
+    pub fn critical(&self) -> bool {
+        self.open.iter().any(|n| n.severity == Severity::Critical)
+    }
+}
+
+pub fn summary(tracker: &Tracker) -> Summary {
     let at = now();
     let state = tracker.lock();
-    let open: Vec<&Notification> = state
+    let mut open: Vec<Notification> = state
         .inbox
         .iter()
         .filter(|n| n.resolved_at.is_none())
+        .cloned()
         .collect();
+    open.sort_by(|a, b| {
+        b.severity
+            .cmp(&a.severity)
+            .then(a.opened_at.cmp(&b.opened_at))
+    });
     let mut in_flight = 0;
-    let mut delivered_recently = 0;
+    let mut delivered_last_hour = 0;
     for m in state.messages.values() {
         match &m.delivery {
             None => in_flight += 1,
-            Some(d) if at.saturating_sub(d.at) < 3600 => delivered_recently += 1,
+            Some(d) if at.saturating_sub(d.at) < 3600 => delivered_last_hour += 1,
             Some(_) => {}
         }
     }
-    let routes = tracker.routes.len();
-    if open.is_empty() {
+    let lowest_gas = tracker
+        .wallets
+        .iter()
+        .filter_map(|w| {
+            let r = state.wallets.get(&w.chain)?;
+            let (_, days, _) = crate::wallets::judge(w, r);
+            Some((w.chain.clone(), days?))
+        })
+        .min_by(|a, b| a.1.total_cmp(&b.1));
+    Summary {
+        routes: tracker.routes.len(),
+        in_flight,
+        delivered_last_hour,
+        open,
+        lowest_gas,
+    }
+}
+
+/// One line on how everything is: all good, or which problems are open.
+pub fn log_summary(tracker: &Tracker) {
+    let s = summary(tracker);
+    let (in_flight, delivered) = (s.in_flight, s.delivered_last_hour);
+    if s.open.is_empty() {
         tracing::info!(
-            "all good: {routes} routes healthy, {in_flight} transfer{} in flight, {delivered_recently} delivered in the last hour",
+            "all good: {} routes healthy, {in_flight} transfer{} in flight, {delivered} delivered in the last hour",
+            s.routes,
             if in_flight == 1 { "" } else { "s" }
         );
         return;
     }
-    let titles: Vec<&str> = open.iter().map(|n| n.title.as_str()).collect();
+    let titles: Vec<&str> = s.open.iter().map(|n| n.title.as_str()).collect();
     let line = format!(
-        "{} problem{} open: {}; {in_flight} in flight, {delivered_recently} delivered in the last hour; details at /api/v1/inbox",
-        open.len(),
-        if open.len() == 1 { "" } else { "s" },
+        "{} problem{} open: {}; {in_flight} in flight, {delivered} delivered in the last hour; details at /api/v1/inbox",
+        s.open.len(),
+        if s.open.len() == 1 { "" } else { "s" },
         titles.join("; ")
     );
-    if open.iter().any(|n| n.severity == Severity::Critical) {
+    if s.critical() {
         tracing::error!("{line}");
     } else {
         tracing::warn!("{line}");
