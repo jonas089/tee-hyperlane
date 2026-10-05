@@ -1,8 +1,7 @@
-//! Bech32 (BIP-173), for showing and searching Celestia addresses.
+//! Bech32 encoding for Celestia addresses.
 //!
-//! Written out rather than taken as a crate: a new dependency changes `Cargo.lock`, which is in
-//! every enclave image's source, so it would move all three image digests for code no enclave
-//! runs.
+//! Hand-written because adding a crate would change `Cargo.lock`, which is part of every
+//! enclave image's source.
 
 const CHARSET: &[u8; 32] = b"qpzry9x8gf2tvdw0s3jn54khce6mua7l";
 const GENERATOR: [u32; 5] = [0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3];

@@ -1,17 +1,9 @@
-//! The tracker: every transfer on every route, from dispatch to delivery.
+//! Tracks transfers on our routes from dispatch to delivery.
 //!
-//! It watches each origin on its own reads, separate from the route loop, so a route that is
-//! stuck or dead cannot also hide the transfers it is failing to deliver. One task per origin
-//! chain, every `track_secs`:
-//!
-//! 1. scan the origin's new blocks for `Dispatch` to one of our routers, and record each one
-//! 2. read the ISM of every route from that origin, and mark the transfers it now covers
-//! 3. mark the covered ones the destination mailbox has processed
-//!
-//! Only public reads, and on EVM chains only the log endpoint, which is the free one. Nothing
-//! here is trusted by the bridge: the tracker only reports, it never relays.
-//!
-//! What a transfer's record means, and when it counts as stuck, is `monitor.rs`.
+//! One task per origin chain scans for `Dispatch` events to our routers, then reads each
+//! route's ISM height and the destination mailbox to mark transfers verified and delivered.
+//! It reads independently of the route loop and never relays. `monitor.rs` decides when a
+//! transfer counts as stuck.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;

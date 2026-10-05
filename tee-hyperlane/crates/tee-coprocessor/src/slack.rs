@@ -1,10 +1,7 @@
-//! Posting the monitor to a Slack channel: every problem as it opens and as it resolves, and a
-//! status post every `SLACK_EVERY_SECS` (30 minutes by default) whether or not anything is
-//! wrong, so a quiet channel means the relayer has stopped, not that all is well.
+//! Posts problems, resolutions and a periodic status to Slack.
 //!
-//! Off unless `SLACK_BOT_TOKEN` and `SLACK_CHANNEL` are set, in `devnet/.env` on the host, which
-//! the service loads. The token is never written anywhere else. `EXPLORER_URL`, when set, turns
-//! each problem into a link to its page.
+//! Enabled by `SLACK_BOT_TOKEN` and `SLACK_CHANNEL`. `SLACK_EVERY_SECS` sets the status interval
+//! (default 30 minutes) and `EXPLORER_URL` adds links to the explorer.
 
 use std::time::Duration;
 

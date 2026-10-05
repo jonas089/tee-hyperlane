@@ -1,12 +1,7 @@
-//! `/api/v1`: the explorer's API, and the contract anything monitoring the bridge builds on.
+//! The `/api/v1` handlers and response types.
 //!
-//! Every response type is here, and `ui/openapi.json` describes each one. A test holds the two
-//! to each other, so a field cannot change or disappear without the spec saying so. Times are
-//! unix seconds throughout; message ids and 32-byte addresses are 0x-prefixed lowercase hex.
-//!
-//! Read-only, and there is nothing to authenticate: every value is public chain data or a
-//! report about it. In particular a notification cannot be dismissed here, only resolved by its
-//! problem going away, so no caller can hide a problem from anyone else.
+//! `ui/openapi.json` describes every response, and a test checks that the two match. Times are
+//! unix seconds; ids and 32-byte addresses are 0x-prefixed lowercase hex. Read-only.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
