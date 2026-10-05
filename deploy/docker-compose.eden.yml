@@ -10,7 +10,7 @@
 # measurement. Written by devnet/scripts/25-images.sh.
 services:
   eden:
-    image: ghcr.io/jonas089/tee-node@sha256:0000000000000000000000000000000000000000000000000000000000000000
+    image: ghcr.io/jonas089/tee-node@sha256:f6a3a0f1219302b9384771ce3b4b6d252e438fb27b26238b0e31a4a2b81e9dfd
     ports:
       - "8084:8080"
     volumes:

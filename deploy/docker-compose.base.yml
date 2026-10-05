@@ -10,7 +10,7 @@
 # measurement. Written by devnet/scripts/25-images.sh.
 services:
   base:
-    image: ghcr.io/jonas089/tee-node@sha256:0000000000000000000000000000000000000000000000000000000000000000
+    image: ghcr.io/jonas089/tee-node@sha256:7962957b708ad231dafb27cb558e39a1601a82223386a2f5ae3506ea8f5e4472
     ports:
       - "8082:8080"
     volumes:

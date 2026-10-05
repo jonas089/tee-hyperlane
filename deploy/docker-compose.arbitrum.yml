@@ -10,7 +10,7 @@
 # measurement. Written by devnet/scripts/25-images.sh.
 services:
   arbitrum:
-    image: ghcr.io/jonas089/tee-node@sha256:0000000000000000000000000000000000000000000000000000000000000000
+    image: ghcr.io/jonas089/tee-node@sha256:a0356a9ac7196d8df11cdfeca9df58b63b52545461cf918577cd55a7fb4fe963
     ports:
       - "8083:8080"
     volumes:

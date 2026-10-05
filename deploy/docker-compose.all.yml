@@ -6,7 +6,7 @@
 # deployed alone (`30-enclave-up.sh --<chain>`) measures only its own file instead.
 services:
   celestia:
-    image: ghcr.io/jonas089/tee-node@sha256:0000000000000000000000000000000000000000000000000000000000000000
+    image: ghcr.io/jonas089/tee-node@sha256:e8dfcc5014f5cdb3890194b498a88e9b57003f4616ba69fdaa8ae5c2d936f89e
     ports:
       - "8080:8080"
     volumes:
@@ -16,7 +16,7 @@ services:
     environment:
       - RUST_LOG=info
   ethereum:
-    image: ghcr.io/jonas089/tee-node@sha256:0000000000000000000000000000000000000000000000000000000000000000
+    image: ghcr.io/jonas089/tee-node@sha256:3b42a1e645f92c934b8ca2807e5d21e088247ae03df772c16ae9ce1f619071a0
     ports:
       - "8081:8080"
     volumes:
@@ -26,7 +26,7 @@ services:
     environment:
       - RUST_LOG=info
   base:
-    image: ghcr.io/jonas089/tee-node@sha256:0000000000000000000000000000000000000000000000000000000000000000
+    image: ghcr.io/jonas089/tee-node@sha256:7962957b708ad231dafb27cb558e39a1601a82223386a2f5ae3506ea8f5e4472
     ports:
       - "8082:8080"
     volumes:
@@ -36,7 +36,7 @@ services:
     environment:
       - RUST_LOG=info
   arbitrum:
-    image: ghcr.io/jonas089/tee-node@sha256:0000000000000000000000000000000000000000000000000000000000000000
+    image: ghcr.io/jonas089/tee-node@sha256:a0356a9ac7196d8df11cdfeca9df58b63b52545461cf918577cd55a7fb4fe963
     ports:
       - "8083:8080"
     volumes:
@@ -46,7 +46,7 @@ services:
     environment:
       - RUST_LOG=info
   eden:
-    image: ghcr.io/jonas089/tee-node@sha256:0000000000000000000000000000000000000000000000000000000000000000
+    image: ghcr.io/jonas089/tee-node@sha256:f6a3a0f1219302b9384771ce3b4b6d252e438fb27b26238b0e31a4a2b81e9dfd
     ports:
       - "8084:8080"
     volumes:
