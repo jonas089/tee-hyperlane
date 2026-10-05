@@ -22,7 +22,6 @@ static GOSSIP: OnceLock<Arc<Recent<SignedHead>>> = OnceLock::new();
 pub struct Base {
     chain: Sequenced,
     port: u16,
-    peers: Vec<libp2p::Multiaddr>,
 }
 
 impl Base {
@@ -36,21 +35,13 @@ impl Base {
         Ok(Self {
             chain: Sequenced::new(&BASE, TREE_SLOT, &config),
             port: config.p2p_port,
-            peers: config
-                .p2p_peers
-                .iter()
-                .map(|p| {
-                    p.parse()
-                        .map_err(|e| anyhow::anyhow!("p2p peer {p} is not a multiaddr: {e}"))
-                })
-                .collect::<Result<_>>()?,
         })
     }
 
     /// The listener's newest blocks, starting it on first use: that is inside the runtime,
     /// which building the config is not.
     fn recent(&self) -> &Recent<SignedHead> {
-        GOSSIP.get_or_init(|| gossip::start(self.port, self.peers.clone()))
+        GOSSIP.get_or_init(|| gossip::start(self.port))
     }
 }
 

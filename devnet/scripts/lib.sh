@@ -390,7 +390,6 @@ kind = "base"
 domain = ${BASE_SEPOLIA_DOMAIN}
 rpc = "${base_archive:-https://sepolia.base.org}"
 p2p_port = ${BASE_P2P_PORT:-9222}
-p2p_peers = [$(printf '%s' "${BASE_P2P_PEERS:-}" | tr ',' '\n' | sed '/^$/d; s/.*/"&"/' | paste -sd, -)]
 logs_rpc = "${BASE_RPC:-https://sepolia.base.org}"
 send_rpc = "${BASE_RPC:-https://sepolia.base.org}"
 mailbox = "${BASE_MAILBOX:-0x6966b0E55883d49BFB24539356a2f8A673E02039}"

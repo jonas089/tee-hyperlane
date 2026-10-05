@@ -33,10 +33,6 @@ pub struct Config {
     /// dialled out; unset picks one.
     #[serde(default)]
     pub p2p_port: u16,
-    /// Base: nodes to always dial, as `/ip4/<ip>/tcp/<port>/p2p/<peer id>`. For nodes known to
-    /// keep a slot for us; discovery finds the rest.
-    #[serde(default)]
-    pub p2p_peers: Vec<String>,
     /// Arbitrum: the sequencer feed.
     pub feed: Option<String>,
 }

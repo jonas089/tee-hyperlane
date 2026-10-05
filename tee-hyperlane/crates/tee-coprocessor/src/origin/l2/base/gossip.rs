@@ -51,12 +51,12 @@ const REDIAL_AFTER: Duration = Duration::from_secs(60);
 const LOOKUPS: usize = 4;
 
 /// Start the listener in the background, and return where its blocks land.
-pub fn start(port: u16, peers: Vec<Multiaddr>) -> Arc<Recent<SignedHead>> {
+pub fn start(port: u16) -> Arc<Recent<SignedHead>> {
     let recent = Arc::new(Recent::default());
     let out = recent.clone();
     tokio::spawn(async move {
         loop {
-            if let Err(e) = run(port, &peers, &out).await {
+            if let Err(e) = run(port, &out).await {
                 warn!(error = %format!("{e:#}"), "base gossip listener stopped; restarting");
             }
             tokio::time::sleep(Duration::from_secs(10)).await;
@@ -65,7 +65,7 @@ pub fn start(port: u16, peers: Vec<Multiaddr>) -> Arc<Recent<SignedHead>> {
     recent
 }
 
-async fn run(port: u16, peers: &[Multiaddr], recent: &Recent<SignedHead>) -> anyhow::Result<()> {
+async fn run(port: u16, recent: &Recent<SignedHead>) -> anyhow::Result<()> {
     let keypair = identity::secp256k1::Keypair::generate();
     let mut secret = keypair.secret().to_bytes();
     let enr_key = CombinedKey::secp256k1_from_bytes(&mut secret)
@@ -125,19 +125,9 @@ async fn run(port: u16, peers: &[Multiaddr], recent: &Recent<SignedHead>) -> any
     loop {
         tokio::select! {
             _ = discover.tick() => {
-                for addr in peers {
-                    let Some(libp2p::multiaddr::Protocol::P2p(peer)) = addr.iter().last() else {
-                        continue;
-                    };
-                    let due = dialled.get(&peer).is_none_or(|t| t.elapsed() > DISCOVER_EVERY * 2);
-                    if due && !swarm.is_connected(&peer) {
-                        dialled.insert(peer, Instant::now());
-                        let _ = swarm.dial(addr.clone());
-                    }
-                }
-                let connected = swarm.connected_peers().count();
+                let peers = swarm.connected_peers().count();
                 lookups.retain(|l| !l.is_finished());
-                if connected < TARGET_PEERS {
+                if peers < TARGET_PEERS {
                     while lookups.len() < LOOKUPS {
                         let query = discovery.find_node(NodeId::random());
                         lookups.push(tokio::spawn(async move {
@@ -145,7 +135,7 @@ async fn run(port: u16, peers: &[Multiaddr], recent: &Recent<SignedHead>) -> any
                         }));
                     }
                 }
-                debug!(peers = connected, received, seen, "base gossip");
+                debug!(peers, received, seen, "base gossip");
             }
             Some(event) = found.recv() => {
                 if let discv5::Event::Discovered(enr) = event {
@@ -154,7 +144,7 @@ async fn run(port: u16, peers: &[Multiaddr], recent: &Recent<SignedHead>) -> any
                         let due = dialled.get(&peer).is_none_or(|t| t.elapsed() > REDIAL_AFTER);
                         if due && swarm.connected_peers().count() < TARGET_PEERS && !swarm.is_connected(&peer) {
                             dialled.insert(peer, Instant::now());
-                            debug!(%peer, %addr, "dialling a base node");
+                            debug!(%peer, "dialling a base node");
                             let _ = swarm.dial(addr);
                         }
                     }
@@ -332,8 +322,6 @@ mod tests {
 /// BASE_P2P_PORT=9222 RUST_LOG=info,tee_coprocessor=debug \
 ///   cargo test -p tee-coprocessor --lib base_gossip_live -- --ignored --nocapture
 /// ```
-///
-/// `BASE_P2P_PEERS` takes comma-separated multiaddrs to dial first, as `p2p_peers` does.
 #[cfg(test)]
 mod live {
     #[tokio::test]
@@ -346,12 +334,7 @@ mod live {
             .ok()
             .and_then(|p| p.parse().ok())
             .unwrap_or(0);
-        let peers = std::env::var("BASE_P2P_PEERS")
-            .unwrap_or_default()
-            .split(',')
-            .filter_map(|p| p.trim().parse().ok())
-            .collect();
-        let head = super::start(port, peers)
+        let head = super::start(port)
             .first(std::time::Duration::from_secs(30 * 60))
             .await
             .expect("no signed Base block within 30 minutes");
