@@ -1,3 +1,3 @@
-# <family> <nix store path of the image> <registry digest>
-# Written only by devnet/scripts/25-images.sh. 30-enclave-up.sh refuses to deploy a family
+# <chain> <nix store path of the image> <registry digest>
+# Written only by devnet/scripts/25-images.sh. 30-enclave-up.sh refuses to deploy a chain
 # whose current source no longer evaluates to its store path here.

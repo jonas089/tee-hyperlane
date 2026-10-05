@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# Build, push and pin each family's enclave image.
+# Build, push and pin each chain's enclave image.
 #
-# The only step that writes deploy/docker-compose.<family>.yml and deploy/images.lock, so the
-# two cannot drift apart and 30-enclave-up.sh can check the pins against the code. A family
-# whose source still evaluates to its locked store path is left alone: no build, no push.
+# The only step that writes deploy/docker-compose.*.yml and deploy/images.lock, so they cannot
+# drift apart and 30-enclave-up.sh can check the pins against the code. A chain whose source
+# still evaluates to its locked store path is left alone: no build, no push.
+# docker-compose.all.yml is regenerated from the per-chain files every run.
 #
-#   FAMILIES="evolve" ./scripts/25-images.sh      # one family
+#   CHAINS="eden" ./scripts/25-images.sh      # one chain
 #
 # Needs x86_64 Linux, nix, and docker logged in to ghcr.io with write:packages.
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
@@ -13,35 +14,38 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 need nix
 need docker
 
-FAMILIES="${FAMILIES:-celestia ethereum evolve}"
+CHAINS="${CHAINS:-${ENCLAVE_CHAINS}}"
 IMAGE=ghcr.io/jonas089/tee-node
 touch "${IMAGES_LOCK}"
 pinned=""
 
-for f in ${FAMILIES}; do
-  out="$(image_out_path "${f}")"
-  if [ "$(locked "${f}" out)" = "${out}" ] && [ "$(locked "${f}" digest)" = "$(pinned_digest "${f}")" ]; then
-    say "${f}: unchanged, still ${out##*/}"
+for c in ${CHAINS}; do
+  enclave_port "${c}" >/dev/null || die "no enclave image for ${c}; the chains are: ${ENCLAVE_CHAINS}"
+  out="$(image_out_path "${c}")"
+  if [ "$(locked "${c}" out)" = "${out}" ] && [ "$(locked "${c}" digest)" = "$(pinned_digest "${c}")" ]; then
+    say "${c}: unchanged, still ${out##*/}"
     continue
   fi
 
-  say "${f}: building ${out##*/}"
-  (cd "${REPO_DIR}" && nix build ".#image-${f}" -o "result-${f}")
-  [ "$(readlink -f "${REPO_DIR}/result-${f}")" = "${out}" ] || die "${f}: nix built something other than ${out}"
-  docker load < "${REPO_DIR}/result-${f}" >/dev/null
+  say "${c}: building ${out##*/}"
+  (cd "${REPO_DIR}" && nix build ".#image-${c}" -o "result-${c}")
+  [ "$(readlink -f "${REPO_DIR}/result-${c}")" = "${out}" ] || die "${c}: nix built something other than ${out}"
+  docker load < "${REPO_DIR}/result-${c}" >/dev/null
   # The digest the registry assigns, read off the push itself: the one Phala pulls and the
   # compose hash covers.
-  digest="$(docker push "${IMAGE}:reproducible-${f}" | grep -oE 'digest: sha256:[0-9a-f]{64}' | cut -d' ' -f2 || true)"
-  [ -n "${digest}" ] || die "${f}: push did not report a digest"
+  digest="$(docker push "${IMAGE}:reproducible-${c}" | grep -oE 'digest: sha256:[0-9a-f]{64}' | cut -d' ' -f2 || true)"
+  [ -n "${digest}" ] || die "${c}: push did not report a digest"
 
-  sed -i "s|tee-node@sha256:[0-9a-f]*|tee-node@${digest}|" "${REPO_DIR}/deploy/docker-compose.${f}.yml"
+  sed -i "s|tee-node@sha256:[0-9a-f]*|tee-node@${digest}|" "$(compose_file "${c}")"
   {
     grep '^#' "${IMAGES_LOCK}" || true
-    { grep -v -e '^#' -e "^${f} " "${IMAGES_LOCK}" || true; printf '%s %s %s\n' "${f}" "${out}" "${digest}"; } | sort
+    { grep -v -e '^#' -e "^${c} " "${IMAGES_LOCK}" || true; printf '%s %s %s\n' "${c}" "${out}" "${digest}"; } | sort
   } > "${IMAGES_LOCK}.new" && mv "${IMAGES_LOCK}.new" "${IMAGES_LOCK}"
-  say "${f}: pinned ${digest}"
-  pinned="${pinned} ${f}"
+  say "${c}: pinned ${digest}"
+  pinned="${pinned} ${c}"
 done
+
+compose_all > "$(compose_file all)"
 
 if [ -n "${pinned}" ]; then
   echo

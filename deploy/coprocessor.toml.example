@@ -1,11 +1,11 @@
-# The ark deployment: five origins, eight routes, three enclaves.
+# The ark deployment: five origins, eight routes, one shared CVM running an enclave per origin.
 #
 # Chains are declared once and routes name them. A chain's fields are documented on its
-# `Config` in tee-hyperlane/crates/tee-coprocessor/src/origin/<chain>.rs. This is the live file with
-# the one metered key replaced; refresh it after a re-deployment:
+# `Config` in tee-hyperlane/crates/tee-coprocessor/src/origin/{l1,l2}/<chain>.rs. This is the
+# live file with the one metered key replaced; refresh it after a re-deployment:
 #
 #   ssh chef@ark 'cat ~/tee-ism-nonzk/devnet/.state/coprocessor.toml' \
-#     | sed 's|/v2/[A-Za-z0-9_-]*|/v2/ALCHEMY_BASE_KEY|' > deploy/coprocessor.toml.example
+#     | sed 's|/v2/[A-Za-z0-9_-]*|/v2/ALCHEMY_KEY|' > deploy/coprocessor.toml.example
 
 tick_secs = 2
 proof_dir = "/home/chef/tee-ism-nonzk/devnet/.state/proofs"
@@ -41,32 +41,30 @@ beacon_rpc = "https://ethereum-sepolia-beacon-api.publicnode.com"
 mailbox = "0xfFAEF09B3cd11D9b20d1a19bECca54EEC2884766"
 merkle_tree_hook = "0x4917a9746A7B6E0A57159cCb7F5a6744247f2d0d"
 
-# Arbitrum and Base derive their roots from Sepolia's, so a transfer waits for the rollup to
-# confirm its block: on Base Sepolia that is five days. Slow by design, not stuck.
+# Arbitrum and Base are attested from blocks their sequencer signed: Arbitrum's from its feed,
+# Base's from the OP Stack p2p network. `rpc` is the one metered endpoint for each (Alchemy,
+# key ALCHEMY_KEY in devnet/.env; never commit it): it is read only at the ISM's trusted height,
+# which can be old. Logs and reads near the head go to the free endpoint.
 [chains.arbitrum]
 kind = "arbitrum"
 domain = 421614
-l1 = "sepolia"
-rpc = "https://api.zan.top/arb-sepolia"
+rpc = "https://arb-sepolia.g.alchemy.com/v2/ALCHEMY_KEY"
+feed = "wss://sepolia-rollup.arbitrum.io/feed"
 logs_rpc = "https://sepolia-rollup.arbitrum.io/rpc"
 send_rpc = "https://sepolia-rollup.arbitrum.io/rpc"
 mailbox = "0x598facE78a4302f11E3de0bee1894Da0b2Cb71F8"
 merkle_tree_hook = "0xAD34A66Bf6dB18E858F6B686557075568c6E031C"
 
-# The one metered endpoint: free archive plans cap eth_getLogs at ten blocks, so logs go to
-# the public node. The key is ALCHEMY_BASE_KEY in devnet/.env; never commit it.
 [chains.base]
 kind = "base"
 domain = 84532
-l1 = "sepolia"
-rpc = "https://base-sepolia.g.alchemy.com/v2/ALCHEMY_BASE_KEY"
+rpc = "https://base-sepolia.g.alchemy.com/v2/ALCHEMY_KEY"
+p2p_port = 9222
 logs_rpc = "https://sepolia.base.org"
 send_rpc = "https://sepolia.base.org"
 mailbox = "0x6966b0E55883d49BFB24539356a2f8A673E02039"
 merkle_tree_hook = "0x86fb9F1c124fB20ff130C41a79a432F770f67AFD"
 
-# `rpc` serves debug_executionWitness, which re-executing Eden needs and no public endpoint
-# offers.
 [chains.eden]
 kind = "eden"
 domain = 3735928814
@@ -80,15 +78,18 @@ merkle_tree_hook = "0xCfBE7016D123d52A7Db4fc7D087cCb5421dbF8db"
 
 # ---------------------------------------------------------------- routes
 #
+# Every enclave URL is `https://<app id>-<port>.dstack-pha-prod9.phala.network`; APP_ID stands
+# for the shared CVM's app id until the next rollout writes the live file.
+#
 # `routers` are our warp routers on the destination: only a batch carrying a message for one
 # of them starts an attestation. It changes when a route works, never what it delivers.
 
-# Attested by the celestia enclave.
+# Attested by the celestia enclave, port 8080 of the shared CVM.
 [[routes]]
 name = "celestia-to-sepolia"
 from = "celestia"
 to = "sepolia"
-enclave = "https://e6a9dc0dcf0b905cbcb561562cbcd6c814adb126-8080.dstack-pha-prod9.phala.network"
+enclave = "https://APP_ID-8080.dstack-pha-prod9.phala.network"
 ism = "0x865264E0ae7b173943e34c493E7851B895F37E3F"
 routers = ["0x9822eE81C82138F88D759faef1AC168aDfEe1467", "0xfb611B6f6CE92033960e99C2D65cee4237e64cDD"]
 
@@ -96,7 +97,7 @@ routers = ["0x9822eE81C82138F88D759faef1AC168aDfEe1467", "0xfb611B6f6CE92033960e
 name = "celestia-to-arbitrum"
 from = "celestia"
 to = "arbitrum"
-enclave = "https://e6a9dc0dcf0b905cbcb561562cbcd6c814adb126-8080.dstack-pha-prod9.phala.network"
+enclave = "https://APP_ID-8080.dstack-pha-prod9.phala.network"
 ism = "0x39b7Cefe6523c474A31652cc297bA2b06ac53AB3"
 routers = ["0x41f992F671D04c5C26350E64FFA3E1D90bc33bcB", "0x8C87fd144006C651430450df8b61A15EeB3FF436"]
 
@@ -104,7 +105,7 @@ routers = ["0x41f992F671D04c5C26350E64FFA3E1D90bc33bcB", "0x8C87fd144006C6514304
 name = "celestia-to-base"
 from = "celestia"
 to = "base"
-enclave = "https://e6a9dc0dcf0b905cbcb561562cbcd6c814adb126-8080.dstack-pha-prod9.phala.network"
+enclave = "https://APP_ID-8080.dstack-pha-prod9.phala.network"
 ism = "0x94cC258254B4e9ef6675E6f3a2Ee023D3D21bFcC"
 routers = ["0xF50470146B36c638b981e437AB37DfEd9a02FAb3", "0x285b590ee43A1374AA131e7390D0CA687Be43DF9"]
 
@@ -112,16 +113,16 @@ routers = ["0xF50470146B36c638b981e437AB37DfEd9a02FAb3", "0x285b590ee43A1374AA13
 name = "celestia-to-eden"
 from = "celestia"
 to = "eden"
-enclave = "https://e6a9dc0dcf0b905cbcb561562cbcd6c814adb126-8080.dstack-pha-prod9.phala.network"
+enclave = "https://APP_ID-8080.dstack-pha-prod9.phala.network"
 ism = "0xe686F221B7A2B641574340F43Ad5cD59707791Ca"
 routers = ["0xD2babc9BE1055551b7AB98c440222862a1646158", "0xc09fbf8F17E96ce746D39f9d11a9dD1813F2d220"]
 
-# Attested by the ethereum enclave.
+# Attested by the ethereum, arbitrum and base enclaves, ports 8081, 8083 and 8082.
 [[routes]]
 name = "sepolia-to-celestia"
 from = "sepolia"
 to = "celestia"
-enclave = "https://6479fb4b957ce078ede97d5999232210eea646ef-8080.dstack-pha-prod9.phala.network"
+enclave = "https://APP_ID-8081.dstack-pha-prod9.phala.network"
 ism = "0x726f757465725f69736d000000000000000000000000002b000000000000003c"
 routers = ["0x726f757465725f61707000000000000000000000000000010000000000000000", "0x726f757465725f61707000000000000000000000000000020000000000000001"]
 
@@ -129,7 +130,7 @@ routers = ["0x726f757465725f61707000000000000000000000000000010000000000000000",
 name = "arbitrum-to-celestia"
 from = "arbitrum"
 to = "celestia"
-enclave = "https://6479fb4b957ce078ede97d5999232210eea646ef-8080.dstack-pha-prod9.phala.network"
+enclave = "https://APP_ID-8083.dstack-pha-prod9.phala.network"
 ism = "0x726f757465725f69736d000000000000000000000000002b000000000000003d"
 routers = ["0x726f757465725f61707000000000000000000000000000010000000000000000", "0x726f757465725f61707000000000000000000000000000020000000000000001"]
 
@@ -137,15 +138,15 @@ routers = ["0x726f757465725f61707000000000000000000000000000010000000000000000",
 name = "base-to-celestia"
 from = "base"
 to = "celestia"
-enclave = "https://6479fb4b957ce078ede97d5999232210eea646ef-8080.dstack-pha-prod9.phala.network"
+enclave = "https://APP_ID-8082.dstack-pha-prod9.phala.network"
 ism = "0x726f757465725f69736d000000000000000000000000002b000000000000003e"
 routers = ["0x726f757465725f61707000000000000000000000000000010000000000000000", "0x726f757465725f61707000000000000000000000000000020000000000000001"]
 
-# Attested by the evolve enclave.
+# Attested by the eden enclave, port 8084.
 [[routes]]
 name = "eden-to-celestia"
 from = "eden"
 to = "celestia"
-enclave = "https://c3789ecebee1956df200741e968814f4608847bb-8080.dstack-pha-prod9.phala.network"
+enclave = "https://APP_ID-8084.dstack-pha-prod9.phala.network"
 ism = "0x726f757465725f69736d000000000000000000000000002b000000000000003f"
 routers = ["0x726f757465725f61707000000000000000000000000000010000000000000000", "0x726f757465725f61707000000000000000000000000000020000000000000001"]

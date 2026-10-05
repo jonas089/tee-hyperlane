@@ -72,12 +72,12 @@ Celestia -> Arbitrum, Base, Sepolia   under 30 s
 Celestia -> Eden                      ~30 s
 Eden     -> Celestia                  1-4 min     waiting for Eden to post its headers to mocha
 Sepolia  -> Celestia                  ~15 min     Ethereum finality
-Arbitrum -> Celestia                  ~1h 40m     how far Arbitrum's confirmed root trails
-Base     -> Celestia                  ~5 days     Base's dispute window
+Arbitrum -> Celestia                  under 1 min the next block its sequencer signs
+Base     -> Celestia                  under 1 min the next block its sequencer signs
 ```
 
-The slow ones are the origin's own finality; the bridge adds one transaction. A Base transfer
-sitting for days is normal ([MAINTAIN](MAINTAIN.md#is-it-waiting-or-stuck)).
+The slow ones are the origin's own finality; the bridge adds one transaction
+([MAINTAIN](MAINTAIN.md#waiting-or-stuck)).
 
 ## Did it arrive
 

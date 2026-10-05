@@ -8,12 +8,12 @@ use async_trait::async_trait;
 use serde_json::Value;
 use tee_node::state::IsmState;
 
-/// Celestia, and Eden, which rides on it.
-pub mod celestia;
-/// Ethereum, and Arbitrum and Base, which ride on it.
-pub mod ethereum;
 /// Reading EVM state over JSON-RPC, shared by the EVM origins.
 pub mod evm;
+/// Chains with their own consensus, verified by a light client.
+pub mod l1;
+/// Rollups, verified by their sequencer's signature.
+pub mod l2;
 
 #[async_trait]
 pub trait Indexer: Send + Sync {

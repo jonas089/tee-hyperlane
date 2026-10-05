@@ -1,18 +1,18 @@
-# The measured configuration for the ethereum enclave, when it runs alone in its own CVM
-# (`30-enclave-up.sh --ethereum`). By default it runs in the shared CVM instead, whose
+# The measured configuration for the arbitrum enclave, when it runs alone in its own CVM
+# (`30-enclave-up.sh --arbitrum`). By default it runs in the shared CVM instead, whose
 # docker-compose.all.yml is generated from this file's service block.
 #
-# Serves the Sepolia origin: a sync-committee light client. One Celestia-side ISM pins it.
+# Serves the Arbitrum Sepolia origin: feed messages its sequencer signed. One Celestia-side ISM pins it.
 #
 # This file's hash becomes `compose-hash` in RTMR3, and the ISM pins that value, so this file,
 # including the image digest below, is what an ISM ultimately commits to. Pinned by digest: a
 # tag can be repointed, and a repointed tag would mean a different binary under the same
 # measurement. Written by devnet/scripts/25-images.sh.
 services:
-  ethereum:
+  arbitrum:
     image: ghcr.io/jonas089/tee-node@sha256:0000000000000000000000000000000000000000000000000000000000000000
     ports:
-      - "8081:8080"
+      - "8083:8080"
     volumes:
       # The only thing the enclave talks to, and it is local. No data volume: the enclave is
       # stateless, so there is nothing to persist and nothing to seal.

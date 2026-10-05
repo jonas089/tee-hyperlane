@@ -8,7 +8,8 @@ use serde::de::DeserializeOwned;
 use serde::Deserialize;
 
 use crate::destination::{self, Destination};
-use crate::origin::{celestia, ethereum};
+use crate::origin::l1::{celestia, ethereum};
+use crate::origin::l2::{arbitrum, base, eden};
 use crate::origin::{Cache, Indexer};
 
 #[derive(Deserialize)]
@@ -126,22 +127,16 @@ impl Config {
         let cache = Cache::new(self.proof_dir().join("chains").join(name));
         Ok(match self.kind(name)? {
             "ethereum" => Box::new(ethereum::Ethereum::new(self.chain(name)?, cache)?),
-            "arbitrum" => Box::new(ethereum::arbitrum::Arbitrum(self.l2(name, cache)?)),
-            "base" => Box::new(ethereum::base::Base(self.l2(name, cache)?)),
+            "arbitrum" => Box::new(arbitrum::Arbitrum::new(self.chain(name)?)?),
+            "base" => Box::new(base::Base::new(self.chain(name)?)?),
             "celestia" => Box::new(celestia::Celestia::new(self.chain(name)?)?),
             "eden" => {
-                let config: celestia::eden::Config = self.chain(name)?;
+                let config: eden::Config = self.chain(name)?;
                 let parent = self.chain(&config.celestia)?;
-                Box::new(celestia::eden::Eden::new(config, parent, cache)?)
+                Box::new(eden::Eden::new(config, parent, cache)?)
             }
             other => anyhow::bail!("chain `{name}` has unknown kind `{other}`"),
         })
-    }
-
-    fn l2(&self, name: &str, cache: Cache) -> Result<ethereum::l2_shared::L2> {
-        let config: ethereum::l2_shared::Config = self.chain(name)?;
-        let l1 = self.chain(&config.l1)?;
-        ethereum::l2_shared::L2::new(config, l1, cache)
     }
 
     /// The destination for `name`, delivering through `ism`.

@@ -41,8 +41,7 @@ pub struct AttestedUpdate {
     pub new_state: IsmState,
     /// Origin merkle tree hook, left-padded to 32 bytes for EVM addresses.
     pub merkle_tree_address: [u8; 32],
-    /// The newest chain time the enclave verified. For an L2 origin that is a recent L1
-    /// header, not the L2 root, whose age is the rollup's confirmation window by design.
+    /// The newest chain time the enclave verified.
     pub attested_at: u64,
     /// The new leaves of the origin tree, in order.
     pub message_ids: Vec<[u8; 32]>,

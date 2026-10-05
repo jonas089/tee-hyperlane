@@ -25,21 +25,8 @@ tiny-keccak = { version = "2.0", features = ["keccak"] }
 alloy-rlp = "0.3"
 alloy-trie = { version = "0.9", features = ["serde", "ethereum"] }
 
-# Eden's state root is re-derived rather than believed, so the enclave carries an EVM and a
-# merkle-patricia trie.
-#
-# The EVM is ev-reth's own, not a stock revm: Eden runs ev-reth, which redirects the base fee
-# to a configured sink, adds mint, proposer-control and deploy-permission precompiles, and
-# accepts sponsor-payer and batch-call transactions. An executor that reimplements Ethereum
-# agrees with it only on blocks that use none of that.
-#
-# The trie is still ours. ev-reth's is an update over a database, and what an enclave holding
-# no state needs is an update over a witness.
-ev-revm = { git = "https://github.com/evstack/ev-reth", tag = "v0.6.0" }
-alloy-evm = { version = "0.38.0", default-features = false }
-revm = { version = "42", features = ["std", "secp256k1", "blst", "c-kzg", "portable"] }
+# Only the coprocessor uses this, to re-encode block headers it reads over JSON-RPC.
 alloy-consensus = { version = "1.0", default-features = false, features = ["std", "k256", "serde"] }
-alloy-eips = { version = "1.0", default-features = false, features = ["std", "serde"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 axum = "0.8"

@@ -35,8 +35,11 @@ over HTTPS. Update it with `git pull`; `devnet/.env` and `devnet/.state/` there 
 - eight routes: Celestia to and from each of Sepolia, Arbitrum, Base and Eden
 - two tokens: TIA (Celestia collateral, synthetic on EVM) and USDC (Sepolia collateral,
   synthetic elsewhere)
-- three enclaves, **three images**: `celestia`, `ethereum` and `evolve`, one per origin
-  family, so a change to one origin does not re-deploy the other families' ISMs
+- **five images**, one per origin (`celestia`, `ethereum`, `base`, `arbitrum`, `eden`), all
+  in **one shared CVM** by default, each on its own port (8080 to 8084). They share that CVM's
+  identity, so a change to any image replaces all 8 ISMs. `30-enclave-up.sh --<chain>` moves a
+  chain into its own CVM with its own identity. Until the rollout of the shared CVM, ark still
+  runs the old three per-family CVMs (`celestia`, `ethereum`, `evolve`)
 
 ## Where the answers already are
 
@@ -58,47 +61,41 @@ over HTTPS. Update it with `git pull`; `devnet/.env` and `devnet/.state/` there 
 key, mnemonics). Never commit them, never copy them into a tracked file, never send them to an
 external service. `deploy/check-secrets.sh` must pass before any commit.
 
-Only the Base route uses a metered RPC: an Alchemy key (`ALCHEMY_BASE_KEY` in `devnet/.env`, or
-`devnet/.state/alchemy-base-key` on older hosts), on ark wired to the single `rpc` field of `[chains.base]`. It is a free tier, so archive
-`eth_getProof` works but `eth_getLogs` is capped at 10 blocks; Base logs therefore go to
-`sepolia.base.org`. Every other endpoint is a free public one.
+Only the Base and Arbitrum routes use a metered RPC: an Alchemy key (`ALCHEMY_KEY` in
+`devnet/.env`; `ALCHEMY_BASE_KEY` or `devnet/.state/alchemy-base-key` on older hosts), wired to
+the `rpc` field of `[chains.base]` and `[chains.arbitrum]` and read only for the tree at the
+ISM's trusted height. It is a free tier, so archive `eth_getProof` works but `eth_getLogs` is
+capped at 10 blocks; logs and reads near the head go to the public endpoints. Every other
+endpoint is a free public one.
 
 ## Gotchas worth knowing before debugging
 
-- **L2 origin routes are slow by design.** `base-to-celestia` and `arbitrum-to-celestia` derive
-  their root from the L2's dispute anchor on L1, so a transfer cannot land until the dispute game
-  covering its block resolves. On Base Sepolia that is exactly 5 days plus about 3 minutes, and
-  the anchor adopts a game the moment it resolves. A transfer sitting for days is normal, not a
-  stall. Check `AnchorStateRegistry.getAnchorRoot()` against the dispatch block before assuming
-  anything is broken.
+- **Rollups are attested from what their sequencer signed, not re-executed.** Base: a block
+  from the OP Stack p2p network, signed by `unsafeBlockSigner`; the coprocessor runs a libp2p
+  listener for it (`origin/l2/base/gossip.rs`), because no RPC serves the signature. Arbitrum: a
+  feed message, whose `signatureV2` covers the block hash. Eden: a header posted to mocha. The
+  keys are constants in `tee-node/src/chains/l2/`; a sequencer key rotation on L1 needs a new
+  image. Transfers from all three land in under a few minutes, so one waiting longer is stuck.
 - **We reuse the canonical Hyperlane deployments on the EVM chains**, so their merkle tree hooks
   carry other people's traffic. A `leaves=N` line in the relayer log is the batch size, not the
   tree size.
 - **The `routers` list is a trigger filter**, affecting latency rather than delivery, because
   merkle tree replay forces batch completeness.
-- **Eden's executor is ev-reth's own** (`ev-revm`, pinned to tag `v0.6.0`), not a
-  reimplementation, so its precompiles, fee sink and custom transaction types come from the
-  chain being verified rather than from guesswork.
 - **v5 quotes: EVM yes, Celestia not yet.** Phala emits v4 TDX quotes today. `TeeDcapIsm`
   (`VERSION` 2) and `75-dcap-verifiers.sh` accept v5 as well, but `x/teeism` still casts to
   `QuoteV4`, so a host switch to v5 would stop the four routes into Celestia until it changes.
 - **Eden runs Osaka, not Prague.** Simple transfers execute the same under both, so the first
   fixtures passed on Prague and proved nothing; a DCAP verification does not, because P-256
   verification is an Osaka precompile. Under Prague it reverts with empty data.
-- **The per-family split bounds origin-specific changes only.** `flake.nix` gives each family
-  its own source filter, so editing `celestia/eden.rs` or `celestia/eden/` moves the evolve
-  digest alone. `Cargo.lock` and the shared modules (`attest.rs`, `origin.rs`, `state.rs`,
-  `evm.rs`) are in every image's source, so touching those still moves all three.
+- **The per-chain split bounds image digests, not identities, in the shared CVM.** `flake.nix`
+  gives each chain its own source filter, so editing `chains/l2/eden.rs` moves the eden digest
+  alone; but the shared CVM's compose hash covers every digest, so its identity moves anyway.
+  The split only saves ISMs for a chain deployed alone. `Cargo.lock` and the shared modules
+  (`attest.rs`, `origin.rs`, `state.rs`, `evm.rs`) move every digest.
 - **A replacement ISM resumes, it never re-anchors.** `80-evm-isms.sh` and
   `85-celestia-isms.sh` start a replacement from the old ISM's last state with only the identity
   (last 32 bytes) swapped, so nothing in flight is lost, and stop rather than fall back to the
   head. Only a first deploy anchors at the head.
-- **Eden's root is re-executed, not believed.** The enclave runs the blocks that changed the
-  state, from the root the ISM already trusts, and the chain has to arrive at the root the
-  sequencer signed. Only state-changing blocks are sent, which is safe because a missing one
-  shows up as a root mismatch. Eden does **not** burn the base fee: it pays it to the block
-  beneficiary, and the executor credits that back. See `crates/tee-node/src/celestia/eden/` and the
-  Design section of `README.md`.
 - **Rotating the enclave identity re-points routers, never redeploys them.** Redeploying a
   collateral router abandons its escrow; that stranded real USDC on Sepolia once.
 

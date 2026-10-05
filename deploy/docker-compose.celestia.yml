@@ -1,23 +1,21 @@
-# The measured configuration for the celestia enclave.
+# The measured configuration for the celestia enclave, when it runs alone in its own CVM
+# (`30-enclave-up.sh --celestia`). By default it runs in the shared CVM instead, whose
+# docker-compose.all.yml is generated from this file's service block.
 #
-# Serves every Celestia-origin route. The four TeeDcapIsm on the EVM chains pin it.
-# One image per origin family, so a change to one does not re-deploy the ISMs of the others. This file's hash becomes `compose-hash` in RTMR3, and the
-# circuit pins that value - so this file, including the image digest below, is what an ISM
-# ultimately commits to.
+# Serves the Celestia origin. The four ISMs on the EVM chains pin it.
 #
-# Pinned by digest: a tag can be repointed, and a repointed tag would mean a different
-# binary under the same measurement claim.
-#
-# Both nodes run this identical file. They differ only by which origin a request names,
-# which is why one identity policy and one pair of vkeys covers both.
+# This file's hash becomes `compose-hash` in RTMR3, and the ISM pins that value, so this file,
+# including the image digest below, is what an ISM ultimately commits to. Pinned by digest: a
+# tag can be repointed, and a repointed tag would mean a different binary under the same
+# measurement. Written by devnet/scripts/25-images.sh.
 services:
-  tee-node:
-    image: ghcr.io/jonas089/tee-node@sha256:cfd37482ca869bfad6c50844df52f2da4085c6e3234e68e903e8f809717e7d0c
+  celestia:
+    image: ghcr.io/jonas089/tee-node@sha256:0000000000000000000000000000000000000000000000000000000000000000
     ports:
       - "8080:8080"
     volumes:
       # The only thing the enclave talks to, and it is local. No data volume: the enclave is
-      # stateless by design, so there is nothing to persist and nothing to seal.
+      # stateless, so there is nothing to persist and nothing to seal.
       - /var/run/dstack.sock:/var/run/dstack.sock
     environment:
       - RUST_LOG=info

@@ -1,17 +1,9 @@
 //! Eden: an EVM chain whose sequencer posts signed headers to Celestia (mocha).
 //!
-//! Eden has no consensus of its own, so its root rests on three checks:
+//! Eden's root rests on two checks:
 //!
-//! 1. Celestia's light client verifies the block the header was posted in,
-//! 2. the pinned sequencer key signed the header, and
-//! 3. re-executing Eden's blocks from the root the ISM trusts arrives at the signed root.
-//!
-//! Only the third makes the root trustworthy: a signature says who claimed a root, not whether
-//! executing the chain produces it. Only state-changing blocks are executed; one left out shows
-//! up as a root mismatch. The executor is ev-reth's own, in `eden/exec.rs`.
-
-pub mod exec;
-pub mod trie;
+//! 1. Celestia's light client verifies the block the header was posted in, and
+//! 2. the pinned sequencer key signed the header, which carries the state root.
 
 use crate::state::IsmState;
 use alloy_primitives::{hex, B256};
@@ -21,9 +13,8 @@ use celestia_types::{Blob, DataAvailabilityHeader};
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use serde_json::Value;
 
-use super::Celestia;
+use crate::chains::l1::celestia::{Celestia, Input as CelestiaInput};
 use crate::origin::{self, Chain, Head, Origin, Tree};
-use exec::{execute_block, BlockExec};
 
 pub static EDEN: Chain = Chain {
     name: "eden",
@@ -46,15 +37,15 @@ pub const TREE_SLOT: u64 = 151;
 pub struct Eden;
 
 /// An Eden step: Celestia's step, untouched, then the signed header inside the block it
-/// verifies and the blocks to re-execute up to it.
+/// verifies.
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct Input {
     pub celestia: Value,
     pub proof: HeaderProof,
 }
 
-/// Everything needed to find a signed header in a verified Celestia block and re-execute up to
-/// it. All of it is checked; none of it is believed.
+/// Everything needed to find a signed header in a verified Celestia block. All of it is
+/// checked; none of it is believed.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct HeaderProof {
     /// Must hash to the `data_hash` of the header the light client verified.
@@ -62,11 +53,8 @@ pub struct HeaderProof {
     /// Every row of Eden's namespace in that block, with proofs. The whole namespace, because
     /// that proves these are *all* the blobs in it, not just some.
     pub data: NamespaceData,
-    /// Every state-changing block between the trusted state and the target, in order.
-    pub chain: Vec<BlockExec>,
     /// Which Eden height to attest out of those the block carries. The caller names it
-    /// because it can only prove the tree at heights it captured a proof for; naming an older
-    /// one only slows the route, since the replay still spans exactly the distance moved.
+    /// because it can only prove the tree at heights it captured a proof for.
     pub target_height: u64,
 }
 
@@ -85,7 +73,7 @@ impl Origin for Eden {
         // Celestia's light client first. The block it lands on is the last light block it
         // was given, which it has now verified.
         let celestia_head = Celestia.verify(celestia.clone(), trusted)?;
-        let celestia: super::Input = origin::parse("celestia input", celestia)?;
+        let celestia: CelestiaInput = origin::parse("celestia input", celestia)?;
         let block = &celestia
             .updates
             .last()
@@ -118,31 +106,16 @@ impl Origin for Eden {
                 )
             })?;
 
-        // 3. Executing Eden from the trusted root arrives at the signed root.
         anyhow::ensure!(
-            !proof.chain.is_empty(),
-            "nothing changed Eden's state before {}",
-            header.height
-        );
-        let (mut number, mut root) = (trusted.height, B256::from(trusted.state_root));
-        for eden_block in &proof.chain {
-            let executed = execute_block(number, root, eden_block)?;
-            (number, root) = (executed.number, executed.state_root);
-        }
-        anyhow::ensure!(
-            number <= header.height,
-            "re-execution ran past the target height"
-        );
-        anyhow::ensure!(
-            root.0 == header.state_root,
-            "re-executing gives {root}, but the sequencer signed {} for height {}",
-            B256::from(header.state_root),
-            header.height
+            header.height > trusted.height,
+            "signed header {} is not past the trusted height {}",
+            header.height,
+            trusted.height
         );
 
         // The Celestia block dates the attestation; the Eden header dates the state.
         Ok(Head {
-            root,
+            root: B256::from(header.state_root),
             height: header.height,
             timestamp: header.time_ns / 1_000_000_000,
             store_commit: celestia_head.store_commit,

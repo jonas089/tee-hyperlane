@@ -119,7 +119,8 @@ fn a_wrong_base_slot_is_rejected() {
 /// hook, an L2 pins 151 and must refuse the same proof.
 #[test]
 fn the_base_slot_is_pinned_per_origin() {
-    use tee_node::ethereum::{arbitrum::ARBITRUM, ETHEREUM};
+    use tee_node::chains::l1::ethereum::ETHEREUM;
+    use tee_node::chains::l2::arbitrum::ARBITRUM;
     let f = fixture();
     let proof = serde_json::to_value(tree_proof(&f)).unwrap();
     let read = ETHEREUM

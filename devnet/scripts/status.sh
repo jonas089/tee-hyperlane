@@ -24,9 +24,11 @@ done
 
 echo
 echo "tee ism"
-for k in enclave-url identity-digest ism-celestia-sepolia; do
-  has "$k" && row "$k" "$(load "$k")"
+for c in ${ENCLAVE_CHAINS}; do
+  has "enclave-url-${c}" && row "${c} enclave" "$(load "enclave-url-${c}")"
+  has "identity-digest-${c}" && row "${c} identity" "$(load "identity-digest-${c}")"
 done
+has ism-celestia-sepolia && row ism-celestia-sepolia "$(load ism-celestia-sepolia)"
 if has ism-celestia-sepolia; then
   state="$(q teeism ism "$(load ism-celestia-sepolia)" 2>/dev/null \
     | python3 -c "import sys,json,base64;print(base64.b64decode(json.load(sys.stdin)['ism']['state']).hex())" 2>/dev/null)"

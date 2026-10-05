@@ -3,8 +3,8 @@
 //! Two things, and everything else is shared:
 //!
 //! * `verify` - authenticate a head and return its state root. A chain may run a light client
-//!   (Ethereum, Celestia), derive its root from a chain that does (Arbitrum, Base), re-execute
-//!   its blocks (Eden), or any combination. The chain decides; the enclave only needs the root.
+//!   (Ethereum, Celestia) or check its sequencer's signature (Base, Arbitrum, and Eden, whose
+//!   headers come through Celestia's light client). The enclave only needs the root.
 //! * `merkle_tree` - prove the Hyperlane merkle tree under a root `verify` returned.
 //!
 //! Inputs are `serde_json::Value` and each chain parses its own, so nothing outside a chain's
@@ -44,9 +44,8 @@ pub struct Head {
     pub timestamp: u64,
     /// The light-client store commitment the ISM moves to.
     pub store_commit: [u8; 32],
-    /// The newest chain time the enclave verified. The chain's own head for a chain with its
-    /// own light client; the parent's head for a derived chain, whose confirmed head is old
-    /// by design.
+    /// The newest chain time the enclave verified: the head's own time, or for Eden the
+    /// Celestia block its header was posted in.
     pub attested_at: u64,
 }
 
@@ -68,13 +67,19 @@ pub struct Chain {
     pub origin: &'static dyn Origin,
 }
 
-/// Every origin compiled into this image. Each image compiles only its own family's chains.
+/// Every origin compiled into this image. Each image compiles only its own chain.
 pub fn chains() -> Vec<&'static Chain> {
     let mut all: Vec<&'static Chain> = Vec::new();
     #[cfg(feature = "celestia")]
-    all.extend(crate::celestia::CHAINS);
+    all.push(&crate::chains::l1::celestia::CELESTIA);
     #[cfg(feature = "ethereum")]
-    all.extend(crate::ethereum::CHAINS);
+    all.push(&crate::chains::l1::ethereum::ETHEREUM);
+    #[cfg(feature = "arbitrum")]
+    all.push(&crate::chains::l2::arbitrum::ARBITRUM);
+    #[cfg(feature = "base")]
+    all.push(&crate::chains::l2::base::BASE);
+    #[cfg(feature = "eden")]
+    all.push(&crate::chains::l2::eden::EDEN);
     all
 }
 

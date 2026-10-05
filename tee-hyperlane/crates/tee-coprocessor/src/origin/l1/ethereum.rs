@@ -1,9 +1,5 @@
 //! Gathers what the enclave needs to verify Ethereum: light-client updates and tree proofs.
 
-pub mod arbitrum;
-pub mod base;
-pub mod l2_shared;
-
 use alloy_primitives::{Address, B256};
 use anyhow::{Context, Result};
 use async_trait::async_trait;
@@ -13,7 +9,7 @@ use helios_consensus_core::types::{
 use helios_consensus_core::{apply_bootstrap, verify_bootstrap};
 use serde::Deserialize;
 use serde_json::{json, Value};
-use tee_node::ethereum::{EthereumStore, Spec, ETHEREUM, TREE_SLOT};
+use tee_node::chains::l1::ethereum::{EthereumStore, Spec, ETHEREUM, TREE_SLOT};
 use tee_node::state::IsmState;
 use tracing::{debug, info};
 use tree_hash::TreeHash;
@@ -62,7 +58,7 @@ pub struct Ethereum {
     cache: Cache,
 }
 
-/// Ethereum's half of a step, which Arbitrum and Base build on.
+/// Ethereum's light-client step.
 pub struct L1Step {
     /// The enclave's `ethereum::Input`: the store the ISM committed to, and the updates.
     pub input: Value,
@@ -85,11 +81,6 @@ impl Ethereum {
             checkpoint: config.checkpoint,
             cache,
         })
-    }
-
-    /// The L1 archive endpoint, for the L2s' proofs at the finalized block.
-    pub fn history(&self) -> &Rpc {
-        &self.history
     }
 
     /// Rebuild the ISM's store and walk it to the current finalized head. `None` when that head

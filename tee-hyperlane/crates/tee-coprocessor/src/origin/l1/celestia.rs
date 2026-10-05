@@ -1,12 +1,10 @@
 //! Gathers what the enclave needs to verify Celestia: light blocks and merkle tree proofs.
 
-pub mod eden;
-
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::{json, Value};
-use tee_node::celestia::{CelestiaStore, CELESTIA};
+use tee_node::chains::l1::celestia::{CelestiaStore, CELESTIA};
 use tee_node::state::IsmState;
 use tendermint::block::Height;
 use tendermint_light_client_verifier::types::LightBlock;
