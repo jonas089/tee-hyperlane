@@ -260,25 +260,34 @@ export function routerFor(token: TokenId, chain: ChainId): string | null {
   return router ? router : null;
 }
 
-/// Celestia is the hub: every route has it on one side. No EVM chain's ISM trusts another
-/// EVM chain, so an EVM-to-EVM pair is not a route even when both routers exist.
+/// The transfers a bridge from `from` to `to` takes. Celestia is the hub, so a pair with
+/// Celestia on one side is one transfer and any other pair is two, through Celestia.
+export type Leg = { from: ChainId; to: ChainId };
+
+export function legsFor(from: ChainId, to: ChainId): Leg[] {
+  if (from === "celestia" || to === "celestia") return [{ from, to }];
+  return [
+    { from, to: "celestia" },
+    { from: "celestia", to },
+  ];
+}
+
+/// Expected wait for a whole bridge, summed over its legs. A second leg starts only once the
+/// user signs it, so this is the time to the end of the last leg if they do so right away.
+export function expectedPathSeconds(from: ChainId, to: ChainId): number {
+  return legsFor(from, to).reduce((sum, leg) => sum + expectedSeconds(leg.from), 0);
+}
+
 export function routeIsLive(token: TokenId, from: ChainId, to: ChainId): boolean {
   return whyNotLive(token, from, to) === null;
 }
 
-/// Why this pair cannot be bridged, or null if it can.
-///
-/// Worth separating, because the two reasons are nothing alike and one message for both
-/// blamed the wrong thing. An EVM to EVM pair is not a route for *any* token, so saying the
-/// token is not deployed sends someone looking for a missing deployment that was never meant
-/// to exist. A missing router really is a missing deployment, and names the chain it is
-/// missing on.
+/// Why this pair cannot be bridged, or null if it can: the same chain twice, or a token not
+/// deployed on one of the chains the path touches.
 export function whyNotLive(token: TokenId, from: ChainId, to: ChainId): string | null {
   if (from === to) return "Pick two different chains.";
-  if (from !== "celestia" && to !== "celestia") {
-    return `Every route goes through ${CHAINS.celestia.name}, so ${CHAINS[from].name} to ${CHAINS[to].name} is two transfers rather than one. Bridge to ${CHAINS.celestia.name} first.`;
-  }
-  for (const c of [from, to]) {
+  const chains = new Set(legsFor(from, to).flatMap((l) => [l.from, l.to]));
+  for (const c of chains) {
     if (routerFor(token, c) === null) return `${token} is not deployed on ${CHAINS[c].name} yet.`;
   }
   return null;

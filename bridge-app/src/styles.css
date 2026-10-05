@@ -585,3 +585,9 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0
 /* The nav holds both links and in-page tabs, so the buttons need the reset the links do not. */
 button.tab { border: 0; font: inherit; cursor: pointer; }
 .note.error { color: var(--bad, #c0392b); }
+
+/* Two-step bridges: the step-2 prompt in History, and the count of ready ones on the tab. */
+.step2 { margin-top: 0.6rem; }
+.step2 .primary { margin-top: 0.5rem; padding: 0.7rem; font-size: 0.95rem; }
+.tab-count.ready { background: var(--accent); color: var(--accent-ink); }
+.recent.ready { color: var(--ink); }

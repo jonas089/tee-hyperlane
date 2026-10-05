@@ -5,7 +5,9 @@ import {
   RELAYER_API,
   ORIGIN_FINALITY,
   SLOW_ORIGIN_SECONDS,
+  expectedPathSeconds,
   expectedSeconds,
+  legsFor,
   routeIsLive,
   whyNotLive,
   routerFor,
@@ -25,6 +27,7 @@ import {
   toRecipientBytes32,
 } from "./bridge";
 import type { BridgeFee, Step, Transfer } from "./bridge";
+import type { Leg } from "./config";
 import type { WiredIsm } from "./ism";
 import { resolveWiredIsm, shortId } from "./ism";
 import { messageIdFromCelestiaTx, sendFromCelestia } from "./celestia";
@@ -41,6 +44,12 @@ import type { Account } from "./wallets";
 /// ISM trusts Celestia and Celestia's trusts each EVM chain, and no EVM chain trusts another.
 const COUNTERPARTIES: ChainId[] = ["sepolia", "arbitrum", "base", "eden"];
 const TOKENS: TokenId[] = ["TIA", "USDC"];
+
+/// Margin for step 2's Celestia transaction fee on top of its Hyperlane delivery fee, in utia.
+const STEP_TWO_GAS_UTIA = 10_000n;
+
+/// The ISM wired for one leg, or why it could not be read.
+type IsmReading = { leg: Leg; ism?: WiredIsm; error?: string };
 
 /// The relayer and the gas oracle serve their own dashboards beside this one. Linking out
 /// beats reimplementing them here, which is what the Prover tab was doing, worse.
@@ -63,16 +72,16 @@ export default function App() {
   const [evm, setEvm] = useState<Account | null>(null);
   const [cosmos, setCosmos] = useState<Account | null>(null);
   const [tab, setTab] = useState<"bridge" | "faucet" | "history">("bridge");
-  const [counterparty, setCounterparty] = useState<ChainId>("sepolia");
-  const [outbound, setOutbound] = useState(true);
+  const [from, setFrom] = useState<ChainId>("celestia");
+  const [to, setTo] = useState<ChainId>("sepolia");
   const [token, setToken] = useState<TokenId>("TIA");
   const [amount, setAmount] = useState("");
   const [recipient, setRecipient] = useState("");
   const [transfers, setTransfers] = useState<Transfer[]>(loadTransfers);
   const [balances, setBalances] = useState<Record<string, bigint>>({});
-  const [fee, setFee] = useState<BridgeFee | null>(null);
-  const [ism, setIsm] = useState<WiredIsm | null>(null);
-  const [ismError, setIsmError] = useState<string | null>(null);
+  // One fee and one ISM per leg: a bridge between two chains other than Celestia has two.
+  const [fees, setFees] = useState<(BridgeFee | null)[]>([]);
+  const [isms, setIsms] = useState<IsmReading[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   // Shown once the origin transaction is in a block and the message id is known, which is the
@@ -125,30 +134,20 @@ export default function App() {
     };
   }, []);
 
-  const from: ChainId = outbound ? "celestia" : counterparty;
-  const to: ChainId = outbound ? counterparty : "celestia";
+  const legs = legsFor(from, to);
+  const twoStep = legs.length > 1;
   const live = routeIsLive(token, from, to);
   const source = CHAINS[from];
   const destination = CHAINS[to];
 
-  // Every route has Celestia on one side, so choosing a chain on one side decides the other:
-  // any other chain pairs with Celestia, and Celestia pairs with whichever chain was already
-  // in play. Picking the chain already on the other side swaps the two.
+  // Any chain to any chain. Picking the chain already on the other side swaps the two.
   const pickFrom = (chain: ChainId) => {
-    if (chain === "celestia") {
-      setOutbound(true);
-    } else {
-      setCounterparty(chain);
-      setOutbound(false);
-    }
+    if (chain === to) setTo(from);
+    setFrom(chain);
   };
   const pickTo = (chain: ChainId) => {
-    if (chain === "celestia") {
-      setOutbound(false);
-    } else {
-      setCounterparty(chain);
-      setOutbound(true);
-    }
+    if (chain === from) setFrom(to);
+    setTo(chain);
   };
 
   const accountFor = useCallback(
@@ -188,30 +187,54 @@ export default function App() {
   // into the page would drift out of date within the hour.
   useEffect(() => {
     let current = true;
-    setFee(null);
-    quoteBridgeFee(from, to)
-      .then((quoted) => current && setFee(quoted))
-      .catch(() => current && setFee(null));
+    setFees([]);
+    Promise.all(legs.map((l) => quoteBridgeFee(l.from, l.to).catch(() => null))).then(
+      (quoted) => current && setFees(quoted),
+    );
     return () => {
       current = false;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [from, to]);
 
-  // Which ISM will authorise this on arrival, asked of the destination chain rather than read
-  // from config, so that what is shown is what will actually be consulted.
+  // Which ISM will authorise each leg on arrival, asked of the destination chain rather than
+  // read from config, so that what is shown is what will actually be consulted.
   useEffect(() => {
     let current = true;
-    setIsm(null);
-    setIsmError(null);
-    resolveWiredIsm(token, from, to)
-      .then((wired) => current && setIsm(wired))
-      .catch((e) => current && setIsmError(e instanceof Error ? e.message : String(e)));
+    setIsms([]);
+    Promise.all(
+      legs.map((leg) =>
+        resolveWiredIsm(token, leg.from, leg.to).then(
+          (ism): IsmReading => ({ leg, ism }),
+          (e): IsmReading => ({ leg, error: e instanceof Error ? e.message : String(e) }),
+        ),
+      ),
+    ).then((read) => current && setIsms(read));
     return () => {
       current = false;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, from, to]);
 
+  // Two-step bridges whose first transfer has not landed are checked every minute while the
+  // page is open, so "ready for step 2" shows up without anyone pressing Check.
+  useEffect(() => {
+    const tick = async () => {
+      const waiting = transfers.filter(
+        (t) => t.next && !t.next.messageId && t.reached !== "delivered",
+      );
+      for (const t of waiting) {
+        const next = await refresh(t);
+        setTransfers((all) => all.map((x) => (x.messageId === t.messageId ? next : x)));
+      }
+    };
+    const id = window.setInterval(tick, 60_000);
+    return () => window.clearInterval(id);
+  }, [transfers]);
 
+  const readyForStep2 = transfers.filter(
+    (t) => t.next && !t.next.messageId && t.reached === "delivered",
+  ).length;
 
   const defaultRecipient = useMemo(
     () => accountFor(to)?.address ?? "",
@@ -248,6 +271,26 @@ export default function App() {
         );
       }
 
+      // The first leg's destination: Celestia when the bridge takes two steps, in which case
+      // the funds land on the user's own Keplr address until they sign step 2.
+      const first = legs[0];
+      const firstDestination = CHAINS[first.to];
+      let firstRecipient = target;
+      if (twoStep) {
+        if (!cosmos) throw new Error("Connect Keplr too: step 2 is signed there");
+        firstRecipient = cosmos.address;
+        // Without TIA for step 2's fee the funds would sit on Celestia, so this is checked now.
+        const stepTwo = await quoteBridgeFee("celestia", to);
+        const tia = await fetchBalance(CHAINS.celestia, "TIA", cosmos.address);
+        if (tia < stepTwo.amount + STEP_TWO_GAS_UTIA) {
+          throw new Error(
+            `Step 2 needs about ${formatFee({ ...stepTwo, amount: stepTwo.amount + STEP_TWO_GAS_UTIA })} ` +
+              `on ${CHAINS.celestia.name}, and your Keplr wallet has ${formatAmount(tia, "TIA")} TIA. ` +
+              `Top it up first, for example from the Faucet tab.`,
+          );
+        }
+      }
+
       let tx: string;
       let messageId: string;
 
@@ -256,8 +299,8 @@ export default function App() {
         tx = await sendFromEvm({
           chain: source as EvmChain,
           token,
-          destination: destination.domain,
-          recipient: target,
+          destination: firstDestination.domain,
+          recipient: firstRecipient,
           amount: wanted,
           sender: evm.address,
         });
@@ -267,13 +310,13 @@ export default function App() {
         const tokenId = routerFor(token, "celestia");
         if (!tokenId) throw new Error(`${token} is not deployed on Celestia`);
         // Re-quoted rather than reusing what the page showed, which may be minutes old.
-        const quoted = await quoteBridgeFee(from, to);
+        const quoted = await quoteBridgeFee(first.from, first.to);
         tx = await sendFromCelestia({
           chain: source as CosmosChain,
           tokenId,
           token,
-          destinationDomain: destination.domain,
-          recipient: toRecipientBytes32(target),
+          destinationDomain: firstDestination.domain,
+          recipient: toRecipientBytes32(firstRecipient),
           amount: wanted,
           sender: cosmos.address,
           quotedFee: quoted.amount,
@@ -286,11 +329,12 @@ export default function App() {
           messageId,
           token,
           amount,
-          from,
-          to,
+          from: first.from,
+          to: first.to,
           originTx: tx,
           reached: "dispatched",
           sentAt: Date.now(),
+          ...(twoStep ? { next: { to, recipient: target } } : {}),
         },
         ...current,
       ]);
@@ -299,8 +343,11 @@ export default function App() {
         token,
         amount,
         origin: source.name,
-        destination: destination.name,
+        destination: twoStep
+          ? `${CHAINS.celestia.name}, step 1 of 2 to ${destination.name}`
+          : destination.name,
         wait: describeDuration(expectedSeconds(from)),
+        twoStep,
       });
       setAmount("");
       loadBalances();
@@ -310,9 +357,60 @@ export default function App() {
       setSending(false);
     }
   }, [
-    amount, cosmos, defaultRecipient, destination, evm, from, loadBalances, recipient, source,
-    to, token,
+    amount, cosmos, defaultRecipient, destination, evm, from, legs, loadBalances, recipient,
+    source, to, token, twoStep,
   ]);
+
+  /// Step 2 of a two-step bridge: Celestia to the final chain, signed in Keplr, for the same
+  /// amount. Throws so the history row can show why it did not go.
+  const continueTransfer = useCallback(
+    async (first: Transfer) => {
+      const next = first.next;
+      if (!next || next.messageId) return;
+      if (!cosmos) throw new Error("Connect Keplr to sign step 2");
+      const wanted = toBaseUnits(first.amount, first.token);
+      const held = await fetchBalance(CHAINS.celestia, first.token, cosmos.address);
+      if (held < wanted) {
+        throw new Error(
+          `Step 2 sends ${first.amount} ${first.token}, but your Keplr wallet holds ` +
+            `${formatAmount(held, first.token)} on ${CHAINS.celestia.name}.`,
+        );
+      }
+      const tokenId = routerFor(first.token, "celestia");
+      if (!tokenId) throw new Error(`${first.token} is not deployed on Celestia`);
+      const quoted = await quoteBridgeFee("celestia", next.to);
+      const celestia = CHAINS.celestia as CosmosChain;
+      const tx = await sendFromCelestia({
+        chain: celestia,
+        tokenId,
+        token: first.token,
+        destinationDomain: CHAINS[next.to].domain,
+        recipient: toRecipientBytes32(next.recipient),
+        amount: wanted,
+        sender: cosmos.address,
+        quotedFee: quoted.amount,
+      });
+      const messageId = await waitForCelestiaMessageId(celestia, tx);
+      setTransfers((current) => [
+        {
+          messageId,
+          token: first.token,
+          amount: first.amount,
+          from: "celestia",
+          to: next.to,
+          originTx: tx,
+          reached: "dispatched",
+          sentAt: Date.now(),
+          prev: first.messageId,
+        },
+        ...current.map((t) =>
+          t.messageId === first.messageId ? { ...t, next: { ...next, messageId } } : t,
+        ),
+      ]);
+      loadBalances();
+    },
+    [cosmos, loadBalances],
+  );
 
   const update = useCallback(
     async (messageId: string) => {
@@ -342,7 +440,11 @@ export default function App() {
           >
             History
             {/* The count is the reason to look, so it belongs on the tab rather than behind it. */}
-            {transfers.length > 0 && <span className="tab-count">{transfers.length}</span>}
+            {transfers.length > 0 && (
+              <span className={readyForStep2 ? "tab-count ready" : "tab-count"}>
+                {readyForStep2 ? `${readyForStep2} ready` : transfers.length}
+              </span>
+            )}
           </button>
           <button
             className={tab === "faucet" ? "tab on" : "tab"}
@@ -361,7 +463,10 @@ export default function App() {
           {evm ? (
             <span className="pill">{shorten(evm.address)}</span>
           ) : (
-            <button className="pill action" onClick={() => connect(counterparty)}>
+            <button
+              className="pill action"
+              onClick={() => connect(CHAINS[from].kind === "evm" ? from : to)}
+            >
               Connect MetaMask
             </button>
           )}
@@ -403,6 +508,7 @@ export default function App() {
                       key={t.messageId}
                       transfer={t}
                       onRefresh={() => update(t.messageId)}
+                      onContinue={() => continueTransfer(t)}
                     />
                   ))}
                 </ul>
@@ -459,7 +565,10 @@ export default function App() {
 
             <button
               className="flip"
-              onClick={() => setOutbound((v) => !v)}
+              onClick={() => {
+                setFrom(to);
+                setTo(from);
+              }}
               title="Swap direction"
               aria-label="Swap direction"
             >
@@ -495,41 +604,69 @@ export default function App() {
               />
             </label>
 
+            {twoStep && (
+              <p className="wait">
+                <strong>Two steps, through {CHAINS.celestia.name}.</strong> You sign step 1 now in{" "}
+                {walletFor(source)}. It lands on your Keplr address on {CHAINS.celestia.name},
+                about {describeDuration(expectedSeconds(from))} from now. Then you sign step 2 in
+                Keplr from the History tab, and it arrives on {destination.name} about{" "}
+                {describeDuration(expectedSeconds("celestia"))} later. Keep a little TIA in Keplr
+                for the step 2 fee.
+              </p>
+            )}
+
             {ORIGIN_FINALITY[from].seconds >= SLOW_ORIGIN_SECONDS && (
               <p className="wait">
                 <strong>
-                  Expected {describeWhen(Date.now() + expectedSeconds(from) * 1000)}, about{" "}
+                  {twoStep ? "Step 1 is expected" : "Expected"}{" "}
+                  {describeWhen(Date.now() + expectedSeconds(from) * 1000)}, about{" "}
                   {describeDuration(expectedSeconds(from))} from now.
                 </strong>{" "}
-                {ORIGIN_FINALITY[from].reason} The transfer is safe to leave. It appears below
-                with its expected arrival, and you can close this page.
+                {ORIGIN_FINALITY[from].reason}{" "}
+                {twoStep
+                  ? "You can close this page and come back then to sign step 2."
+                  : "The transfer is safe to leave. It appears in History with its expected arrival, and you can close this page."}
               </p>
             )}
 
             <dl className="quote">
               <dt>Delivery fee</dt>
-              <dd>{fee ? formatFee(fee) : "quoting…"}</dd>
+              <dd>
+                {legs.map((leg, i) => (
+                  <span key={i} className={i ? "ism-via" : undefined}>
+                    {fees.length === 0 ? "quoting…" : fees[i] ? formatFee(fees[i]!) : "unavailable"}
+                    {twoStep ? ` for step ${i + 1}` : ""}
+                  </span>
+                ))}
+              </dd>
               <dt>Arrives</dt>
-              <dd>{describeDuration(expectedSeconds(from))} from now</dd>
+              <dd>
+                {describeDuration(expectedPathSeconds(from, to))} from now
+                {twoStep && <span className="ism-via">if you sign step 2 as soon as it is ready</span>}
+              </dd>
               <dt>Verified on arrival by</dt>
               <dd>
-                {ismError ? (
-                  <span className="ism-bad">could not read it: {ismError}</span>
-                ) : !ism ? (
-                  "reading…"
-                ) : (
-                  <>
-                    {ism.url ? (
-                      <a href={ism.url} target="_blank" rel="noreferrer" title={ism.id}>
-                        {shortId(ism.id)}
-                      </a>
-                    ) : (
-                      <span title={ism.id}>{shortId(ism.id)}</span>
-                    )}
-                    <span className="ism-where"> on {destination.name}</span>
-                    {ism.via && <span className="ism-via">{ism.via}</span>}
-                  </>
-                )}
+                {isms.length === 0
+                  ? "reading…"
+                  : isms.map((r, i) => (
+                      <span key={i} className={i ? "ism-via" : undefined}>
+                        {r.error ? (
+                          <span className="ism-bad">could not read it: {r.error}</span>
+                        ) : r.ism ? (
+                          <>
+                            {r.ism.url ? (
+                              <a href={r.ism.url} target="_blank" rel="noreferrer" title={r.ism.id}>
+                                {shortId(r.ism.id)}
+                              </a>
+                            ) : (
+                              <span title={r.ism.id}>{shortId(r.ism.id)}</span>
+                            )}
+                            <span className="ism-where"> on {CHAINS[r.leg.to].name}</span>
+                            {!twoStep && r.ism.via && <span className="ism-via">{r.ism.via}</span>}
+                          </>
+                        ) : null}
+                      </span>
+                    ))}
               </dd>
             </dl>
 
@@ -537,15 +674,30 @@ export default function App() {
             {error && <p className="error">{error}</p>}
 
             <button className="primary" onClick={send} disabled={!live || sending || !amount}>
-              {sending ? "Confirm in your wallet…" : `Bridge ${token}`}
+              {sending
+                ? "Confirm in your wallet…"
+                : twoStep
+                  ? `Bridge ${token}: sign step 1`
+                  : `Bridge ${token}`}
             </button>
 
-            <p className="note">
-              Signed in {walletFor(source)}. Arrival waits for {source.name} to finalise, then the
-              enclave attests it and the destination verifies the quote. About{" "}
-              {describeDuration(expectedSeconds(from))}.
-            </p>
+            {!twoStep && (
+              <p className="note">
+                Signed in {walletFor(source)}. Arrival waits for {source.name} to finalise, then
+                the enclave attests it and the destination verifies the quote. About{" "}
+                {describeDuration(expectedSeconds(from))}.
+              </p>
+            )}
           </section>
+
+          {readyForStep2 > 0 && (
+            <p className="note recent ready">
+              <button className="linklike" onClick={() => setTab("history")}>
+                {readyForStep2} transfer{readyForStep2 === 1 ? " is" : "s are"} ready for step 2
+              </button>
+              . Sign {readyForStep2 === 1 ? "it" : "them"} in Keplr from History.
+            </p>
+          )}
 
           {/* Transfers live on their own tab now. What belongs beside the form is the one
               transfer you just sent, not a growing list that pushes the form off screen. */}
@@ -588,11 +740,28 @@ function ChainPicker({ value, onChange }: { value: ChainId; onChange: (c: ChainI
 function TransferRow({
   transfer,
   onRefresh,
+  onContinue,
 }: {
   transfer: Transfer;
   onRefresh: () => void;
+  onContinue: () => Promise<void>;
 }) {
   const [open, setOpen] = useState(false);
+  const [continuing, setContinuing] = useState(false);
+  const [continueError, setContinueError] = useState<string | null>(null);
+  const next = transfer.next;
+  const step2Ready = !!next && !next.messageId && transfer.reached === "delivered";
+  const continueNow = async () => {
+    setContinuing(true);
+    setContinueError(null);
+    try {
+      await onContinue();
+    } catch (e) {
+      setContinueError(describeError(e));
+    } finally {
+      setContinuing(false);
+    }
+  };
   const reachedIndex = STEPS.indexOf(transfer.reached);
   const expected = transfer.sentAt + expectedSeconds(transfer.from) * 1000;
   const slow = ORIGIN_FINALITY[transfer.from].seconds >= SLOW_ORIGIN_SECONDS;
@@ -603,7 +772,9 @@ function TransferRow({
         <div>
           <strong>{transfer.amount} {transfer.token}</strong>
           <span className="muted">
-            {CHAINS[transfer.from].name} → {CHAINS[transfer.to].name}
+            {next
+              ? `${CHAINS[transfer.from].name} → ${CHAINS.celestia.name} → ${CHAINS[next.to].name}, step 1 of 2`
+              : `${CHAINS[transfer.from].name} → ${CHAINS[transfer.to].name}${transfer.prev ? ", step 2 of 2" : ""}`}
           </span>
         </div>
         <button className="pill action" onClick={onRefresh}>Check</button>
@@ -638,6 +809,29 @@ function TransferRow({
           </a>
         </dd>
       </dl>
+
+      {next && !next.messageId && !step2Ready && (
+        <p className="timing">
+          Step 2 to {CHAINS[next.to].name} can be signed in Keplr once this lands on{" "}
+          {CHAINS.celestia.name}.
+        </p>
+      )}
+      {step2Ready && (
+        <div className="step2">
+          <p className="timing">
+            Landed on {CHAINS.celestia.name}. Sign step 2 to send it on to {CHAINS[next!.to].name}.
+          </p>
+          <button className="primary" onClick={continueNow} disabled={continuing}>
+            {continuing ? "Confirm in Keplr…" : `Continue: sign step 2 in Keplr`}
+          </button>
+          {continueError && <p className="error">{continueError}</p>}
+        </div>
+      )}
+      {next?.messageId && (
+        <p className="timing">
+          Step 2 sent to {CHAINS[next.to].name}, message <code>{shorten(next.messageId, 8)}</code>.
+        </p>
+      )}
 
       {transfer.failure && <p className="error">{transfer.failure}</p>}
 
@@ -723,6 +917,7 @@ type Confirmation = {
   origin: string;
   destination: string;
   wait: string;
+  twoStep?: boolean;
 };
 
 /// Confirmation of a send, and an honest description of what happens next.
@@ -789,7 +984,9 @@ function ConfirmedDialog({
           <span />
         </div>
         <p className="note confirm-note">
-          The enclave attests it, then the destination verifies the quote. About {confirmation.wait}.
+          {confirmation.twoStep
+            ? `It lands on your Keplr address in about ${confirmation.wait}. Then sign step 2 from History.`
+            : `The enclave attests it, then the destination verifies the quote. About ${confirmation.wait}.`}
         </p>
 
         <button className="primary" onClick={onClose}>

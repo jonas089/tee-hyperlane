@@ -23,6 +23,16 @@ import { switchEvmChain } from "./wallets";
 export type Step = "dispatched" | "attested" | "authorised" | "delivered";
 export const STEPS: Step[] = ["dispatched", "attested", "authorised", "delivered"];
 
+/// The second transfer of a bridge that goes through Celestia. Signed in Keplr once the
+/// first transfer has arrived on Celestia.
+export interface NextLeg {
+  to: ChainId;
+  /// The final recipient, on `to`.
+  recipient: string;
+  /// The second transfer's message id, once it has been sent.
+  messageId?: string;
+}
+
 export interface Transfer {
   messageId: string;
   token: TokenId;
@@ -39,6 +49,10 @@ export interface Transfer {
   attestation?: Attestation;
   deliveryTx?: string;
   failure?: string;
+  /// Set on the first transfer of a two-step bridge.
+  next?: NextLeg;
+  /// Set on the second transfer: the first transfer's message id.
+  prev?: string;
 }
 
 /** What an enclave signed for the batch containing a message. */
