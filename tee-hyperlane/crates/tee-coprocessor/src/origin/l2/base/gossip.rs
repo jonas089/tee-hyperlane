@@ -56,8 +56,14 @@ pub fn start(port: u16) -> Arc<Recent<SignedHead>> {
     let out = recent.clone();
     tokio::spawn(async move {
         loop {
-            if let Err(e) = run(port, &out).await {
-                warn!(error = %format!("{e:#}"), "base gossip listener stopped; restarting");
+            // Its own task, so a panic is logged and the listener restarted.
+            let out = out.clone();
+            match tokio::spawn(async move { run(port, &out).await }).await {
+                Ok(Err(e)) => {
+                    warn!(error = %format!("{e:#}"), "base gossip listener stopped; restarting")
+                }
+                Err(e) => tracing::error!(error = %e, "base gossip listener panicked; restarting"),
+                Ok(Ok(())) => {}
             }
             tokio::time::sleep(Duration::from_secs(10)).await;
         }

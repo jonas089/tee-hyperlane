@@ -42,6 +42,9 @@ snap = "1"
 futures = "0.3"
 # Arbitrum's sequencer feed.
 tokio-tungstenite = { version = "0.28", features = ["rustls-tls-webpki-roots"] }
+# Already in the tree through reqwest and tokio-tungstenite, which between them enable two
+# crypto backends; named here only to pick one as the default (see `install_tls_provider`).
+rustls = { version = "0.23", default-features = false, features = ["aws-lc-rs"] }
 tracing-subscriber.workspace = true
 
 [[bin]]

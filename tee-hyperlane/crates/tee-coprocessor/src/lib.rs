@@ -64,6 +64,13 @@ impl Streak {
 /// Error text from an endpoint, shortened to one line for a log. An endpoint that fails behind
 /// a CDN answers with a whole HTML page, which is reduced to its `<title>`; anything else loses
 /// its line breaks and is cut at 300 characters.
+/// Pick rustls's default crypto backend. Both `ring` and `aws-lc-rs` are compiled in, so rustls
+/// has no default, and the Arbitrum feed's websocket panicked on connect without one. Safe to
+/// call more than once.
+pub fn install_tls_provider() {
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+}
+
 pub fn brief(text: &str) -> String {
     let lower = text.to_ascii_lowercase();
     if lower.contains("<html") || lower.contains("<!doctype") {

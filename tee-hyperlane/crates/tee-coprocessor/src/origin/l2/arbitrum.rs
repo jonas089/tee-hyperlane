@@ -103,14 +103,21 @@ impl Indexer for Arbitrum {
     }
 }
 
-/// Keep the feed's newest signed messages, reconnecting whenever it drops.
+/// Keep the feed's newest signed messages, reconnecting whenever it drops. Each connection runs
+/// in its own task, so a panic in it is logged and retried rather than ending the feed.
 fn listen(url: String) -> Arc<Recent<FeedMessage>> {
+    crate::install_tls_provider();
     let recent = Arc::new(Recent::default());
     let out = recent.clone();
     tokio::spawn(async move {
         loop {
-            if let Err(e) = read_feed(&url, &out).await {
-                warn!(error = %format!("{e:#}"), "arbitrum feed dropped; reconnecting");
+            let (url, out) = (url.clone(), out.clone());
+            match tokio::spawn(async move { read_feed(&url, &out).await }).await {
+                Ok(Err(e)) => {
+                    warn!(error = %format!("{e:#}"), "arbitrum feed dropped; reconnecting")
+                }
+                Err(e) => tracing::error!(error = %e, "arbitrum feed task panicked; reconnecting"),
+                Ok(Ok(())) => {}
             }
             tokio::time::sleep(Duration::from_secs(5)).await;
         }

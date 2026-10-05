@@ -53,6 +53,7 @@ async fn main() -> Result<()> {
     } else {
         builder.without_time().init();
     }
+    tee_coprocessor::install_tls_provider();
     let cli = Cli::parse();
     if let Some(Mode::Identity { url, json }) = &cli.mode {
         let identity = tee_coprocessor::identity::Identity::fetch(url).await?;
