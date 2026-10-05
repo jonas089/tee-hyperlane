@@ -1,20 +1,4 @@
-//! When a transfer, a route or the tracker itself is in trouble, and the inbox that says so.
-//!
-//! A transfer is judged by `assess`, from its record and nothing the route loop could get
-//! wrong about itself. It is stuck, in the order checked, when:
-//!
-//! * its delivery was refused and it is parked for redelivery (`failed`)
-//! * the ISM covers it but it has not been delivered within `DELIVERY_GRACE` (`overdue`)
-//! * the route loop reported an origin head past its block, so the origin made it final, but
-//!   the ISM has not followed within `ATTEST_GRACE` (`overdue`)
-//! * none of that is known and it is older than its route's expected latency (`overdue`), the
-//!   backstop that holds however the more specific checks are fooled
-//!
-//! `sweep` turns every such condition, and every route, origin watch or monitor that has
-//! stopped working, into a notification. A notification opens when its condition first holds,
-//! stays open while it holds, and resolves by itself when it clears, so the inbox is always the
-//! current list of problems plus the last week of solved ones. There is no dismissing one: a
-//! problem leaves the inbox only by going away.
+//! Decides when transfers and routes are stuck, and keeps the inbox of notifications.
 
 use serde::{Deserialize, Serialize};
 

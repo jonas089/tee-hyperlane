@@ -1,20 +1,4 @@
-//! Keeping the Celestia IGP's destination gas configs current.
-//!
-//! Hyperlane quotes a transfer's fee on the origin chain, in the origin's token, for gas that
-//! will be spent on the destination chain in the destination's token. Two numbers have to be
-//! kept current for that to stay honest as prices move:
-//!
-//!   gas price       what a unit of destination gas costs, in destination wei
-//!   exchange rate   what the destination's token is worth in the origin's token
-//!
-//! The quote the module computes is
-//!
-//!   fee = gas_amount * gas_price * exchange_rate / EXCHANGE_RATE_SCALE
-//!
-//! and `fee` has to come out in the origin's smallest unit. Since the two chains have
-//! different decimals, that conversion is folded into the exchange rate rather than left
-//! implicit - getting it wrong by 10^12 is the obvious way to under- or over-charge by a
-//! factor no one notices until the relayer runs dry.
+//! Computes the IGP's destination gas configs from current gas and token prices, and writes them.
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};

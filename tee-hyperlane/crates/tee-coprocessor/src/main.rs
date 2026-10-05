@@ -1,15 +1,4 @@
-//! The coprocessor service: every route in the config, and the dashboard API.
-//!
-//! ```text
-//! tee-hyperlane --config coprocessor.toml
-//! ```
-//!
-//! Two setup modes, both used by the deploy scripts before any route exists:
-//!
-//! ```text
-//! tee-hyperlane --config coprocessor.toml genesis --chain sepolia --identity 0x... [--height N]
-//! tee-hyperlane identity --url https://<app-id>-8080.<gateway> --json identity.json
-//! ```
+//! Entry point: runs the relayer, or the `genesis` and `identity` setup commands.
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};

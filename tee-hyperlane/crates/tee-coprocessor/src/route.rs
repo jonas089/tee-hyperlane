@@ -1,23 +1,4 @@
-//! The relayer: one loop per route, the same for every chain.
-//!
-//! Each pass does the whole pipeline or nothing:
-//!
-//! 1. finish a batch left staged by an earlier pass, if there is one
-//! 2. read the ISM's trusted state from the destination
-//! 3. gather the origin's proofs for its newest head; stop if the tree has not grown
-//! 4. index the messages in between, and check they are exactly the new leaves
-//! 5. stop unless one of them is ours, or the heartbeat is due
-//! 6. ask the enclave to attest, stage the result, and submit it
-//!
-//! Every pass also retries the messages parked in `undelivered/`: ones the destination refused,
-//! and ones left over from a batch whose attestation landed but whose delivery could not finish.
-//! A message the ISM covers is never forgotten, only parked, and a parked message is reported
-//! by the API until it lands.
-//!
-//! The ISM's state on chain is the only progress marker, so restarting is the same as
-//! continuing. A batch is staged on disk only so a crash between attesting and submitting does
-//! not lose it, and it is always finished before a new one starts: abandoning it after the ISM
-//! advanced past its start would put its leaves behind every later snapshot for good.
+//! The relay loop: one per route, attesting new messages and delivering them.
 
 use std::path::PathBuf;
 use std::time::Duration;

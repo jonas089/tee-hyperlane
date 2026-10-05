@@ -1,5 +1,4 @@
-//! An EVM destination: `TeeDcapIsm.submitAttestation`, then `Mailbox.process` per message,
-//! both sent with `cast`.
+//! Delivers to EVM chains: submits attestations to `TeeDcapIsm` and processes messages, using `cast`.
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;

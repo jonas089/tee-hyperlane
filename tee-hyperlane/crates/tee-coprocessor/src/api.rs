@@ -1,9 +1,6 @@
-//! The HTTP server: the explorer page, `/api/v1` (see `v1.rs`), and the older endpoints the
-//! bridge app still calls, served from the same process as the routes.
-//!
-//! Everything it reports comes from two places: each route's directory, where the route loop
-//! writes its staged and finished batches and its markers, and each destination's ISM, read
-//! live. It holds no state of its own.
+//! HTTP server: the explorer page, `/api/v1`, the faucet, and the older endpoints the bridge app uses.
+
+pub mod v1;
 
 use std::collections::BTreeMap;
 use std::io::Write;
@@ -160,7 +157,7 @@ pub async fn serve(api: Api, tracker: Arc<crate::tracker::Tracker>, listen: &str
             "/",
             get(|| async { axum::response::Html(include_str!("../ui/explorer.html")) }),
         )
-        .merge(crate::v1::router(tracker))
+        .merge(v1::router(tracker))
         .merge(legacy);
     let listener = tokio::net::TcpListener::bind(listen).await?;
     debug!(listen, "api listening");

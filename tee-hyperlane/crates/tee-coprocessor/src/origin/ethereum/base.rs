@@ -1,5 +1,4 @@
-//! Base as an origin: finding the proof that reads its root out of L1, which the enclave's
-//! `ethereum::base::Base` verifies.
+//! Gathers what the enclave needs to verify Base: its anchored root on Ethereum and tree proofs.
 
 use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
 use anyhow::{Context, Result};

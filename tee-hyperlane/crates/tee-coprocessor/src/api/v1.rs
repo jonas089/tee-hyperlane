@@ -1,12 +1,4 @@
-//! `/api/v1`: the explorer's API, and the contract anything monitoring the bridge builds on.
-//!
-//! Every response type is here, and `ui/openapi.json` describes each one. A test holds the two
-//! to each other, so a field cannot change or disappear without the spec saying so. Times are
-//! unix seconds throughout; message ids and 32-byte addresses are 0x-prefixed lowercase hex.
-//!
-//! Read-only, and there is nothing to authenticate: every value is public chain data or a
-//! report about it. In particular a notification cannot be dismissed here, only resolved by its
-//! problem going away, so no caller can hide a problem from anyone else.
+//! Handlers and response types for `/api/v1`. The response shapes are described in `ui/openapi.json`.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -22,7 +14,7 @@ use crate::monitor::{self, Assessment, Notification, Severity, Status, Subject};
 use crate::route::{now, Parked};
 use crate::tracker::{route_head, IsmReading, MessageRecord, TrackedRoute, Tracker, Watch};
 
-pub const SPEC: &str = include_str!("../ui/openapi.json");
+pub const SPEC: &str = include_str!("../../ui/openapi.json");
 
 pub fn router(tracker: Arc<Tracker>) -> Router {
     Router::new()

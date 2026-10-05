@@ -1,21 +1,4 @@
-//! The coprocessor's one config file: chains declared once, routes naming them.
-//!
-//! ```toml
-//! [chains.sepolia]
-//! kind = "ethereum"
-//! domain = 11155111
-//! rpc = "..."
-//!
-//! [[routes]]
-//! name = "sepolia-to-celestia"
-//! from = "sepolia"
-//! to = "celestia"
-//! enclave = "https://..."
-//! ism = "0x..."
-//! ```
-//!
-//! Each chain's table is parsed by that chain's own `Config`, so the fields each kind takes
-//! are documented next to the code that reads them.
+//! Loads the coprocessor config: the chains, the routes between them, and their settings.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;

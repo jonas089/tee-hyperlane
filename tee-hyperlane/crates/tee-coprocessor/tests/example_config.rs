@@ -1,5 +1,4 @@
-//! The shipped example is the live deployment's config, so it has to parse, and every route in
-//! it has to build: an origin its `from` chain can index, a destination its `to` chain can serve.
+//! Checks that the shipped example config parses and that every route in it builds.
 
 use tee_coprocessor::config::Config;
 

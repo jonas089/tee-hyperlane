@@ -1,8 +1,4 @@
-//! The relayer's gas wallets: one per destination chain, read every `CHECK_EVERY`.
-//!
-//! Each reading is kept for a week, so the spend rate comes from what the relayer actually
-//! paid rather than a guess, and "days left" is that rate against the balance. A top-up is not
-//! spend: only drops between readings count.
+//! Tracks the relayer's gas balance on each destination chain and estimates how long it lasts.
 
 use std::collections::BTreeMap;
 

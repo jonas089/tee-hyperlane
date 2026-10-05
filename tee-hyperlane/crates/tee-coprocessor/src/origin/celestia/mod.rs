@@ -1,5 +1,4 @@
-//! Celestia as an origin: finding the light blocks and hook proofs the enclave's
-//! `celestia::Celestia` verifies. Eden rides on Celestia, so its indexer lives here too.
+//! Gathers what the enclave needs to verify Celestia: light blocks and merkle tree proofs.
 
 pub mod eden;
 
