@@ -41,8 +41,13 @@ async fn main() -> Result<()> {
     // there; `RUST_LOG=debug` brings back every step of every pass.
     use std::io::IsTerminal;
     let terminal = std::io::stderr().is_terminal();
-    let filter =
+    let mut filter =
         tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into());
+    // Base's p2p discovery warns about every other node's malformed packet and timeout, which
+    // is the network's noise, not ours. Errors only, unless RUST_LOG asks for discv5 itself.
+    if !std::env::var("RUST_LOG").is_ok_and(|v| v.contains("discv5")) {
+        filter = filter.add_directive("discv5=error".parse().expect("a valid directive"));
+    }
     let builder = tracing_subscriber::fmt()
         .with_target(false)
         .with_ansi(terminal)
