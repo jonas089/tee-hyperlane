@@ -19,7 +19,6 @@ pub mod origin;
 pub mod route;
 pub mod slack;
 pub mod tracker;
-pub mod v1;
 pub mod wallets;
 
 /// A run of failures of one thing, so the log says it failed once, then again only every

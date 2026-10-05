@@ -22,7 +22,7 @@ use crate::monitor::{self, Assessment, Notification, Severity, Status, Subject};
 use crate::route::{now, Parked};
 use crate::tracker::{route_head, IsmReading, MessageRecord, TrackedRoute, Tracker, Watch};
 
-pub const SPEC: &str = include_str!("../ui/openapi.json");
+pub const SPEC: &str = include_str!("../../ui/openapi.json");
 
 pub fn router(tracker: Arc<Tracker>) -> Router {
     Router::new()
