@@ -1,5 +1,4 @@
-//! What Arbitrum and Base share as origins: both are Ethereum's step plus a proof reading the
-//! L2's root out of L1 storage, and both end at an L2 block whose tree is proven the same way.
+//! Code shared by the Arbitrum and Base origins.
 
 use std::sync::Mutex;
 use std::time::{Duration, Instant};

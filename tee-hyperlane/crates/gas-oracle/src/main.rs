@@ -1,9 +1,4 @@
-//! A gas oracle for the Celestia IGP.
-//!
-//! Hyperlane's fee quote is only as good as the numbers behind it, and those numbers are not
-//! self-updating: nothing on chain knows what TIA or ETH is worth. This service reads both,
-//! pushes the result to the IGP once an hour, and serves a page showing what it pushed and
-//! what it derived it from.
+//! Gas oracle service: keeps the Celestia IGP's gas prices and exchange rates up to date.
 
 mod oracle;
 

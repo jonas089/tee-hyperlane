@@ -1,6 +1,4 @@
-//! Reading an EVM chain over JSON-RPC: blocks, logs, and proofs of the Hyperlane tree.
-//!
-//! Shared by every EVM origin. Nothing read here is trusted; the enclave re-proves all of it.
+//! JSON-RPC helpers for EVM chains: blocks, logs and proofs.
 
 use alloy_primitives::{keccak256, Address, B256};
 use anyhow::{Context, Result};

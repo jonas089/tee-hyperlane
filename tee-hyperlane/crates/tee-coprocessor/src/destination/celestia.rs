@@ -1,5 +1,4 @@
-//! The Celestia destination: `x/teeism` submit-attestation with fresh Intel collateral carried
-//! in the transaction, then `hyperlane mailbox process` per message, both via `celestia-appd`.
+//! Delivers to Celestia: submits attestations to `x/teeism` and processes messages, using `celestia-appd`.
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;

@@ -1,9 +1,4 @@
-//! An enclave's identity, read from its quote and dstack's event log.
-//!
-//! The quote is signed by the hardware; the event log is not. So nothing is read from the log
-//! until it replays to the RTMRs in the quote, and no entry is read unless its digest commits
-//! to its own name and payload. Used to pin a new enclave (`tee-hyperlane identity`) and to
-//! show the measurements behind a batch in the API.
+//! Reads an enclave's identity (measurements, compose hash, KMS) from its quote and event log.
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};

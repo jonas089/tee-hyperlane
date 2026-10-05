@@ -1,12 +1,4 @@
-//! Decides when a transfer or route is stuck, and keeps the inbox.
-//!
-//! `assess` marks a transfer failed (delivery refused) or overdue: verified but not delivered
-//! within `DELIVERY_GRACE`, final on the origin but not verified within `ATTEST_GRACE`, or
-//! older than its route's expected latency.
-//!
-//! `sweep` turns these, and failing routes, watches or the monitor itself, into notifications.
-//! A notification opens when its condition holds and resolves when it clears. It cannot be
-//! dismissed.
+//! Decides when transfers and routes are stuck, and keeps the inbox of notifications.
 
 use serde::{Deserialize, Serialize};
 

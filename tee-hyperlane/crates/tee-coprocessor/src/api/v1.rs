@@ -1,7 +1,4 @@
-//! The `/api/v1` handlers and response types.
-//!
-//! `ui/openapi.json` describes every response, and a test checks that the two match. Times are
-//! unix seconds; ids and 32-byte addresses are 0x-prefixed lowercase hex. Read-only.
+//! Handlers and response types for `/api/v1`. The response shapes are described in `ui/openapi.json`.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;

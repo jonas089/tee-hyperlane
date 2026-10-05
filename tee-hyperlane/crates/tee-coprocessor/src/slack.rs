@@ -1,7 +1,4 @@
-//! Posts problems, resolutions and a periodic status to Slack.
-//!
-//! Enabled by `SLACK_BOT_TOKEN` and `SLACK_CHANNEL`. `SLACK_EVERY_SECS` sets the status interval
-//! (default 30 minutes) and `EXPLORER_URL` adds links to the explorer.
+//! Posts problems, resolutions and a status every 30 minutes to Slack, when configured.
 
 use std::time::Duration;
 

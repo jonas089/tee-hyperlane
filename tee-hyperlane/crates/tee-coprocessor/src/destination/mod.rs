@@ -1,19 +1,4 @@
-//! Where a route delivers: read the ISM's state, submit an attestation, deliver its messages.
-//!
-//! Two kinds, EVM chains and Celestia. Both sign through the tools that deploy them - `cast`
-//! and `celestia-appd` - rather than reimplementing signing: the relayer key is the least
-//! sensitive thing in the system, since it can pay gas and stall a route but cannot make a
-//! chain accept a message the enclave did not attest.
-//!
-//! Submitting is idempotent, so a batch interrupted anywhere can simply be submitted again:
-//! an ISM already at the batch's state is not advanced twice, and a message already delivered
-//! is skipped.
-//!
-//! Two kinds of failure are kept apart. An error (`Err`) is the infrastructure: an RPC down, a
-//! tool that hung, a nonce race. The whole batch is retried. A refusal (`Outcome::Refused`) is
-//! one message the destination will not take, such as a recipient that reverts: the rest of the
-//! batch goes ahead, and the route queues that one message for redelivery and reports it, so
-//! one bad message can never hold up every message behind it.
+//! The `Destination` trait: read an ISM's state, submit an attestation, and deliver messages.
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;

@@ -1,9 +1,4 @@
-//! The HTTP server: the explorer page, `/api/v1` (see `api/v1.rs`), and the older endpoints the
-//! bridge app still calls, served from the same process as the routes.
-//!
-//! Everything it reports comes from two places: each route's directory, where the route loop
-//! writes its staged and finished batches and its markers, and each destination's ISM, read
-//! live. It holds no state of its own.
+//! HTTP server: the explorer page, `/api/v1`, the faucet, and the older endpoints the bridge app uses.
 
 pub mod v1;
 

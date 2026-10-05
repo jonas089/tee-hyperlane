@@ -1,16 +1,4 @@
-//! Eden as an origin: finding the Celestia block that carries Eden's signed header, the blocks
-//! to re-execute up to it, and the tree proofs, all of which the enclave's
-//! `celestia::eden::Eden` verifies.
-//!
-//! Three things make this origin harder to follow than the others, and each is handled here:
-//!
-//! * Eden's node serves `eth_getProof` only at `latest`. So a tree proof is captured every tick
-//!   and kept, and a step can only attest a height a proof was captured for. The ISM's own
-//!   trusted height is the one proof that must never be dropped: it is every step's snapshot.
-//! * The ISM records Eden's height, not the Celestia height its light-client store sits at,
-//!   so that height is remembered, and searched for when the hint is missing.
-//! * Eden posts to Celestia in batches, so the newest Celestia block rarely carries a header;
-//!   the DA node is walked back for one that does, remembering heights known to be empty.
+//! Gathers what the enclave needs to verify Eden: its headers on Celestia, the blocks to re-execute, and tree proofs.
 
 use std::collections::HashSet;
 use std::sync::{LazyLock, Mutex};

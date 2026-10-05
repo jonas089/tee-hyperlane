@@ -1,9 +1,4 @@
-//! Tracks transfers on our routes from dispatch to delivery.
-//!
-//! One task per origin chain scans for `Dispatch` events to our routers, then reads each
-//! route's ISM height and the destination mailbox to mark transfers verified and delivered.
-//! It reads independently of the route loop and never relays. `monitor.rs` decides when a
-//! transfer counts as stuck.
+//! Tracks each transfer on our routes from dispatch to delivery.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;

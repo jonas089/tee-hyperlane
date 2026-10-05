@@ -1,7 +1,4 @@
-//! The relayer's gas balance on each destination chain.
-//!
-//! Read every `CHECK_EVERY` and kept for a week. Spend per day counts only drops between
-//! readings, so top-ups are ignored; days left is the balance divided by that.
+//! Tracks the relayer's gas balance on each destination chain and estimates how long it lasts.
 
 use std::collections::BTreeMap;
 

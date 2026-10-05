@@ -1,9 +1,4 @@
-//! Arbitrum as an origin: finding the proof that reads its confirmed root out of L1, which the
-//! enclave's `ethereum::arbitrum::Arbitrum` verifies.
-//!
-//! Nothing here depends on how often Arbitrum posts or how long it takes to confirm: the
-//! confirmed assertion's own storage says which L1 block created it, so its preimage is one
-//! single-block log read on any network.
+//! Gathers what the enclave needs to verify Arbitrum: its confirmed root on Ethereum and tree proofs.
 
 use alloy_primitives::{keccak256, B256, U256};
 use anyhow::{Context, Result};

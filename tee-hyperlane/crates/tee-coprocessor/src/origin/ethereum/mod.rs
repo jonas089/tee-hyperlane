@@ -1,9 +1,4 @@
-//! Ethereum (Sepolia) as an origin: finding the light-client updates and tree proofs the
-//! enclave's `ethereum::Ethereum` verifies.
-//!
-//! The light-client store is never kept. It is rebuilt each tick from the ISM's own trusted
-//! state, which is what lets a route resume after any outage with no memory of its own. Arbitrum
-//! and Base reuse this whole half: their ISMs commit to an Ethereum store too.
+//! Gathers what the enclave needs to verify Ethereum: light-client updates and tree proofs.
 
 pub mod arbitrum;
 pub mod base;

@@ -1,15 +1,4 @@
-//! What the coprocessor needs from a chain to relay its messages.
-//!
-//! The mirror of the enclave's `origin::Origin`. The enclave verifies a head and a tree; the
-//! coprocessor has to find them. Three things per chain, and the route loop does the rest:
-//!
-//! * `gather` - the proofs for the newest head the enclave would accept, starting from the
-//!   state the ISM trusts. When there is nothing new, `leaves` is empty.
-//! * `index` - every message the origin's tree took in over a height range, in tree order.
-//! * `bootstrap` - the genesis state for a new ISM.
-//!
-//! Nothing here is trusted. A wrong answer from any RPC produces a refused attestation, never a
-//! wrong root, so chains are free to read from whatever endpoints they are configured with.
+//! The `Indexer` trait each origin chain implements: gather proofs, index messages, create a genesis state.
 
 use std::ops::Range;
 use std::path::PathBuf;
