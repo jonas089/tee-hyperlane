@@ -336,7 +336,8 @@ ARBITRUM_LOGS     https://sepolia-rollup.arbitrum.io/rpc   (serves eth_getLogs o
 ARBITRUM_RPC      https://sepolia-rollup.arbitrum.io/rpc
 BASE_ARCHIVE      Alchemy, from ALCHEMY_KEY
 BASE_RPC          https://sepolia.base.org
-BASE_P2P_PORT     9222   (UDP, for discovery; outbound only)
+BASE_P2P_PORT     9222   (TCP and UDP; open it so Base nodes can dial in)
+BASE_P2P_PEERS    none   (comma-separated multiaddrs of Base nodes to always dial)
 EDEN_ARCHIVE      https://ev-reth-eden-testnet.binarybuilders.services:8545/
 EDEN_RPC          https://rpc.testnet.eden.gateway.fm/
 EDEN_DA_RPC       http://localhost:26658
