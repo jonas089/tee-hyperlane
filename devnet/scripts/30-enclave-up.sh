@@ -1,19 +1,36 @@
 #!/usr/bin/env bash
-# Deploy one enclave per origin family and wait for each to answer.
+# Deploy the enclaves and wait for each to answer.
+#
+#   ./scripts/30-enclave-up.sh                     # every chain, in one shared CVM
+#   ./scripts/30-enclave-up.sh --ethereum --base   # each named chain alone, in its own CVM
+#
+# One image per origin chain either way; the shared CVM runs them all side by side, each on
+# its own port (see `enclave_port` in lib.sh). A chain deployed alone keeps its port, so the
+# coprocessor only ever needs a different app id in the URL.
 #
 # The enclaves are the one piece that cannot be local: a TDX quote has to come from real Intel
-# hardware, and this machine is not it. Everything else in this devnet runs on the laptop.
-#
-# Three families, three images, three CVMs. They measure the same compose files the testnet
-# measures, because the identity an ISM pins is a property of the code, not of which CVM runs
-# it - app id and instance id are deliberately outside the measurement. Deploying from a
-# separate devnet compose would only produce a fourth image nothing can rebuild.
+# hardware. They measure the same compose files the testnet measures, because the identity an
+# ISM pins is a property of the code, not of which CVM runs it.
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 need phala
 need curl
 
-FAMILIES="${FAMILIES:-celestia ethereum evolve}"
+# `all`, or the chains named on the command line, each its own CVM.
+TARGETS=""
+for arg in "$@"; do
+  chain="${arg#--}"
+  enclave_port "${chain}" >/dev/null || die "unknown chain ${arg}; use --<chain> with one of: ${ENCLAVE_CHAINS}"
+  TARGETS="${TARGETS} ${chain}"
+done
+TARGETS="${TARGETS:-all}"
+
+# The chains a target serves.
+chains_in() { [ "$1" = all ] && echo "${ENCLAVE_CHAINS}" || echo "$1"; }
+
+# A chain's URL in the CVM with this app id.
+url_for() { echo "https://$1-$(enclave_port "$2").dstack-pha-prod9.phala.network"; }
+
 INSTANCE_TYPE="${INSTANCE_TYPE:-tdx.small}"
 # Node 18 is prod9. Auto-selection sometimes lands on prod5, whose teepod reports
 # tproxy_base_domain: None - the CVM runs, the gateway never registers it, and every request
@@ -34,33 +51,36 @@ sys.stdout.write(json.loads(tcb["app_compose"])["docker_compose_file"])
 ' 2>/dev/null
 }
 
-deploy_family() {
-  local family="$1"
-  local compose="${REPO_DIR}/deploy/docker-compose.${family}.yml"
-  local name="teeism-${family}"
-  local url
+deploy_cvm() {
+  local target="$1"
+  local compose
+  compose="$(compose_file "${target}")"
+  local name="teeism-${target}"
+  local first url chain
+  first="$(chains_in "${target}" | awk '{print $1}')"
 
-  [ -f "${compose}" ] || die "no compose for ${family} at ${compose}"
+  [ -f "${compose}" ] || die "no compose for ${target} at ${compose}"
 
-  # Keep a recorded enclave only if it answers *and* measured this compose file. Answering is
-  # not enough: after an image is re-pinned the old CVM is still healthy, and keeping it would
-  # leave every ISM this family deploys next pinning the old code.
-  if has "enclave-url-${family}"; then
-    url="$(load "enclave-url-${family}")"
+  # Keep a recorded CVM only if it answers *and* measured this compose file. Answering is not
+  # enough: after an image is re-pinned the old CVM is still healthy, and keeping it would
+  # leave every ISM deployed next pinning the old code.
+  if has "enclave-app-id-${target}"; then
+    url="$(url_for "$(load "enclave-app-id-${target}")" "${first}")"
     if curl -sf -m 15 "${url}/health" >/dev/null 2>&1; then
       local measured
       measured="$(measured_compose "${url}" || true)"
       # Unreadable is not the same as different: deploying a new CVM over a failed read would
       # replace a working enclave for nothing.
-      [ -n "${measured}" ] || die "${family} enclave ${url} answers /health but its /identity could not be read"
+      [ -n "${measured}" ] || die "${target} CVM ${url} answers /health but its /identity could not be read"
       if [ "${measured}" = "$(cat "${compose}")" ]; then
-        say "${family} enclave already up at ${url}"
+        say "${target} CVM already up"
+        record_urls "${target}" "$(load "enclave-app-id-${target}")"
         return 0
       fi
-      warn "recorded ${family} enclave ${url} runs a different compose; deploying a new one"
+      warn "recorded ${target} CVM runs a different compose; deploying a new one"
       warn "the old CVM keeps running; delete it with 'phala cvms delete' once nothing uses it"
     else
-      warn "recorded ${family} enclave ${url} is not answering; deploying a new one"
+      warn "recorded ${target} CVM is not answering; deploying a new one"
     fi
   fi
 
@@ -83,7 +103,7 @@ deploy_family() {
     --node-id "${NODE_ID}" \
     --image "${OS_IMAGE}" \
     --no-dev-os \
-    --wait --json 2>&1)" || { printf '%s\n' "${out}" >&2; die "phala deploy failed for ${family}"; }
+    --wait --json 2>&1)" || { printf '%s\n' "${out}" >&2; die "phala deploy failed for ${target}"; }
 
   # The CLI prints progress before its JSON and wraps the payload differently per command, so
   # the id is pulled from the first JSON object in the output rather than from a fixed path.
@@ -111,31 +131,39 @@ for m in re.finditer(r'[{\[]', raw):
     # The deploy may still have created a CVM, so say where to look rather than leaving one
     # billing quietly.
     printf '%s\n' "${out}" >&2
-    die "could not read the app id for ${family}; check 'phala cvms ls' for a stray ${name}"
+    die "could not read the app id for ${target}; check 'phala cvms ls' for a stray ${name}"
   fi
+  save "enclave-app-id-${target}" "${app_id}"
 
-  url="https://${app_id}-8080.dstack-pha-prod9.phala.network"
-  save "enclave-app-id-${family}" "${app_id}"
-  save "enclave-url-${family}"    "${url}"
-
-  say "waiting for ${url}"
   local i
-  for i in $(seq 1 60); do
-    if curl -sf -m 10 "${url}/health" >/dev/null 2>&1; then
-      say "${family} enclave is answering"
-      return 0
-    fi
-    sleep 10
+  for chain in $(chains_in "${target}"); do
+    url="$(url_for "${app_id}" "${chain}")"
+    say "waiting for ${url}"
+    for i in $(seq 1 60); do
+      curl -sf -m 10 "${url}/health" >/dev/null 2>&1 && break
+      [ "${i}" -lt 60 ] || die "${chain} enclave did not come up; check 'phala cvms get --cvm-id ${app_id}'"
+      sleep 10
+    done
+    say "${chain} enclave is answering"
   done
-  die "${family} enclave did not come up; check 'phala cvms get --cvm-id ${app_id}'"
+  record_urls "${target}" "${app_id}"
+}
+
+# Point every chain this CVM serves at it. A chain deployed alone later takes over its own.
+record_urls() { # <target> <app id>
+  local chain
+  for chain in $(chains_in "$1"); do
+    save "enclave-url-${chain}" "$(url_for "$2" "${chain}")"
+  done
 }
 
 # Refuse to deploy an image the repo does not describe, or that the current code would not
-# build. For each family:
+# build. For each chain deployed:
 #   - its source still evaluates to the store path deploy/images.lock recorded (new code with
 #     an old image, or the reverse, fails here);
 #   - its compose file pins the digest the lock recorded (a hand-edited compose fails here);
-#   - both files are committed and pushed, so `main` names what the enclave runs.
+#   - docker-compose.all.yml is exactly what the per-chain files generate;
+#   - all of them are committed and pushed, so `main` names what the enclaves run.
 # FORCE_UNPINNED=1 skips all of it, for a local experiment and nothing else.
 check_pins() {
   if [ "${FORCE_UNPINNED:-0}" = 1 ]; then
@@ -144,16 +172,20 @@ check_pins() {
   fi
   need nix
   need git
-  local family out
-  for family in ${FAMILIES}; do
-    out="$(image_out_path "${family}")" || die "could not evaluate .#image-${family}"
-    [ -n "$(locked "${family}" out)" ] \
-      || die "${family} has no entry in deploy/images.lock; run scripts/25-images.sh"
-    [ "$(locked "${family}" out)" = "${out}" ] \
-      || die "${family}: the code changed since its image was pinned; run scripts/25-images.sh"
-    [ "$(locked "${family}" digest)" = "$(pinned_digest "${family}")" ] \
-      || die "${family}: deploy/docker-compose.${family}.yml does not pin the digest in deploy/images.lock"
+  local target chain out
+  for target in ${TARGETS}; do
+    for chain in $(chains_in "${target}"); do
+      out="$(image_out_path "${chain}")" || die "could not evaluate .#image-${chain}"
+      [ -n "$(locked "${chain}" out)" ] \
+        || die "${chain} has no entry in deploy/images.lock; run scripts/25-images.sh"
+      [ "$(locked "${chain}" out)" = "${out}" ] \
+        || die "${chain}: the code changed since its image was pinned; run scripts/25-images.sh"
+      [ "$(locked "${chain}" digest)" = "$(pinned_digest "${chain}")" ] \
+        || die "${chain}: deploy/docker-compose.${chain}.yml does not pin the digest in deploy/images.lock"
+    done
   done
+  [ "$(compose_all)" = "$(cat "$(compose_file all)")" ] \
+    || die "deploy/docker-compose.all.yml is not what the per-chain files generate; run scripts/25-images.sh"
   git -C "${REPO_DIR}" ls-files --error-unmatch deploy/images.lock >/dev/null 2>&1 \
     || die "deploy/images.lock is not committed; commit and push it first"
   git -C "${REPO_DIR}" diff --quiet HEAD -- deploy/images.lock 'deploy/docker-compose.*.yml' \
@@ -164,20 +196,22 @@ check_pins() {
 }
 
 check_pins
-for family in ${FAMILIES}; do
-  deploy_family "${family}"
+for target in ${TARGETS}; do
+  deploy_cvm "${target}"
 done
 
-# Each ISM pins the identity of the family that attests its origin, so record all three now
-# rather than re-reading them in every script that needs one. Read from the quote, and only
-# after the event log replays to the RTMRs the hardware signed.
+# Each ISM pins the identity of the enclave that attests its origin, so record them now rather
+# than re-reading them in every script that needs one. Read from the quote, and only after the
+# event log replays to the RTMRs the hardware signed. Chains sharing a CVM share an identity.
 (cd "${REPO_DIR}/tee-hyperlane" && cargo build --quiet --release -p tee-coprocessor)
-for family in ${FAMILIES}; do
-  url="$(load "enclave-url-${family}")"
-  "${COPROCESSOR_BIN}" identity --url "${url}" --json "${OUT_DIR}/identity-${family}.json" \
-    || die "could not read ${family} identity from ${url}"
-  digest="$("${BIN_DIR}/teeism-identity" -identity "${OUT_DIR}/identity-${family}.json")"
-  [ -n "${digest}" ] || die "no identity digest for ${family}"
-  save "identity-digest-${family}" "${digest}"
-  say "${family} identity ${digest}"
+for target in ${TARGETS}; do
+  for chain in $(chains_in "${target}"); do
+    url="$(load "enclave-url-${chain}")"
+    "${COPROCESSOR_BIN}" identity --url "${url}" --json "${OUT_DIR}/identity-${chain}.json" \
+      || die "could not read ${chain} identity from ${url}"
+    digest="$("${BIN_DIR}/teeism-identity" -identity "${OUT_DIR}/identity-${chain}.json")"
+    [ -n "${digest}" ] || die "no identity digest for ${chain}"
+    save "identity-digest-${chain}" "${digest}"
+    say "${chain} identity ${digest}"
+  done
 done

@@ -33,6 +33,18 @@ tendermint-light-client-verifier.workspace = true
 helios-consensus-core.workspace = true
 axum.workspace = true
 tracing.workspace = true
+# Base's sequencer signs blocks only on the OP Stack p2p network: discv5 finds peers, gossipsub
+# carries the blocks, snappy compresses them.
+libp2p = { version = "0.56", default-features = false, features = ["tokio", "tcp", "dns", "noise", "yamux", "gossipsub", "identify", "ping", "secp256k1", "macros"] }
+discv5 = "0.12"
+enr = { version = "0.14", features = ["k256"] }
+snap = "1"
+futures = "0.3"
+# Arbitrum's sequencer feed.
+tokio-tungstenite = { version = "0.28", features = ["rustls-tls-webpki-roots"] }
+# Already in the tree through reqwest and tokio-tungstenite, which between them enable two
+# crypto backends; named here only to pick one as the default (see `install_tls_provider`).
+rustls = { version = "0.23", default-features = false, features = ["aws-lc-rs"] }
 tracing-subscriber.workspace = true
 
 [[bin]]

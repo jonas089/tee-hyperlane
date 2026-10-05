@@ -38,6 +38,17 @@ impl Rpc {
         self.call_at(&self.url, method, params).await
     }
 
+    /// A read near the head: the free endpoint first, then `url` if it refuses.
+    pub async fn recent(&self, method: &str, params: Value) -> Result<Value> {
+        if self.logs_url != self.url {
+            match self.call_at(&self.logs_url, method, params.clone()).await {
+                Ok(v) => return Ok(v),
+                Err(e) => debug!(method, error = %e, "free endpoint refused; using the main one"),
+            }
+        }
+        self.call(method, params).await
+    }
+
     async fn call_at(&self, url: &str, method: &str, params: Value) -> Result<Value> {
         let body = json!({ "jsonrpc": "2.0", "id": 1, "method": method, "params": params });
         let reply = self.http.post(url).json(&body).send().await?;
@@ -80,7 +91,7 @@ impl Rpc {
     pub async fn header_rlp(&self, block_hash: B256) -> Result<(Vec<u8>, Value)> {
         use alloy_rlp::Encodable;
         let block = self
-            .call("eth_getBlockByHash", json!([block_hash, false]))
+            .recent("eth_getBlockByHash", json!([block_hash, false]))
             .await?;
         anyhow::ensure!(!block.is_null(), "no block {block_hash}");
         let header: alloy_consensus::Header = serde_json::from_value(block.clone())?;
@@ -97,23 +108,28 @@ impl Rpc {
     /// `evm::TreeProof`. `block` is a number, or `"latest"` for an endpoint that serves nothing
     /// older (Eden's).
     pub async fn tree_proof(&self, hook: Address, base_slot: u64, block: Value) -> Result<Value> {
-        let keys: Vec<String> = hyperlane_types::MerkleTreeSlots::new(base_slot)
-            .storage_keys()
-            .iter()
-            .map(|k| format!("0x{}", hex::encode(k)))
-            .collect();
         let r = self
-            .call("eth_getProof", json!([hook, keys, block]))
+            .call("eth_getProof", tree_keys(hook, base_slot, block))
             .await
             .context("eth_getProof on the merkle tree hook; the block may be outside this node's proof window")?;
-        Ok(json!({
-            "merkle_tree_hook": hook,
-            "account": account(&r),
-            "account_proof": r["accountProof"],
-            "storage_proof": r["storageProof"].as_array().context("storageProof")?.iter()
-                .map(|s| json!({ "slot": s["key"], "value": s["value"], "proof": s["proof"] }))
-                .collect::<Vec<_>>(),
-        }))
+        tree_proof(&r, hook)
+    }
+
+    /// As `tree_proof`, for a block near the head: from the free endpoint when it serves it.
+    pub async fn recent_tree_proof(
+        &self,
+        hook: Address,
+        base_slot: u64,
+        block: u64,
+    ) -> Result<Value> {
+        let r = self
+            .recent(
+                "eth_getProof",
+                tree_keys(hook, base_slot, json!(hex_number(block))),
+            )
+            .await
+            .context("eth_getProof on the merkle tree hook near the head")?;
+        tree_proof(&r, hook)
     }
 
     /// Every message the hook took in over `from..=to`, in tree order.
@@ -282,6 +298,28 @@ impl Rpc {
         }
         Ok(out)
     }
+}
+
+/// `eth_getProof` parameters for a hook's 33 tree slots at `block`.
+fn tree_keys(hook: Address, base_slot: u64, block: Value) -> Value {
+    let keys: Vec<String> = hyperlane_types::MerkleTreeSlots::new(base_slot)
+        .storage_keys()
+        .iter()
+        .map(|k| format!("0x{}", hex::encode(k)))
+        .collect();
+    json!([hook, keys, block])
+}
+
+/// An `eth_getProof` answer for the tree slots, shaped as the enclave's `evm::TreeProof`.
+fn tree_proof(r: &Value, hook: Address) -> Result<Value> {
+    Ok(json!({
+        "merkle_tree_hook": hook,
+        "account": account(r),
+        "account_proof": r["accountProof"],
+        "storage_proof": r["storageProof"].as_array().context("storageProof")?.iter()
+            .map(|s| json!({ "slot": s["key"], "value": s["value"], "proof": s["proof"] }))
+            .collect::<Vec<_>>(),
+    }))
 }
 
 /// The account half of an `eth_getProof` answer, shaped as the enclave's `ClaimedAccount`.

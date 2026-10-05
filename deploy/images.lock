@@ -1,3 +1,8 @@
-# <family> <nix store path of the image> <registry digest>
-# Written only by devnet/scripts/25-images.sh. 30-enclave-up.sh refuses to deploy a family
+# <chain> <nix store path of the image> <registry digest>
+# Written only by devnet/scripts/25-images.sh. 30-enclave-up.sh refuses to deploy a chain
 # whose current source no longer evaluates to its store path here.
+arbitrum /nix/store/8iww084y91fdml11q0q02yvravvhskxb-tee-node.tar.gz sha256:a0356a9ac7196d8df11cdfeca9df58b63b52545461cf918577cd55a7fb4fe963
+base /nix/store/fwblxrswl02ridkyl2abw45ghgg5nx5p-tee-node.tar.gz sha256:7962957b708ad231dafb27cb558e39a1601a82223386a2f5ae3506ea8f5e4472
+celestia /nix/store/b4jf0aj3glq11j636c1b3sk0imjqknag-tee-node.tar.gz sha256:e8dfcc5014f5cdb3890194b498a88e9b57003f4616ba69fdaa8ae5c2d936f89e
+eden /nix/store/z0lcd59s7px6qkii3yfmzdc0fl2hd0d1-tee-node.tar.gz sha256:f6a3a0f1219302b9384771ce3b4b6d252e438fb27b26238b0e31a4a2b81e9dfd
+ethereum /nix/store/kmf3pl7gfmqdmqqrnclai70gl0d7jryi-tee-node.tar.gz sha256:3b42a1e645f92c934b8ca2807e5d21e088247ae03df772c16ae9ce1f619071a0

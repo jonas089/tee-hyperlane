@@ -2,11 +2,9 @@
 # The Celestia side of every route: one ISM per origin, and the routing ISM that fans them
 # out.
 #
-# An ISM pins the identity of the enclave that attests *its* origin, and each origin family
-# runs its own enclave image. So Sepolia, Arbitrum and Base pin the Ethereum enclave while
-# Eden pins the evolve one, and changing either leaves the other alone. That is the whole
-# point of the split: before it, one identity served every origin and a change anywhere
-# re-deployed everything.
+# An ISM pins the identity of the enclave that attests *its* origin, and each origin has its
+# own enclave image. In the shared CVM they all share one identity; a chain deployed alone has
+# its own, and changing it leaves the other ISMs alone.
 #
 # Adding an origin is a row in ORIGINS; its genesis comes from its `[chains.<name>]` table.
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
@@ -18,16 +16,16 @@ A="${BIN_DIR}/celestia-appd"
 TX="--from relayer --keyring-backend test --home ${CELHOME} --chain-id ${CHAINID}
     --node ${CELESTIA_RPC} --fees 200000utia --gas 900000 --broadcast-mode sync -y -o json"
 
-# origin : domain : enclave family : merkle tree address on that origin
+# origin : domain : enclave : merkle tree address on that origin
 #
 # Override ORIGINS to bring up a subset, and keep it in step with CHAINS in 80-evm-isms.sh
 # and 90-evm-warp.sh. An origin with an ISM here but no enrolled warp router from 90 produces
 # a route that attests fine and then fails every delivery with "no enrolled router found for
 # origin <domain>", forever.
 ORIGINS="${ORIGINS:-sepolia:11155111:ethereum:0x0000000000000000000000004917a9746a7b6e0a57159ccb7f5a6744247f2d0d
-arbitrum:421614:ethereum:0x000000000000000000000000ad34a66bf6db18e858f6b686557075568c6e031c
-base:84532:ethereum:0x00000000000000000000000086fb9f1c124fb20ff130c41a79a432f770f67afd
-eden:3735928814:evolve:0x000000000000000000000000cfbe7016d123d52a7db4fc7d087ccb5421dbf8db}"
+arbitrum:421614:arbitrum:0x000000000000000000000000ad34a66bf6db18e858f6b686557075568c6e031c
+base:84532:base:0x00000000000000000000000086fb9f1c124fb20ff130c41a79a432f770f67afd
+eden:3735928814:eden:0x000000000000000000000000cfbe7016d123d52a7db4fc7d087ccb5421dbf8db}"
 
 # Wait for a transaction and report its code, since `--broadcast-mode sync` only means the
 # node accepted it.
@@ -79,7 +77,7 @@ print("0x" + base64.b64decode(json.load(sys.stdin)["ism"]["state"]).hex())
 #     its last 32 bytes, swapped. The route resumes where the old one stopped, so nothing in
 #     flight is lost. An unreadable old state stops the script rather than fall back to the head.
 #   - otherwise (a first deploy): the origin's current head, from the coprocessor config.
-genesis_for() { # <origin> <family> [old ism id]
+genesis_for() { # <origin> <enclave> [old ism id]
   local override old digest
   override="$(eval "printf '%s' \"\${ISM_GENESIS_$(printf '%s' "$1" | tr 'a-z-' 'A-Z_'):-}\"")"
   if [ -n "${override}" ]; then
@@ -99,9 +97,9 @@ genesis_for() { # <origin> <family> [old ism id]
 write_config
 
 for row in ${ORIGINS}; do
-  IFS=: read -r name domain family tree <<< "${row}"
+  IFS=: read -r name domain enclave tree <<< "${row}"
   replacing=""
-  say "== ${name} (domain ${domain}, ${family} enclave)"
+  say "== ${name} (domain ${domain}, ${enclave} enclave)"
 
   # Already created for this enclave, so leave it alone. An origin whose bootstrap failed the
   # first time is the normal reason to run this again - Eden's needs a synced DA node, which
@@ -114,7 +112,7 @@ for row in ${ORIGINS}; do
     # Unreadable is not the same as different: minting a replacement on a query hiccup would
     # re-point the route for nothing.
     [ -n "${pinned}" ] || die "could not read ${existing} from ${CELESTIA_RPC}"
-    if [ "${pinned}" = "$(load "identity-digest-${family}" | tr 'A-F' 'a-f' | sed 's/^0x//')" ]; then
+    if [ "${pinned}" = "$(load "identity-digest-${enclave}" | tr 'A-F' 'a-f' | sed 's/^0x//')" ]; then
       say "  already created for this enclave: ${existing}"
       continue
     fi
@@ -127,15 +125,15 @@ for row in ${ORIGINS}; do
   # script at this assignment, before the guard on the next line can skip that origin. The
   # guard read as if it handled the case and never once ran: base took the run down with it
   # and Eden, the origin after it, was never attempted.
-  genesis="$(genesis_for "${name}" "${family}" "${replacing}" || true)"
+  genesis="$(genesis_for "${name}" "${enclave}" "${replacing}" || true)"
   [ -n "${genesis}" ] || { incomplete "${name}: could not build its genesis state (the reason is above); its current ISM stays in place"; continue; }
 
-  OUT_DIR="${OUT_DIR}" python3 - "${genesis}" "${tree}" "${name}" "${family}" <<'PY'
+  OUT_DIR="${OUT_DIR}" python3 - "${genesis}" "${tree}" "${name}" "${enclave}" <<'PY'
 import json, sys, os
-state, tree, name, family = sys.argv[1:5]
+state, tree, name, enclave = sys.argv[1:5]
 out = os.environ["OUT_DIR"]
 json.dump({"state": state, "merkle_tree_address": tree,
-           "identity": json.load(open(f"{out}/identity-{family}.json"))},
+           "identity": json.load(open(f"{out}/identity-{enclave}.json"))},
           open(f"{out}/ism-{name}-origin.json", "w"), indent=2)
 PY
 

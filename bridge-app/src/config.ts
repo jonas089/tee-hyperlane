@@ -198,9 +198,8 @@ export const PROVING_SECONDS = envNum("VITE_PROVING_SECONDS", 45);
 
 /// How long each origin takes to reach the finality the enclave will attest, and why.
 ///
-/// Arbitrum and Base are both optimistic rollups, so both wait out a challenge window before
-/// their state root is trustless. They differ only in how long that window is configured to
-/// be - which is the difference between half an hour and most of a week.
+/// Arbitrum, Base and Eden are attested from a block their sequencer signed, so they are as
+/// quick as the chains with fast finality.
 export interface OriginFinality {
   seconds: number;
   /// Shown to the sender before they commit to a transfer they cannot speed up.
@@ -217,18 +216,16 @@ export const ORIGIN_FINALITY: Record<ChainId, OriginFinality> = {
     reason: "Ethereum is attested at its finalized head, roughly two epochs behind.",
   },
   arbitrum: {
-    seconds: 35 * 60,
+    seconds: 30,
     reason:
-      "Arbitrum is an optimistic rollup: its state root is only trustless once Ethereum " +
-      "confirms the assertion, about every half hour on Sepolia.",
+      "Arbitrum's sequencer signs every block it produces, and the enclave checks that " +
+      "signature before it attests the root.",
   },
   base: {
-    // Measured on Base Sepolia: the game the anchor points at was created 120.1 hours before
-    // it resolved, and the portal adds no further delay.
-    seconds: 120 * 60 * 60,
+    seconds: 30,
     reason:
-      "Base is an optimistic rollup. Its root only becomes final once a dispute game has " +
-      "run its full challenge clock, which on Sepolia takes five days.",
+      "Base's sequencer signs every block it produces, and the enclave checks that " +
+      "signature before it attests the root.",
   },
   eden: {
     // Eden's sequencer batches roughly every eleventh block into one Celestia blob, and the
@@ -236,9 +233,8 @@ export const ORIGIN_FINALITY: Record<ChainId, OriginFinality> = {
     // about ninety seconds; the margin covers a slow blob.
     seconds: 3 * 60,
     reason:
-      "Eden has no consensus of its own. Its sequencer publishes each header to Celestia, " +
-      "and the enclave waits for that blob and re-runs the blocks behind it before it will " +
-      "attest the root.",
+      "Eden has no consensus of its own. Its sequencer publishes each signed header to " +
+      "Celestia, and the enclave waits for that blob before it will attest the root.",
   },
 };
 

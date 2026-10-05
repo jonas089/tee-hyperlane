@@ -2,13 +2,6 @@
 //!
 //! The enclave checks the sync committee's BLS signatures against a store the ISM already
 //! commits to, so the beacon and execution RPCs are data sources only.
-//!
-//! Arbitrum and Base publish their state into Ethereum, so they live here too: each runs
-//! `Ethereum.verify` first and reads its own root out of the L1 state root it returns.
-
-pub mod arbitrum;
-pub mod base;
-mod l2_shared;
 
 use crate::state::IsmState;
 use alloy_primitives::B256;
@@ -29,9 +22,6 @@ pub static ETHEREUM: Chain = Chain {
     domain: 11155111,
     origin: &Ethereum,
 };
-
-/// Every chain this module attests.
-pub static CHAINS: &[&Chain] = &[&ETHEREUM, &arbitrum::ARBITRUM, &base::BASE];
 
 /// Hyperlane's canonical Sepolia `MerkleTreeHook` keeps its tree from slot 103.
 pub const TREE_SLOT: u64 = 103;

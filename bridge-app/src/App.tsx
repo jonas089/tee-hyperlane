@@ -613,7 +613,7 @@ function TransferRow({
         {transfer.reached === "delivered"
           ? `Landed ${describeWhen(transfer.deliveredAt ?? Date.now())}`
           : `Sent ${describeWhen(transfer.sentAt)}, expected ${describeWhen(expected)}` +
-            (slow ? `, waiting on ${CHAINS[transfer.from].name}'s dispute window` : "")}
+            (slow ? `, waiting on ${CHAINS[transfer.from].name}'s finality` : "")}
       </p>
 
       <ol className="steps">

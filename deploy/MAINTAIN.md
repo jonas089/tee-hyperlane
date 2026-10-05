@@ -28,8 +28,11 @@ For UI changes, also rebuild the UI ([DEPLOY step 11](DEPLOY.md#11-ui-and-gatewa
 
 ## Update: enclave code
 
-For changes to `crates/tee-node`, `crates/hyperlane-types` or `Cargo.lock`. Each
-changed enclave needs new ISMs. The scripts only redo what changed.
+For changes to `crates/tee-node`, `crates/hyperlane-types` or `Cargo.lock`. A changed enclave
+gives its CVM a new identity, and every ISM that CVM attests needs replacing. With all five
+chains in the shared CVM that is all 8 ISMs; a chain running in its own CVM (see
+[One chain in its own CVM](#one-chain-in-its-own-cvm)) only moves its own. The scripts only
+redo what changed.
 
 In-flight transfers are kept; see [No message is lost](#no-message-is-lost).
 
@@ -42,13 +45,14 @@ cp -a devnet/.state ~/teeism-state-$(date +%F)
 cd ~/tee-ism-nonzk/tee-hyperlane && cargo build --release -p tee-coprocessor -p gas-oracle
 ```
 
-Leave `devnet/.state/proofs/` in place. It holds the hints (`chains/<chain>/`) that let each
-route rebuild its old ISM's light-client state and resume.
+Leave `devnet/.state/proofs/` in place. It holds the hints (`chains/<chain>/`) that let the
+Sepolia and Eden routes rebuild their old ISM's light-client state and resume.
 
 **2. Images:** [DEPLOY step 4](DEPLOY.md#4-enclave-images): build, pin, commit and push.
 
-**3. Enclaves:** [DEPLOY step 5](DEPLOY.md#5-enclaves). It refuses to run until step 2's pins
-match the code and are pushed. The old CVMs keep running.
+**3. Enclaves:** [DEPLOY step 5](DEPLOY.md#5-enclaves), with the same flags the chains were
+deployed with: none for the shared CVM, `--<chain>` for a chain in its own. It refuses to run
+until step 2's pins match the code and are pushed. The old CVMs keep running.
 
 **4. ISMs and routers**
 
@@ -77,7 +81,7 @@ curl -s localhost:3001/api/status | jq -r '.[] | "\(.name) \(.height)"'     # 8 
 **8. Clean up**, only once step 7 works:
 
 ```sh
-phala cvms delete <old app id>        # ×3, ids in ~/teeism-state-*/out/enclave-app-id-*
+phala cvms delete <old app id>        # each replaced CVM, ids in ~/teeism-state-*/out/enclave-app-id-*
 ```
 
 Then update the ids in `README.md`.
@@ -102,6 +106,23 @@ cd ~/tee-ism-nonzk/devnet
 . scripts/lib.sh && write_config && sudo systemctl restart teeism-relayer
 ```
 
+## One chain in its own CVM
+
+By default every chain's enclave runs in the shared CVM. Moving one out gives it its own
+identity, so later changes to it no longer replace the other chains' ISMs, and the reverse.
+It costs one more CVM.
+
+```sh
+cd ~/tee-ism-nonzk/devnet
+./scripts/30-enclave-up.sh --base                   # any of --celestia --ethereum --base --arbitrum --eden
+./scripts/80-evm-isms.sh && ./scripts/85-celestia-isms.sh && ./scripts/90-evm-warp.sh
+. scripts/lib.sh && write_config && sudo systemctl restart teeism-relayer
+```
+
+The scripts replace only the ISMs that trust the moved chain (`--celestia`: the four on the
+EVM chains; any other: that origin's ISM on Celestia), resuming from their last state. The
+shared CVM keeps serving the rest.
+
 ## No message is lost
 
 When a script replaces an ISM, the new one starts from the old one's last state, with only the
@@ -119,16 +140,11 @@ A Celestia → EVM route can resume only if its last state is under 14 days old.
 | Celestia → any EVM | < 1 min |
 | Eden → Celestia | 1-4 min, mostly waiting for Eden to post its headers to mocha |
 | Sepolia → Celestia | ~15 min |
-| Arbitrum → Celestia | ~1h 40m |
-| Base → Celestia | 5 days |
+| Arbitrum → Celestia | < 1 min |
+| Base → Celestia | < 1 min |
 
-To tell whether a Base transfer is still waiting, compare the anchor's L2 block with your
-dispatch block. If the anchor is below it, the transfer is waiting:
-
-```sh
-cast call 0x2fF5cC82dBf333Ea30D8ee462178ab1707315355 "getAnchorRoot()(bytes32,uint256)" \
-  --rpc-url https://rpc.sepolia.ethpandaops.io
-```
+Base and Arbitrum are attested from the newest block their sequencer signed, so a transfer
+from either that waits more than a few minutes is stuck: check the symptoms below.
 
 `leaves=N` in the log counts other people's messages too.
 
@@ -151,7 +167,11 @@ cast call 0x2fF5cC82dBf333Ea30D8ee462178ab1707315355 "getAnchorRoot()(bytes32,ui
 | `error decoding response body` once | a flaky RPC; nothing, unless it repeats |
 | Eden: `no celestia header in the last 400 rebuilds this ISM's store` | the `da-heights` hint is gone; restore `.state/proofs/chains/eden/` from a backup |
 | Eden: `no celestia block … carries an eden header at a height we hold a proof for` | normal for a few minutes after a restart; if it persists, check that mocha-light is synced |
-| Arbitrum, Base: `no finalized checkpoint in the last 512 epochs rebuilds this ISM's store` | the `checkpoints` hint is gone; restore `.state/proofs/chains/<chain>/` from a backup |
+| Base: `nothing from the base sequencer on p2p in Ns` | the p2p listener has no peers. `RUST_LOG=debug` shows `base gossip peers=… received=…`; check outbound TCP and UDP 9222 |
+| Arbitrum: `nothing from the arbitrum sequencer feed in Ns` | the feed is unreachable; check `ARBITRUM_FEED` |
+| `signed by 0x…, not the pinned sequencer 0x…` | the rollup rotated its sequencer key on L1. Set the new key in `tee-node/src/chains/l2/<chain>.rs` and roll out new enclave code |
+| `proving the tree at signed block N` once | the free endpoint lags the sequencer by a block; nothing, unless it repeats |
+| `reading the tree at the trusted height` | the Alchemy archive refused; check `ALCHEMY_KEY` and its quota |
 
 To decode a four-letter code: `cast call <ism> "describeQuoteError(bytes)(string)" $(cast from-utf8 TCBR)`.
 
@@ -165,8 +185,9 @@ every 30 minutes. **No status post for over 30 minutes means the relayer is down
 
 ```sh
 cd ~/tee-ism-nonzk
-FAMILY=celestia deploy/verify-digest.sh <app id>                            # the enclave runs this repo
-FAMILY=celestia deploy/verify-digest.sh <app id> --ism <ism> --rpc <rpc>    # and the ISM accepts it
+TARGET=all deploy/verify-digest.sh <app id>                                 # the shared CVM runs this repo
+TARGET=all deploy/verify-digest.sh <app id> --ism <ism> --rpc <rpc>         # and the ISM accepts it
+TARGET=base deploy/verify-digest.sh <app id>                                # a chain in its own CVM
 cast call <router> 'interchainSecurityModule()(address)' --rpc-url <rpc>     # which ISM a router uses
 ```
 

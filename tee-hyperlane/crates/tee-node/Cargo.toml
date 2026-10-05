@@ -4,20 +4,18 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
-# One image per origin family, so a change to one stops re-deploying the others.
+# One image per origin chain, so a change to one chain re-deploys only that chain's enclave.
 #
-# The identity an ISM pins is the hash of the image, so every origin sharing one binary means
-# every ISM sharing one identity: changing Eden's executor re-deployed the Ethereum side too.
-# Split, only the ISMs that trust the changed enclave move.
-#
-# `default` builds all three, which is what the tests and the devnet use. The three images
-# each enable one.
+# `default` builds all of them, which is what the tests and the devnet use. Each image enables
+# one.
 [features]
-default = ["celestia", "ethereum", "evolve"]
+default = ["celestia", "ethereum", "base", "arbitrum", "eden"]
 celestia = ["dep:tendermint", "dep:tendermint-light-client-verifier", "dep:celestia-types", "dep:ed25519-dalek", "dep:ics23", "dep:prost"]
 ethereum = ["dep:helios-consensus-core", "dep:ssz_types", "dep:ethereum_ssz", "dep:tree_hash"]
-# An evolve chain rides on Celestia, so its light client comes too.
-evolve = ["celestia", "dep:revm", "dep:ev-revm", "dep:alloy-evm", "dep:alloy-consensus", "dep:alloy-eips"]
+base = ["alloy-primitives/k256"]
+arbitrum = ["alloy-primitives/k256"]
+# Eden's headers are read out of Celestia blocks, so its light client comes too.
+eden = ["celestia"]
 
 [dependencies]
 hyperlane-types.workspace = true
@@ -25,11 +23,6 @@ hyperlane-types.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 alloy-trie.workspace = true
-revm = { workspace = true, optional = true }
-ev-revm = { workspace = true, optional = true }
-alloy-evm = { workspace = true, optional = true }
-alloy-consensus = { workspace = true, optional = true }
-alloy-eips = { workspace = true, optional = true }
 anyhow.workspace = true
 hex.workspace = true
 serde.workspace = true

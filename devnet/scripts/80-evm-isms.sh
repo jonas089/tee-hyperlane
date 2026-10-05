@@ -18,14 +18,14 @@ has merkle-hook-id || die "no local hyperlane deployment; run 'make init' first"
 
 # ---------------------------------------------------------------- pin the live enclave
 
-# Which enclave family this ISM will trust. An EVM destination verifies a *Celestia*-origin
+# Which enclave this ISM will trust. An EVM destination verifies a *Celestia*-origin
 # attestation, so these ISMs pin the Celestia enclave; the Celestia-side ISMs pin whichever
-# enclave attests their origin. One file per family, so adding one is a name, not a rewrite.
-ENCLAVE_FAMILY="${ENCLAVE_FAMILY:-celestia}"
-has "enclave-url-${ENCLAVE_FAMILY}" \
-  || die "no ${ENCLAVE_FAMILY} enclave; run 'make init' first"
+# enclave attests their origin.
+ENCLAVE="${ENCLAVE:-celestia}"
+has "enclave-url-${ENCLAVE}" \
+  || die "no ${ENCLAVE} enclave; run 'make init' first"
 say "reading measurements from the devnet enclave"
-curl -sS -m 30 "$(load "enclave-url-${ENCLAVE_FAMILY}")/identity" -o "${STATE_DIR}/enclave-identity.json"
+curl -sS -m 30 "$(load "enclave-url-${ENCLAVE}")/identity" -o "${STATE_DIR}/enclave-identity.json"
 MEASUREMENTS="$(python3 - "${STATE_DIR}/enclave-identity.json" <<'PY'
 import json, subprocess, sys
 q = json.load(open(sys.argv[1]))["quote"]
@@ -41,8 +41,8 @@ PY
 ISM_REVISION="$(sed -n 's/.*uint8 public constant VERSION = \([0-9]*\);.*/\1/p' "${CONTRACTS}/src/TeeDcapIsm.sol")"
 [ -n "${ISM_REVISION}" ] || die "no VERSION in TeeDcapIsm.sol"
 
-IDENTITY="$(load "identity-digest-${ENCLAVE_FAMILY}")"
-[ -n "${IDENTITY}" ] || die "no identity-digest-${ENCLAVE_FAMILY}; deploy that enclave first"
+IDENTITY="$(load "identity-digest-${ENCLAVE}")"
+[ -n "${IDENTITY}" ] || die "no identity-digest-${ENCLAVE}; deploy that enclave first"
 say "  measurements  ${MEASUREMENTS}"
 say "  identity      ${IDENTITY}"
 

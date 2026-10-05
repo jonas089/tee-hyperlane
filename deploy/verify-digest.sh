@@ -35,22 +35,25 @@ while [ $# -gt 0 ]; do
 done
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-# Every enclave measures one of deploy/docker-compose.<family>.yml, so the family has to be
-# named. There is no default: guessing one would make step 3 report a mismatch that is really
-# just the wrong file, which is indistinguishable from a real failure.
+# Every CVM measures one of deploy/docker-compose.<target>.yml: `all` for the shared CVM, or
+# a chain's name for one deployed alone. There is no default: guessing would make step 3 report
+# a mismatch that is really just the wrong file, which is indistinguishable from a real failure.
 #
-#   FAMILY=evolve ./deploy/verify-digest.sh <app-id>
+#   TARGET=all ./deploy/verify-digest.sh <app-id>
+#   TARGET=eden ./deploy/verify-digest.sh <app-id>
 #   COMPOSE=/some/other/compose.yml ./deploy/verify-digest.sh <app-id>
 if [ -z "${COMPOSE:-}" ]; then
-  [ -n "${FAMILY:-}" ] || {
-    echo "set FAMILY=celestia|ethereum|evolve (or COMPOSE=<path>) so this knows which compose to check against" >&2
+  [ -n "${TARGET:-}" ] || {
+    echo "set TARGET=all|celestia|ethereum|base|arbitrum|eden (or COMPOSE=<path>) so this knows which compose to check against" >&2
     exit 2
   }
-  COMPOSE="${ROOT}/deploy/docker-compose.${FAMILY}.yml"
-  [ -f "${COMPOSE}" ] || { echo "no compose for family ${FAMILY} at ${COMPOSE}" >&2; exit 2; }
+  COMPOSE="${ROOT}/deploy/docker-compose.${TARGET}.yml"
+  [ -f "${COMPOSE}" ] || { echo "no compose for ${TARGET} at ${COMPOSE}" >&2; exit 2; }
 fi
 GATEWAY="${GATEWAY:-dstack-pha-prod9.phala.network}"
-URL="${ENCLAVE_URL:-https://${APP_ID}-8080.${GATEWAY}}"
+# Any service in the CVM reports the same measurements; ask the first one the compose maps.
+PORT="$(grep -oE '"[0-9]+:8080"' "${COMPOSE}" | head -1 | tr -d '"' | cut -d: -f1)"
+URL="${ENCLAVE_URL:-https://${APP_ID}-${PORT:-8080}.${GATEWAY}}"
 WORK="$(mktemp -d)"; trap 'rm -rf "${WORK}"' EXIT
 fail=0
 ok()  { printf '  \033[32mok\033[0m   %s\n' "$1"; }
@@ -113,11 +116,11 @@ else
   diff "${COMPOSE}" "${WORK}/compose_in_quote" | head -20 | sed 's/^/       /'
 fi
 
-IMAGE="$(grep -oE 'image:[[:space:]]*\S+' "${WORK}/compose_in_quote" | awk '{print $2}' | head -1)"
-DIGEST="${IMAGE##*@}"
+# `<service> <image>` per service; the service is the chain the image was built for.
+SERVICES="$(awk '/^  [a-z]+:$/ { s = substr($1, 1, length($1) - 1) } /^    image:/ { print s, $2 }' "${WORK}/compose_in_quote")"
 echo
-echo "4. the image that compose pins"
-note "${IMAGE}"
+echo "4. the images that compose pins"
+while read -r svc image; do note "${svc}: ${image}"; done <<< "${SERVICES}"
 
 echo
 echo "5. what the chain will accept"
@@ -147,15 +150,12 @@ echo "6. the image is what this source builds"
 if [ "${REBUILD}" -eq 1 ]; then
   command -v nix >/dev/null 2>&1 || { bad "nix is not installed"; }
   if command -v nix >/dev/null 2>&1; then
-    # One image per origin family, so the output to build is named by the compose file being
-    # checked. FAMILY overrides it for a compose file that is not named that way.
-    fam="${FAMILY:-$(basename "${COMPOSE}" .yml | sed -n 's/^docker-compose\.//p')}"
-    if [ -z "${fam}" ]; then
-      bad "cannot tell which family ${COMPOSE} is; set FAMILY=celestia|ethereum|evolve"
-    else
-      ( cd "${ROOT}" && nix build ".#image-${fam}" -o "result-verify-${fam}" ) \
-        || bad "nix build of .#image-${fam} failed"
-      built="$(tar -xOf "${ROOT}/result-verify-${fam}" manifest.json 2>/dev/null \
+    # One image per chain, named by its service in the compose.
+    while read -r chain image; do
+      DIGEST="${image##*@}"
+      ( cd "${ROOT}" && nix build ".#image-${chain}" -o "result-verify-${chain}" ) \
+        || bad "nix build of .#image-${chain} failed"
+      built="$(tar -xOf "${ROOT}/result-verify-${chain}" manifest.json 2>/dev/null \
         | python3 -c 'import sys,json;print(json.load(sys.stdin)[0]["Config"])' 2>/dev/null)"
       # The compose pins a manifest digest; a tarball has no manifest digest, because that is
       # computed when it is pushed. Both name the same config blob though, so comparing that
@@ -165,14 +165,14 @@ if [ "${REBUILD}" -eq 1 ]; then
         | sed 's/^sha256://')"
       built="${built#sha256:}"; built="${built%.json}"; built="${built#*/}"
       if [ -n "${pinned}" ] && [ "${built}" = "${pinned}" ]; then
-        ok "rebuilt from this source and it is the image the compose pins"
+        ok "${chain}: rebuilt from this source and it is the image the compose pins"
       else
-        bad "rebuilt ${built}, but the pinned image is ${pinned:-unreadable}"
+        bad "${chain}: rebuilt ${built}, but the pinned image is ${pinned:-unreadable}"
       fi
-    fi
+    done <<< "${SERVICES}"
   fi
 else
-  note "not rebuilt. ${DIGEST} is the registry's word until you run --rebuild,"
+  note "not rebuilt. The digests are the registry's word until you run --rebuild,"
   note "which is the only link here that is not independently checked."
 fi
 

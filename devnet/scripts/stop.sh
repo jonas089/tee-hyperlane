@@ -13,12 +13,12 @@ say "stopping the coprocessor"
 pkill -f "tee-hyperlane --config" 2>/dev/null || true
 pkill -f "vite.*3000" 2>/dev/null || true
 
-# One CVM per origin family. All three are deleted, because a CVM bills by the hour and
-# leaving one behind is the single mistake here that costs money.
-for family in celestia ethereum evolve; do
-  has "enclave-app-id-${family}" || continue
-  app_id="$(load "enclave-app-id-${family}")"
-  say "deleting the ${family} phala cvm ${app_id}"
+# The shared CVM and any chain deployed alone. All are deleted, because a CVM bills by the
+# hour and leaving one behind is the single mistake here that costs money.
+for target in all ${ENCLAVE_CHAINS}; do
+  has "enclave-app-id-${target}" || continue
+  app_id="$(load "enclave-app-id-${target}")"
+  say "deleting the ${target} phala cvm ${app_id}"
   phala cvms delete --cvm-id "${app_id}" --force 2>&1 | tail -2 \
     || warn "could not delete ${app_id}; it is still billing, so check 'phala cvms ls'"
 done

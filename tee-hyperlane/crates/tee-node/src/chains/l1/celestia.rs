@@ -1,14 +1,7 @@
 //! Celestia as an origin: a Tendermint light client, and the Hyperlane tree in the app hash.
 //!
-//! This image attests the Celestia origin, which the four EVM-side ISMs pin. Eden rides on
-//! Celestia - its sequencer posts headers into Celestia blocks - so it lives here too, and only
-//! the evolve image compiles it.
-//!
 //! Only consensus is needed, not data availability sampling: Hyperlane's tree lives in the
 //! application state the app hash commits to, and the app hash is in the header.
-
-#[cfg(feature = "evolve")]
-pub mod eden;
 
 use crate::state::IsmState;
 use alloy_primitives::B256;
@@ -31,13 +24,6 @@ pub static CELESTIA: Chain = Chain {
     domain: DOMAIN,
     origin: &Celestia,
 };
-
-/// Every chain this module attests in this image.
-pub static CHAINS: &[&Chain] = &[
-    &CELESTIA,
-    #[cfg(feature = "evolve")]
-    &eden::EDEN,
-];
 
 /// Hyperlane's domain for mocha. The ISM state carries it; the local devnet's own domain
 /// differs, and that is harmless because the light-client store is what pins the chain.

@@ -8,7 +8,7 @@
 use base64::{engine::general_purpose::STANDARD, Engine};
 use hyperlane_types::get_tree_root;
 use serde_json::{json, Value};
-use tee_node::celestia::CELESTIA;
+use tee_node::chains::l1::celestia::CELESTIA;
 
 #[derive(serde::Deserialize)]
 struct Fixture {

@@ -20,9 +20,10 @@ chain. Without Nix there, set `FORCE_UNPINNED=1` to skip step 5's pin checks. `m
 - an EVM key used by nothing else, funded on Sepolia, Arbitrum Sepolia and Base Sepolia (ETH)
   and on Eden (TIA)
 - a Phala balance (the enclaves cost $4.38/day)
-- a free Alchemy key, for Base
+- a free Alchemy key, for the Base and Arbitrum archives
 
-Only port 3000 needs to be public.
+Only port 3000 needs to be public. The relayer also dials out to Base's p2p network (TCP, and
+UDP on 9222 for discovery); nothing needs to reach it from outside.
 
 ## 1. Code and secrets
 
@@ -33,7 +34,7 @@ cd ~/tee-ism-nonzk
 ln -s ../../deploy/check-secrets.sh .git/hooks/pre-commit
 mkdir -p devnet/.state && chmod 700 devnet/.state
 cp devnet/.env.example devnet/.env && chmod 600 devnet/.env
-$EDITOR devnet/.env      # set EVM_PRIVATE_KEY (with 0x) and ALCHEMY_BASE_KEY
+$EDITOR devnet/.env      # set EVM_PRIVATE_KEY (with 0x) and ALCHEMY_KEY
 ```
 
 celestia-app: always the `jonas/tee-ism` branch, never `main`.
@@ -67,20 +68,27 @@ cd ~/tee-ism-nonzk && git add deploy/images.lock deploy/docker-compose.*.yml
 git commit -m "Pin enclave images" && git push
 ```
 
-`25-images.sh` builds, pushes and pins only the families whose code changed, and records each
-in `deploy/images.lock`. Step 5 refuses to run until those pins match the code and are
-pushed. Pushing from the server needs a GitHub token; otherwise copy the four files off and
-commit them elsewhere.
+One image per origin chain: `celestia`, `ethereum`, `base`, `arbitrum`, `eden`.
+`25-images.sh` builds, pushes and pins only the chains whose code changed, records each in
+`deploy/images.lock`, and regenerates `deploy/docker-compose.all.yml` from the per-chain files.
+Step 5 refuses to run until those pins match the code and are pushed. Pushing from the server
+needs a GitHub token; otherwise copy the changed files off and commit them elsewhere.
 
 ## 5. Enclaves
 
 ```sh
 cd ~/tee-ism-nonzk/devnet
 ./scripts/30-enclave-up.sh
-for f in celestia ethereum evolve; do FAMILY=$f ~/tee-ism-nonzk/deploy/verify-digest.sh "$(cat .state/out/enclave-app-id-$f)"; done
+TARGET=all ~/tee-ism-nonzk/deploy/verify-digest.sh "$(cat .state/out/enclave-app-id-all)"
 ```
 
-It stops first if a family's code no longer matches its pin in `deploy/images.lock`, or the
+This deploys every chain's enclave into one CVM, each on its own port (8080 to 8084). To run a
+chain in its own CVM instead, name it: `./scripts/30-enclave-up.sh --base` (any of
+`--celestia --ethereum --base --arbitrum --eden`, several at once for several CVMs). That chain
+then has its own identity, and its routes point at its own CVM; check it with
+`TARGET=base verify-digest.sh <its app id>`.
+
+It stops first if a chain's code no longer matches its pin in `deploy/images.lock`, or the
 pins aren't committed and pushed. Every `verify-digest.sh` check must say `ok`. Never use
 `phala cvms upgrade`: it changes the enclave's identity.
 
@@ -247,22 +255,31 @@ No enclave or ISM changes.
 
 ### B. Adding a chain
 
-**As an origin**, one file per crate, named after the chain, under the chain it relies on:
+**As an origin**, one file per crate, named after the chain, under `l1/` for a chain verified
+by a light client or `l2/` for a rollup verified by its sequencer's signature:
 
 | file | implement | returns |
 |---|---|---|
-| `tee-node/src/ethereum/arbitrum.rs` | `origin::Origin` | `verify`: the verified state root. `merkle_tree`: the Hyperlane tree under it |
-| `tee-coprocessor/src/origin/ethereum/arbitrum.rs` | `origin::Indexer` | `gather`: the inputs for those two. `index`: messages between heights. `bootstrap`: a genesis state |
+| `tee-node/src/chains/l2/arbitrum.rs` | `origin::Origin` | `verify`: the verified state root. `merkle_tree`: the Hyperlane tree under it |
+| `tee-coprocessor/src/origin/l2/arbitrum.rs` | `origin::Indexer` | `gather`: the inputs for those two. `index`: messages between heights. `bootstrap`: a genesis state |
+
+A rollup whose sequencer signs blocks with a secp256k1 key can reuse
+`tee-node/src/chains/l2/sequencer.rs` for the check and `tee-coprocessor/src/origin/l2/sequenced.rs`
+for everything after the signed block (tree proofs, the archive snapshot, indexing).
 
 Then register it:
-- add the chain to `CHAINS` in its parent module
-- add a `kind` arm in `tee-coprocessor/src/config.rs`
-- add its table to `write_config`
-- add a row to the ISM scripts
+- a cargo feature in `tee-node/Cargo.toml`, and the chain in `origin::chains()`
+- an image: the chain in `flake.nix` (`chains`, `chainFiles`, `keeps`), a
+  `deploy/docker-compose.<chain>.yml`, and a port in `enclave_port` and `ENCLAVE_CHAINS` in
+  `devnet/scripts/lib.sh`
+- a `kind` arm in `tee-coprocessor/src/config.rs`
+- its table in `write_config`, and a row in the ISM scripts
 
 Rules:
 - Contract addresses, storage slots and keys are constants in the chain's file, never inputs.
 - The time is never an input.
+- A new image changes `docker-compose.all.yml`, so it moves the shared CVM's identity and
+  every ISM attested from it.
 
 **As a destination**, an EVM chain reuses `tee-coprocessor/src/destination/evm.rs` and
 `TeeDcapIsm.sol` unchanged. Any other kind of chain needs an ISM that behaves like
@@ -313,14 +330,18 @@ Defaults, each overridable in `devnet/.env`:
 ```
 SEPOLIA_RPC       https://rpc.sepolia.ethpandaops.io
 SEPOLIA_BEACON    https://ethereum-sepolia-beacon-api.publicnode.com
-ARBITRUM_ARCHIVE  https://api.zan.top/arb-sepolia
+ARBITRUM_ARCHIVE  Alchemy, from ALCHEMY_KEY
+ARBITRUM_FEED     wss://sepolia-rollup.arbitrum.io/feed
 ARBITRUM_LOGS     https://sepolia-rollup.arbitrum.io/rpc   (serves eth_getLogs over 1M blocks; publicnode caps at 50k)
 ARBITRUM_RPC      https://sepolia-rollup.arbitrum.io/rpc
-BASE_ARCHIVE      Alchemy, from ALCHEMY_BASE_KEY
+BASE_ARCHIVE      Alchemy, from ALCHEMY_KEY
 BASE_RPC          https://sepolia.base.org
-EDEN_ARCHIVE      https://ev-reth-eden-testnet.binarybuilders.services:8545/   (needs debug_executionWitness)
+BASE_P2P_PORT     9222   (UDP, for discovery; outbound only)
+EDEN_ARCHIVE      https://ev-reth-eden-testnet.binarybuilders.services:8545/
 EDEN_RPC          https://rpc.testnet.eden.gateway.fm/
 EDEN_DA_RPC       http://localhost:26658
 ```
 
 Never use a metered key for logs: a large `eth_getLogs` sweep drains it and stalls every route.
+The Base and Arbitrum archives are read once per ISM advance (the tree at the trusted height);
+reads near the head go to the free endpoint.

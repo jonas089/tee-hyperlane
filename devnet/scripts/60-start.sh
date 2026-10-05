@@ -63,7 +63,7 @@ VITE_CELESTIA_REST=${CELESTIA_API}
 VITE_CELESTIA_EXPLORER=${CELESTIA_API}
 VITE_CELESTIA_MAILBOX_ID=$(load mailbox-id)
 # The routing ISM, not one origin's: it is what the mailbox defaults to and what fans every
-# origin out to the ISM that pins that origin's enclave family.
+# origin out to the ISM that pins that origin's enclave.
 VITE_CELESTIA_ISM_ID=$(load routing-ism-id)
 VITE_CELESTIA_IGP_ID=$(load noop-hook-id)
 VITE_CELESTIA_TIA_ROUTER=$(load celestia-token-id)

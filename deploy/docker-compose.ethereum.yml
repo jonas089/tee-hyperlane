@@ -1,23 +1,21 @@
-# The measured configuration for the ethereum enclave.
+# The measured configuration for the ethereum enclave, when it runs alone in its own CVM
+# (`30-enclave-up.sh --ethereum`). By default it runs in the shared CVM instead, whose
+# docker-compose.all.yml is generated from this file's service block.
 #
-# Serves the Sepolia, Arbitrum and Base origins. Three Celestia-side ISMs pin it.
-# One image per origin family, so a change to one does not re-deploy the ISMs of the others. This file's hash becomes `compose-hash` in RTMR3, and the
-# circuit pins that value - so this file, including the image digest below, is what an ISM
-# ultimately commits to.
+# Serves the Sepolia origin: a sync-committee light client. One Celestia-side ISM pins it.
 #
-# Pinned by digest: a tag can be repointed, and a repointed tag would mean a different
-# binary under the same measurement claim.
-#
-# Both nodes run this identical file. They differ only by which origin a request names,
-# which is why one identity policy and one pair of vkeys covers both.
+# This file's hash becomes `compose-hash` in RTMR3, and the ISM pins that value, so this file,
+# including the image digest below, is what an ISM ultimately commits to. Pinned by digest: a
+# tag can be repointed, and a repointed tag would mean a different binary under the same
+# measurement. Written by devnet/scripts/25-images.sh.
 services:
-  tee-node:
-    image: ghcr.io/jonas089/tee-node@sha256:a25e796aaebd7cd69360dc37e20e01348592f4c8d76b16f279bc1092f69f62cb
+  ethereum:
+    image: ghcr.io/jonas089/tee-node@sha256:3b42a1e645f92c934b8ca2807e5d21e088247ae03df772c16ae9ce1f619071a0
     ports:
-      - "8080:8080"
+      - "8081:8080"
     volumes:
       # The only thing the enclave talks to, and it is local. No data volume: the enclave is
-      # stateless by design, so there is nothing to persist and nothing to seal.
+      # stateless, so there is nothing to persist and nothing to seal.
       - /var/run/dstack.sock:/var/run/dstack.sock
     environment:
       - RUST_LOG=info

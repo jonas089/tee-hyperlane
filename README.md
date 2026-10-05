@@ -1,8 +1,9 @@
 # TEE ISMs
 
-Hyperlane bridging between Celestia and EVM chains, where messages are authorised by a **light
-client running inside a TDX enclave** instead of a validator multisig. The destination
-verifies the enclave's TDX quote directly. There is no zero-knowledge proof anywhere.
+Hyperlane bridging between Celestia and EVM chains, where messages are authorised by a **TDX
+enclave that verifies the origin chain** instead of a validator multisig: a light client for
+Celestia and Ethereum, the sequencer's signature for the rollups. The destination verifies the
+enclave's TDX quote directly. There is no zero-knowledge proof anywhere.
 
 | doc | for |
 |---|---|
@@ -30,32 +31,38 @@ devnet/                                 scripts that deploy everything, and the 
 deploy/                                 the guides, the measured compose files, systemd units
 ```
 
-Both crates have one file per chain: everything about Base is `tee-node/src/ethereum/base.rs`
-(how the enclave verifies it) and `tee-coprocessor/src/origin/ethereum/base.rs` (how its proofs
-are fetched). The coprocessor splits into `origin/` and `destination/`, each with its trait in
-`mod.rs` and one file per implementation.
+Both crates have one file per chain, grouped the same way: `l1/` for chains with their own
+consensus, verified by a light client (Celestia, Ethereum), and `l2/` for rollups, verified by
+their sequencer's signature (Base, Arbitrum, Eden). Everything about Base is
+`tee-node/src/chains/l2/base.rs` (how the enclave verifies it) and
+`tee-coprocessor/src/origin/l2/base.rs` (how its blocks and proofs are fetched). The coprocessor
+splits into `origin/` and `destination/`, each with its trait in `mod.rs`.
 
 ## Deployments
 
-Check any value here yourself with `FAMILY=<family> deploy/verify-digest.sh <app-id>`.
+Check any value here yourself with `TARGET=all deploy/verify-digest.sh <app-id>`.
 
 **Enclaves.** Phala Cloud `prod9`, `tdx.small`, OS `dstack-0.5.9`, image
-`ghcr.io/jonas089/tee-node`.
+`ghcr.io/jonas089/tee-node`. One image per origin, all five in one CVM
+(`deploy/docker-compose.all.yml`), each on its own port. They share the CVM's identity. A chain
+can also run alone in its own CVM with `30-enclave-up.sh --<chain>`, and then has its own.
 
-| family | app id | attests | identity |
-|---|---|---|---|
-| `celestia` | `e6a9dc0dcf0b905cbcb561562cbcd6c814adb126` | Celestia | `0xf3640dbb03c52fa649ae03431a8511e431f78f00d9b8cb622dcd21c9716a82b5` |
-| `ethereum` | `6479fb4b957ce078ede97d5999232210eea646ef` | Sepolia, Arbitrum, Base | `0xbc84fb7140c6bd6e432bcb13b18f2ab5065068803582cf075e688df9d0878b62` |
-| `evolve` | `c3789ecebee1956df200741e968814f4608847bb` | Eden | `0x9bb4f75ab3efe61eafb15bb261d5fccfce81af9252da89e37b571ca3daec2e78` |
+| enclave | port | attests |
+|---|---|---|
+| `celestia` | 8080 | Celestia |
+| `ethereum` | 8081 | Sepolia |
+| `base` | 8082 | Base Sepolia |
+| `arbitrum` | 8083 | Arbitrum Sepolia |
+| `eden` | 8084 | Eden |
+
+The app id, identity and measurements below are written at the rollout of the shared CVM;
+until then the three per-family CVMs (`e6a9dc0d…`, `6479fb4b…`, `c3789ece…`) still serve.
 
 ```
-mr_td          f06dfda6dce1cf904d4e2bab1dc370634cf95cefa2ceb2de2eee127c9382698090d7a4a13e14c536ec6c9c3c8fa87077
-os_image_hash  bd369a8c2f9edb2b52dad48ac8e0b32dde5f1337c423a506b48d07403a7d8033
-mr_kms         92a4bf40c88734b0e56f54b09b1f0fe4b8d3e230047e9298f491968ada8dedf8
-
-                celestia                                                           ethereum                                                           evolve
-compose_hash    37d2642c1dfdff01c93e8b5c931d0ce6e681d88cb2403c2ff98eb84ed7b246a2   8f294a664953f6db736f2a944b2acbc4d0ffd89a0e8e092cf071ab969501ba43   c72ffa5756938376495269366d58a89fcecb3646ac5cfde0bfdff4b7b92647fb
-measurements    0x85db587bf21fad1c4648f368d4fbc1cb95222765274c2ee643e717ef142ec921 0xcd9f2141389162348a791c449e2b63bca2170b0d71b986cb2f1348ca052437d2 0xece515445d5d05f08f2590936d884776a5dd02244e555cefedb14b4f928b9c84
+app id         set at rollout
+identity       set at rollout
+compose_hash   set at rollout
+measurements   set at rollout
 ```
 
 The EVM ISMs pin `measurements`; the Celestia ISMs pin the fields behind `identity`.
@@ -107,6 +114,13 @@ DA           mocha-5, namespace 0000000000000000000000000000000000005d2e074163aa
 sequencer    ed25519 4366433b4309d4f077f0cc1f4370a525736df9a1dc9a205b8d2db1d630b68d51
 ```
 
+**Base and Arbitrum.** The canonical Hyperlane deployments. The sequencer keys the enclave pins:
+
+```
+base       0xb830b99c95Ea32300039624Cb567d324D4b1D83C   SystemConfig 0xf272670eb55e895584501d564AfEB048bEd26194 unsafeBlockSigner
+arbitrum   0x9396c22161c821231ad4ae8fcf991b4beee39990   SequencerInbox 0x6c97864CE4bEf387dE0b3310A44230f7E3F1be0D isSequencer
+```
+
 **Host.** One server, `ark`, runs everything except the enclaves.
 
 ```
@@ -123,17 +137,21 @@ teeism-gas-oracle  systemd  paymaster upkeep
 
 ## Design
 
-- **One enclave per origin family.** A code change to one family only replaces that family's
-  ISMs: celestia → 4, ethereum → 3, evolve → 1. Shared code or `Cargo.lock` → all 8.
-- **Arbitrum and Base are slow on purpose.** A message waits until its rollup block is
-  confirmed on L1: ~1h40m for Arbitrum, 5 days for Base.
-- **Eden is re-executed.** The enclave replays Eden's blocks with ev-reth's own executor and
-  must reach the root the sequencer signed. The sequencer can reorder or stop, not invent state.
+- **One image per origin, one CVM for all of them.** The shared CVM has one identity, so a
+  code change to any image replaces all 8 ISMs. A chain moved to its own CVM
+  (`30-enclave-up.sh --<chain>`) gets its own identity, and a change to it then replaces only
+  the ISMs that chain attests.
+- **Rollups are attested from what their sequencer signed.** Base's sequencer signs every
+  block on the OP Stack p2p network, Arbitrum's every feed message (which commits to the block
+  hash), Eden's every header it posts to Celestia. The enclave checks the signature against the
+  pinned key, takes the state root from the signed block, and proves the Hyperlane tree under
+  it. No re-execution, and no waiting for L1: a transfer is attested seconds after its block.
 
 ## Trust
 
-- **Trusted:** Intel TDX, the pinned enclave identity, each ISM's starting state, and on EVM
-  chains our Automata contracts.
+- **Trusted:** Intel TDX, the pinned enclave identity, each ISM's starting state, on EVM
+  chains our Automata contracts, and the Base, Arbitrum and Eden sequencer keys: a sequencer
+  that signs a wrong state root, or a block it later reorgs away, is believed.
 - **Not trusted:** RPCs, the relayer (it can stall, not forge), Phala beyond uptime, anything
   sent to the enclave.
 - **Risks:** a TDX break forges anything; one EOA owns the ISMs, routers and Automata roles.

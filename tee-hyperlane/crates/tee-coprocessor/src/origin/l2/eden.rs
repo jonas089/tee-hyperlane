@@ -1,4 +1,4 @@
-//! Gathers what the enclave needs to verify Eden: its headers on Celestia, the blocks to re-execute, and tree proofs.
+//! Gathers what the enclave needs to verify Eden: its signed headers on Celestia, and tree proofs.
 
 use std::collections::HashSet;
 use std::sync::{LazyLock, Mutex};
@@ -10,14 +10,14 @@ use celestia_types::namespace_data::NamespaceData;
 use celestia_types::DataAvailabilityHeader;
 use serde::Deserialize;
 use serde_json::{json, Value};
-use tee_node::celestia::eden::{Eden as EdenChain, SignedHeader, EDEN, TREE_SLOT};
-use tee_node::celestia::CelestiaStore;
+use tee_node::chains::l1::celestia::CelestiaStore;
+use tee_node::chains::l2::eden::{Eden as EdenChain, SignedHeader, EDEN, TREE_SLOT};
 use tee_node::state::IsmState;
 use tendermint_light_client_verifier::types::LightBlock;
 use tracing::{debug, info};
 
-use super::Rpc as CelestiaRpc;
-use crate::origin::evm::{hex_number, Rpc};
+use crate::origin::evm::Rpc;
+use crate::origin::l1::celestia::Rpc as CelestiaRpc;
 use crate::origin::{self, Cache, Indexer, Message, Step};
 
 /// How far back to search for the Celestia header this ISM's store sits at, without a hint.
@@ -46,7 +46,7 @@ pub struct Config {
     pub celestia: String,
     /// A celestia-node DA endpoint: the consensus RPC cannot serve rows or blobs.
     pub da_rpc: String,
-    /// Eden's own RPC. It must serve `debug_executionWitness`, which re-execution needs.
+    /// Eden's own RPC.
     pub rpc: String,
     pub logs_rpc: Option<String>,
     /// Where transactions and ISM reads go when this chain is a destination, if not `rpc`.
@@ -54,7 +54,7 @@ pub struct Config {
     pub send_rpc: Option<String>,
     pub mailbox: Address,
     pub merkle_tree_hook: Address,
-    #[serde(default = "super::default_lag")]
+    #[serde(default = "crate::origin::l1::celestia::default_lag")]
     pub lag: u64,
 }
 
@@ -69,7 +69,11 @@ pub struct Eden {
 }
 
 impl Eden {
-    pub fn new(config: Config, celestia: super::Config, cache: Cache) -> Result<Self> {
+    pub fn new(
+        config: Config,
+        celestia: crate::origin::l1::celestia::Config,
+        cache: Cache,
+    ) -> Result<Self> {
         let _ = std::fs::create_dir_all(cache.path("trees"));
         Ok(Self {
             celestia: CelestiaRpc::new(&celestia.rpc)?,
@@ -218,66 +222,6 @@ impl Eden {
         }
         Ok(None)
     }
-
-    /// Every block that changed Eden's state in `(from, to]`, by bisecting on state roots.
-    /// Only those need re-executing; a skipped one shows up in the enclave as a root mismatch.
-    async fn changed_blocks(&self, from: u64, to: u64) -> Result<Vec<u64>> {
-        let mut found = Vec::new();
-        let mut stack = vec![(
-            from,
-            self.rpc.state_root(from).await?,
-            to,
-            self.rpc.state_root(to).await?,
-        )];
-        while let Some((lo, lo_root, hi, hi_root)) = stack.pop() {
-            if lo_root == hi_root {
-                continue;
-            }
-            if hi == lo + 1 {
-                found.push(hi);
-                continue;
-            }
-            let mid = lo + (hi - lo) / 2;
-            let mid_root = self.rpc.state_root(mid).await?;
-            stack.push((lo, lo_root, mid, mid_root));
-            stack.push((mid, mid_root, hi, hi_root));
-        }
-        found.sort_unstable();
-        Ok(found)
-    }
-
-    /// One block and its execution witness, shaped as the enclave's `BlockExec`.
-    async fn block_for_execution(&self, number: u64) -> Result<Value> {
-        use alloy_rlp::Encodable;
-        let block = self
-            .rpc
-            .call("eth_getBlockByNumber", json!([hex_number(number), true]))
-            .await?;
-        let header: alloy_consensus::Header = serde_json::from_value(block.clone())
-            .with_context(|| format!("block {number} header"))?;
-        let mut rlp = Vec::new();
-        header.encode(&mut rlp);
-        let mut transactions = Vec::new();
-        for tx in block["transactions"].as_array().context("transactions")? {
-            transactions.push(
-                self.rpc
-                    .call("eth_getRawTransactionByHash", json!([tx["hash"]]))
-                    .await?,
-            );
-        }
-        let witness = self
-            .rpc
-            .call("debug_executionWitness", json!([hex_number(number)]))
-            .await
-            .with_context(|| format!("execution witness for block {number}"))?;
-        Ok(json!({
-            "header": format!("0x{}", hex::encode(rlp)),
-            "transactions": transactions,
-            "state": witness["state"],
-            "codes": witness["codes"],
-            "ancestors": witness["headers"],
-        }))
-    }
 }
 
 #[async_trait]
@@ -334,21 +278,6 @@ impl Indexer for Eden {
             return Ok(Step::idle(header.height));
         }
 
-        let changed = self
-            .changed_blocks(trusted.height, header.height)
-            .await
-            .context("finding eden's state changes")?;
-        debug!(
-            blocks = changed.len(),
-            from = trusted.height,
-            to = header.height,
-            celestia = celestia_height,
-            "re-executing eden"
-        );
-        let mut chain = Vec::with_capacity(changed.len());
-        for number in changed {
-            chain.push(self.block_for_execution(number).await?);
-        }
         // The store the ISM moves to sits at this Celestia height; remember it ahead of the one
         // just used, so the next tick finds the store in one request either way.
         self.cache
@@ -366,7 +295,6 @@ impl Indexer for Eden {
                 "proof": {
                     "dah": self.da.dah(celestia_height).await?,
                     "data": data,
-                    "chain": chain,
                     "target_height": header.height,
                 },
             }),

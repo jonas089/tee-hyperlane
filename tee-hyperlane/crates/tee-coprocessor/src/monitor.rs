@@ -637,8 +637,8 @@ mod tests {
         assert!(late.problem.unwrap().contains("not verified"));
     }
 
-    /// Base takes five days, but once its anchor covers the block the ISM must follow within
-    /// minutes, and a transfer stuck behind that is reported long before the five days.
+    /// On a route with a long expected latency, a transfer the origin already covers must
+    /// still be attested within minutes, and is reported long before the backstop.
     #[test]
     fn attestable_but_not_verified_is_stuck_well_before_the_backstop() {
         let r = route(5 * 86400);
