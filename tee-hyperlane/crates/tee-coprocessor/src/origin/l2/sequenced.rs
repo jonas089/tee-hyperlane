@@ -59,14 +59,15 @@ pub struct SignedHead {
 /// listener hands them in.
 pub struct Recent<T> {
     items: Mutex<BTreeMap<u64, T>>,
-    last: Mutex<Option<Instant>>,
+    /// When something last arrived, or when the listener started if nothing has yet.
+    last: Mutex<Instant>,
 }
 
 impl<T> Default for Recent<T> {
     fn default() -> Self {
         Self {
             items: Mutex::new(BTreeMap::new()),
-            last: Mutex::new(None),
+            last: Mutex::new(Instant::now()),
         }
     }
 }
@@ -78,7 +79,7 @@ impl<T: Clone> Recent<T> {
         while items.len() > KEPT {
             items.pop_first();
         }
-        *self.last.lock().unwrap_or_else(|p| p.into_inner()) = Some(Instant::now());
+        *self.last.lock().unwrap_or_else(|p| p.into_inner()) = Instant::now();
     }
 
     /// Up to `n` items above `key`, newest first.
@@ -92,13 +93,19 @@ impl<T: Clone> Recent<T> {
             .collect()
     }
 
-    /// Fails once nothing has arrived for `SILENT_AFTER`, so a dead source shows as a failing
-    /// route rather than a quiet one.
+    /// Fails once nothing has arrived for `SILENT_AFTER`, counting from the start if nothing
+    /// ever has, so a dead source shows as a failing route rather than a quiet one.
     pub fn check_alive(&self, what: &str) -> Result<()> {
-        let last = *self.last.lock().unwrap_or_else(|p| p.into_inner());
-        if let Some(silent) = last.map(|t| t.elapsed()).filter(|s| *s > SILENT_AFTER) {
-            anyhow::bail!("nothing from the {what} in {}s", silent.as_secs());
-        }
+        let silent = self
+            .last
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .elapsed();
+        anyhow::ensure!(
+            silent <= SILENT_AFTER,
+            "nothing from the {what} in {}s",
+            silent.as_secs()
+        );
         Ok(())
     }
 
@@ -235,7 +242,12 @@ mod tests {
         let recent = Recent::default();
         assert!(
             recent.check_alive("test").is_ok(),
-            "nothing yet is not silence"
+            "just started is not silence"
+        );
+        *recent.last.lock().unwrap() -= SILENT_AFTER * 2;
+        assert!(
+            recent.check_alive("test").is_err(),
+            "never hearing anything is"
         );
         for h in 0..(KEPT as u64 + 10) {
             recent.insert(h, h);
