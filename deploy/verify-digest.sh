@@ -18,6 +18,10 @@
 # --rebuild also builds the image from source with Nix and compares it against the one the
 # compose pins, which takes a while. Without it the image leg is reported as unverified rather than
 # passed, because the digest in the compose file is only the registry's word until rebuilt.
+#
+# --rebuild reproduces the pinned image only on x86_64 Linux with Nix's sandbox on
+# (`nix config show sandbox` prints `true`). Without it, rustc embeds a different build path and
+# every binary differs. In Docker, run Nix with `--privileged` and `sandbox = true`.
 set -uo pipefail
 
 APP_ID="${1:-}"
