@@ -325,7 +325,9 @@ COPROCESSOR_CONFIG="${STATE_DIR}/coprocessor.toml"
 COPROCESSOR_BIN="${REPO_DIR}/tee-hyperlane/target/release/tee-hyperlane"
 
 write_config() {
-  local sepolia_rpc="${SEPOLIA_RPC:-https://rpc.sepolia.ethpandaops.io}"
+  # Sepolia is read from the host's own nodes: reth for execution, Lodestar for the beacon
+  # chain. Lodestar because Gloas light-client data is only served by it; see deploy/DEPLOY.md.
+  local sepolia_rpc="${SEPOLIA_RPC:-http://127.0.0.1:8545}"
   # The archives for Base and Arbitrum: BASE_ARCHIVE / ARBITRUM_ARCHIVE as urls, else Alchemy
   # with ALCHEMY_KEY from devnet/.env (ALCHEMY_BASE_KEY on older hosts, or the key file they
   # keep in .state). Only these two `rpc` fields ever get it.
@@ -401,10 +403,10 @@ rpc = "${MOCHA_RPC:-https://rpc.celestia-mocha.com}"
 kind = "ethereum"
 domain = ${SEPOLIA_DOMAIN}
 rpc = "${sepolia_rpc}"
-# Deliveries go to a node at the head: the ISM refuses an attestation newer than the block
-# it is checked in, so a lagging rpc fails every delivery with ClockBehindAttest.
-send_rpc = "${SEPOLIA_SEND_RPC:-https://ethereum-sepolia-rpc.publicnode.com}"
-beacon_rpc = "${SEPOLIA_BEACON:-https://ethereum-sepolia-beacon-api.publicnode.com}"
+beacon_rpc = "${SEPOLIA_BEACON:-http://127.0.0.1:9596}"$(
+  # Deliveries go through `rpc` unless this is set. Whichever it is has to be at the head: the
+  # ISM refuses an attestation newer than the block it is checked in (ClockBehindAttest).
+  if [ -n "${SEPOLIA_SEND_RPC:-}" ]; then printf '\nsend_rpc = "%s"' "${SEPOLIA_SEND_RPC}"; fi)
 mailbox = "${SEPOLIA_MAILBOX:-0xfFAEF09B3cd11D9b20d1a19bECca54EEC2884766}"
 merkle_tree_hook = "${SEPOLIA_HOOK:-0x4917a9746A7B6E0A57159cCb7F5a6744247f2d0d}"
 
@@ -448,9 +450,9 @@ TOML
         printf '\n[trade.venues.%s]\nfactory = "%s"\npositions = "%s"\nswap_router = "%s"\nquoter = "%s"\nfee = %s\n' \
           "${c}" "${factory}" "${positions}" "${swap}" "${quoter}" "${TRADE_FEE}"
         if has "${c}-factory"; then printf 'token_factory = "%s"\n' "$(load "${c}-factory")"; fi
-        # Sepolia's own rpc is a full node busy proving old state for the relayer, which answers
-        # the venue slowly and can trail the head; the venue reads a public endpoint instead.
-        if [ "${c}" = sepolia ]; then printf 'rpc = "%s"\n' "${TRADE_SEPOLIA_RPC:-https://ethereum-sepolia-rpc.publicnode.com}"; fi
+        # The venue reads a chain through its own endpoints unless TRADE_<CHAIN>_RPC names another.
+        local trade_rpc="TRADE_$(printf '%s' "${c}" | tr 'a-z' 'A-Z')_RPC"
+        if [ -n "${!trade_rpc:-}" ]; then printf 'rpc = "%s"\n' "${!trade_rpc}"; fi
       done
       printf '\n[trade.assets.TIA]\ndecimals = 6\ndenom = "utia"\n[trade.assets.TIA.routers]\ncelestia = "%s"\n' "$(load celestia-token-id)"
       for c in sepolia arbitrum base eden; do if has "${c}-router"; then printf '%s = "%s"\n' "${c}" "$(load "${c}-router")"; fi; done

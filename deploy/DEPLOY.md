@@ -103,6 +103,23 @@ for c in sepolia arbitrum base eden; do ./scripts/seed-evm-collateral.sh $c; don
 These files hold the addresses of our Automata contracts. For a chain that has none yet, see
 [appendix D](#d-automata-on-a-new-evm-chain).
 
+## 6b. Sepolia node
+
+The Sepolia routes read the host's own nodes: execution on `127.0.0.1:8545`, beacon on
+`127.0.0.1:9596` (`SEPOLIA_RPC`, `SEPOLIA_BEACON` to change).
+
+- **Execution: reth 2.7.0 or later**, which knows Amsterdam. Keep about a day of history and an
+  `eth_getProof` window to match (`--rpc.eth-proof-window`); ark keeps 120k blocks of each.
+- **Beacon: Lodestar v1.49.0 or later.** Since Glamsterdam (Sepolia slot 11296768) a beacon
+  block carries a builder's bid instead of an execution payload, and only Lodestar serves Gloas
+  light-client data; lighthouse returns 404 for every post-fork bootstrap. Lodestar drives reth
+  over the engine API with the same JWT secret lighthouse used.
+
+```sh
+curl -s localhost:9596/eth/v1/beacon/light_client/finality_update | jq -r .version   # gloas
+curl -s localhost:9596/eth/v1/config/spec | jq -r .data.GLOAS_FORK_EPOCH            # 353024
+```
+
 ## 7. Mocha light node (for Eden)
 
 ```sh
@@ -343,8 +360,9 @@ the scripts and ISMs read:
 Defaults, each overridable in `devnet/.env`:
 
 ```
-SEPOLIA_RPC       https://rpc.sepolia.ethpandaops.io
-SEPOLIA_BEACON    https://ethereum-sepolia-beacon-api.publicnode.com
+SEPOLIA_RPC       http://127.0.0.1:8545   (reth, step 6b)
+SEPOLIA_BEACON    http://127.0.0.1:9596   (Lodestar, step 6b)
+SEPOLIA_SEND_RPC  SEPOLIA_RPC              (deliveries; must be at the head)
 ARBITRUM_ARCHIVE  Alchemy, from ALCHEMY_KEY
 ARBITRUM_FEED     wss://sepolia-rollup.arbitrum.io/feed
 ARBITRUM_LOGS     https://sepolia-rollup.arbitrum.io/rpc   (serves eth_getLogs over 1M blocks; publicnode caps at 50k)

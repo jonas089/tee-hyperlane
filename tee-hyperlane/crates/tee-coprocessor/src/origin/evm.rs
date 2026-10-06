@@ -103,6 +103,10 @@ impl Rpc {
         let header: alloy_consensus::Header = serde_json::from_value(block.clone())?;
         let mut rlp = Vec::new();
         header.encode(&mut rlp);
+        if keccak256(&rlp) != block_hash {
+            // Amsterdam appended fields this alloy does not know; encode from the JSON.
+            rlp = encode_header(&block)?;
+        }
         anyhow::ensure!(
             keccak256(&rlp) == block_hash,
             "re-encoded header of {block_hash} hashes differently"
@@ -338,6 +342,62 @@ pub fn account(proof: &Value) -> Value {
     })
 }
 
+/// A header's RLP from its JSON, in the order the forks appended fields, up to Amsterdam's
+/// block access list hash and slot number. Every field the block has is encoded and none after
+/// the first it lacks; the caller checks the result against the block hash.
+pub fn encode_header(block: &Value) -> Result<Vec<u8>> {
+    use alloy_rlp::Encodable;
+    const FIELDS: [(&str, bool); 23] = [
+        ("parentHash", false),
+        ("sha3Uncles", false),
+        ("miner", false),
+        ("stateRoot", false),
+        ("transactionsRoot", false),
+        ("receiptsRoot", false),
+        ("logsBloom", false),
+        ("difficulty", true),
+        ("number", true),
+        ("gasLimit", true),
+        ("gasUsed", true),
+        ("timestamp", true),
+        ("extraData", false),
+        ("mixHash", false),
+        ("nonce", false),
+        ("baseFeePerGas", true),
+        ("withdrawalsRoot", false),
+        ("blobGasUsed", true),
+        ("excessBlobGas", true),
+        ("parentBeaconBlockRoot", false),
+        ("requestsHash", false),
+        ("blockAccessListHash", false),
+        ("slotNumber", true),
+    ];
+    let mut items: Vec<u8> = Vec::new();
+    for (name, number) in FIELDS {
+        let Some(text) = block[name].as_str() else {
+            break;
+        };
+        if number {
+            alloy_primitives::U256::from_str_radix(text.trim_start_matches("0x"), 16)
+                .with_context(|| name.to_string())?
+                .encode(&mut items);
+        } else {
+            hex::decode(text.trim_start_matches("0x"))
+                .with_context(|| name.to_string())?
+                .as_slice()
+                .encode(&mut items);
+        }
+    }
+    let mut out = Vec::new();
+    alloy_rlp::Header {
+        list: true,
+        payload_length: items.len(),
+    }
+    .encode(&mut out);
+    out.extend_from_slice(&items);
+    Ok(out)
+}
+
 pub fn hex_number(n: u64) -> String {
     format!("0x{n:x}")
 }
@@ -349,4 +409,28 @@ pub fn quantity(v: &Value) -> Result<u64> {
             .trim_start_matches("0x"),
         16,
     )?)
+}
+
+#[cfg(test)]
+mod header_tests {
+    use super::*;
+
+    /// Sepolia's last Prague block and an Amsterdam one: both re-encode to their own hash.
+    #[test]
+    fn a_header_encodes_to_its_hash_on_both_sides_of_amsterdam() {
+        for name in ["sepolia_block_prague.json", "sepolia_block_amsterdam.json"] {
+            let path = format!("{}/tests/fixtures/{name}", env!("CARGO_MANIFEST_DIR"));
+            let block: Value =
+                serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+            let hash: B256 = block["hash"].as_str().unwrap().parse().unwrap();
+            assert_eq!(keccak256(encode_header(&block).unwrap()), hash, "{name}");
+            let decoded =
+                tee_node::evm::BlockHeader::decode(&encode_header(&block).unwrap()).unwrap();
+            assert_eq!(
+                decoded.number,
+                quantity(&block["number"]).unwrap(),
+                "{name}"
+            );
+        }
+    }
 }

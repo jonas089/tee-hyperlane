@@ -127,6 +127,46 @@ pub fn verify_storage_proof(
 }
 
 /// A 20-byte address as a Hyperlane message addresses it, left-padded to 32 bytes.
+/// What an execution block header says about its block.
+pub struct BlockHeader {
+    pub state_root: B256,
+    pub number: u64,
+    pub timestamp: u64,
+}
+
+impl BlockHeader {
+    /// A block header is an RLP list: state root is item 3, number item 8, timestamp item 11.
+    /// Later forks only append items, so these positions hold for every header since London.
+    pub fn decode(rlp: &[u8]) -> anyhow::Result<Self> {
+        let malformed = || anyhow::anyhow!("block header RLP is malformed");
+        let mut slice = rlp;
+        let alloy_rlp::PayloadView::List(items) =
+            alloy_rlp::Header::decode_raw(&mut slice).map_err(|_| malformed())?
+        else {
+            return Err(malformed());
+        };
+        anyhow::ensure!(slice.is_empty() && items.len() >= 12, malformed());
+        let field = |i: usize| {
+            let mut item = items[i];
+            alloy_rlp::Header::decode_bytes(&mut item, false).map_err(|_| malformed())
+        };
+        let uint = |i: usize| -> anyhow::Result<u64> {
+            let bytes = field(i)?;
+            anyhow::ensure!(bytes.len() <= 8, malformed());
+            let mut out = [0u8; 8];
+            out[8 - bytes.len()..].copy_from_slice(bytes);
+            Ok(u64::from_be_bytes(out))
+        };
+        let root = field(3)?;
+        anyhow::ensure!(root.len() == 32, malformed());
+        Ok(Self {
+            state_root: B256::from_slice(root),
+            number: uint(8)?,
+            timestamp: uint(11)?,
+        })
+    }
+}
+
 pub fn padded(address: Address) -> [u8; 32] {
     let mut out = [0u8; 32];
     out[12..].copy_from_slice(address.as_slice());

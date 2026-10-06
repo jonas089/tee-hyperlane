@@ -41,9 +41,8 @@ rpc = "https://rpc.celestia-mocha.com"
 [chains.sepolia]
 kind = "ethereum"
 domain = 11155111
-rpc = "https://rpc.sepolia.ethpandaops.io"
-send_rpc = "https://ethereum-sepolia-rpc.publicnode.com"
-beacon_rpc = "https://ethereum-sepolia-beacon-api.publicnode.com"
+rpc = "http://127.0.0.1:8545"
+beacon_rpc = "http://127.0.0.1:9596"
 mailbox = "0xfFAEF09B3cd11D9b20d1a19bECca54EEC2884766"
 merkle_tree_hook = "0x4917a9746A7B6E0A57159cCb7F5a6744247f2d0d"
 
@@ -99,7 +98,6 @@ swap_router = "0x3bFA4769FB09eefC5a80d6E87c3B9C650f7Ae48E"
 quoter = "0xEd1f6473345F45b75F8179591dd5bA1888cf2FB3"
 fee = 3000
 token_factory = "0x511e40dd0d0100abFA2507aBD5A03724A216DdEA"
-rpc = "https://ethereum-sepolia-rpc.publicnode.com"
 
 [trade.venues.base]
 factory = "0x4752ba5DBc23f44D87826276BF6Fd6b1C372aD24"

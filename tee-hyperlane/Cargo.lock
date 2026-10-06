@@ -3257,7 +3257,6 @@ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 [[package]]
 name = "helios-consensus-core"
 version = "0.11.1"
-source = "git+https://github.com/a16z/helios?rev=43a8c9f3cdda41a6f383c4db41d9a83f102638b1#43a8c9f3cdda41a6f383c4db41d9a83f102638b1"
 dependencies = [
  "alloy",
  "alloy-rlp",
@@ -3267,6 +3266,7 @@ dependencies = [
  "eyre",
  "getrandom 0.2.17",
  "serde",
+ "serde_json",
  "sha2 0.9.9",
  "ssz_types",
  "superstruct",

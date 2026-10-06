@@ -43,6 +43,7 @@
           "tee-hyperlane/Cargo.lock"
           "tee-hyperlane/rust-toolchain"
           "tee-hyperlane/crates/hyperlane-types"
+          "tee-hyperlane/crates/helios-consensus-core"
           "tee-hyperlane/crates/tee-node"
         ];
 
@@ -103,23 +104,16 @@
           src = srcFor feature;
           sourceRoot = "source/tee-hyperlane";
 
-          cargoLock = {
-            lockFile = ./tee-hyperlane/Cargo.lock;
-            # helios publishes only nightly tags, so it arrives by git rev rather than from
-            # crates.io. Pinned by content hash here, by rev in Cargo.lock.
-            outputHashes = {
-              # helios is the one crate fetched from git: the Ethereum light client.
-              "helios-consensus-core-0.11.1" =
-                "sha256-iV+FnmteHnSZFZ8wJi0PUwDeU9gnLh8gPN+0X//2mSQ=";
-            };
-          };
+          # Every dependency comes from crates.io now: helios, the one that came from git, is
+          # vendored in the workspace with Gloas added.
+          cargoLock.lockFile = ./tee-hyperlane/Cargo.lock;
 
           # cargo insists every workspace member resolve even when building one of them, and
           # the excluded crates' manifests are not in `src`. Trimming the list is what lets
           # them stay out.
           postPatch = ''
-            sed -i 's|^members = .*|members = ["crates/hyperlane-types", "crates/tee-node"]|' Cargo.toml
-            grep -q 'members = \["crates/hyperlane-types", "crates/tee-node"\]' Cargo.toml
+            sed -i 's|^members = .*|members = ["crates/hyperlane-types", "crates/helios-consensus-core", "crates/tee-node"]|' Cargo.toml
+            grep -q 'members = \["crates/hyperlane-types", "crates/helios-consensus-core", "crates/tee-node"\]' Cargo.toml
           '';
 
           cargoBuildFlags = [

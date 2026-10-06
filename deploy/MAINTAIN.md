@@ -165,6 +165,8 @@ from either that waits more than a few minutes is stuck: check the symptoms belo
 | UI shows `Failed to fetch` | the UI was built with the wrong `.env.local`; rebuild on the host |
 | `discarding a batch` | nothing; it rebuilds by itself |
 | `carrying sync committee updates` every tick | nothing; the ISM is behind and catches up when a batch lands |
+| Sepolia: `GLOAS_FORK_VERSION missing` | the beacon node has no Gloas; point `SEPOLIA_BEACON` at Lodestar ([DEPLOY 6b](DEPLOY.md#6b-sepolia-node)) |
+| Sepolia: `no finalized checkpoint … rebuilds this ISM's light-client store` | the beacon node cannot bootstrap the ISM's checkpoint: a lighthouse after Glamsterdam, or a Lodestar that synced after that checkpoint |
 | Sepolia deliveries: `ClockBehindAttest` | the node deliveries are sent through trails the chain; `send_rpc` (`SEPOLIA_SEND_RPC`) has to be at the head |
 | Sepolia: `finality update rejected: invalid sync committee period` | a period boundary between the finalized header and its signature; the relayer carries the committee update for it since `7b51626`; before that it cleared within 20 minutes |
 | `error decoding response body` once | a flaky RPC; nothing, unless it repeats |

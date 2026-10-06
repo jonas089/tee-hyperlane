@@ -4,7 +4,7 @@ use alloy_primitives::{Address, B256};
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use helios_consensus_core::types::{
-    Bootstrap, FinalityUpdate, Fork, Forks, LightClientStore, Update,
+    Bootstrap, FinalityUpdate, Fork, Forks, LightClientHeader, LightClientStore, Update,
 };
 use helios_consensus_core::{apply_bootstrap, verify_bootstrap};
 use serde::Deserialize;
@@ -132,18 +132,35 @@ impl Ethereum {
         );
         self.remember(&[&next, &used]);
 
-        let execution = finality
-            .finalized_header()
-            .execution()
-            .map_err(|_| anyhow::anyhow!("finalized header has no execution payload"))?;
+        let (block, state_root, execution_header) =
+            self.execution_of(finality.finalized_header()).await?;
         Ok(Some(L1Step {
-            block: *execution.block_number(),
-            state_root: *execution.state_root(),
+            block,
+            state_root,
             input: json!({
                 "store": store,
                 "updates": { "committee_updates": committee_updates, "finality_update": finality },
+                "execution_header": execution_header,
             }),
         }))
+    }
+
+    /// The execution block a finalized beacon header lands on. Before Gloas the header carries
+    /// it; from Gloas it names it by hash, and the enclave needs the header RLP to check that.
+    async fn execution_of(
+        &self,
+        header: &LightClientHeader,
+    ) -> Result<(u64, B256, Option<String>)> {
+        if let LightClientHeader::Gloas(h) = header {
+            let (rlp, block) = self.rpc.header_rlp(h.execution_block_hash).await?;
+            let number = crate::origin::evm::quantity(&block["number"])?;
+            let state_root: B256 = block["stateRoot"].as_str().context("stateRoot")?.parse()?;
+            return Ok((number, state_root, Some(format!("0x{}", hex::encode(rlp)))));
+        }
+        let execution = header
+            .execution()
+            .map_err(|_| anyhow::anyhow!("finalized header has no execution payload"))?;
+        Ok((*execution.block_number(), *execution.state_root(), None))
     }
 
     fn remember(&self, checkpoints: &[&str]) {
@@ -176,8 +193,14 @@ impl Ethereum {
         if trusted.origin_domain == ETHEREUM.domain {
             let genesis = self.beacon.genesis().await?.0;
             let slot = trusted.timestamp.saturating_sub(genesis) / SECONDS_PER_SLOT;
-            if let Ok(root) = self.beacon.block_root(slot).await {
-                hints.push(root);
+            // Before Gloas the execution block is the checkpoint's own slot. From Gloas it is
+            // the last payload revealed before the checkpoint, so the checkpoint is the next
+            // epoch boundary after it.
+            let next = (slot / SLOTS_PER_EPOCH + 1) * SLOTS_PER_EPOCH;
+            for s in [slot, next] {
+                if let Ok(root) = self.beacon.block_root(s).await {
+                    hints.push(root);
+                }
             }
         }
         for checkpoint in &hints {
@@ -289,7 +312,11 @@ impl Indexer for Ethereum {
 
     async fn bootstrap(&self, identity: [u8; 32], _height: Option<u64>) -> Result<IsmState> {
         let store = self.genesis_store().await?;
-        let root = store.root()?;
+        let (_, _, header) = self.execution_of(&store.store.finalized_header).await?;
+        let header = header
+            .map(|h| hex::decode(h.trim_start_matches("0x")))
+            .transpose()?;
+        let root = store.root(header.as_deref())?;
         Ok(IsmState {
             state_root: root.state_root.0,
             origin_domain: ETHEREUM.domain,
@@ -437,7 +464,64 @@ impl Beacon {
                 deneb: fork("DENEB")?,
                 electra: fork("ELECTRA")?,
                 fulu: fork("FULU")?,
+                // Gloas: only a beacon node with Gloas light-client support lists it; one
+                // without (lighthouse 8.3) fails here rather than serving updates we refuse.
+                gloas: fork("GLOAS")?,
             },
         ))
+    }
+}
+
+/// Against a Gloas beacon node and an execution node at the head, with no cache: anchor, rebuild
+/// from the ISM state alone, wait for finality to move, and run the enclave's check on the step.
+/// `BEACON=<lodestar> RPC=<sepolia> cargo test -p tee-coprocessor gloas_live -- --ignored --nocapture`
+#[cfg(test)]
+mod live {
+    use super::*;
+    use tee_node::origin::Origin;
+
+    #[tokio::test]
+    #[ignore]
+    async fn gloas_live() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = Config {
+            domain: ETHEREUM.domain,
+            rpc: std::env::var("RPC").unwrap(),
+            archive_rpc: None,
+            send_rpc: None,
+            beacon_rpc: Some(std::env::var("BEACON").unwrap()),
+            mailbox: "0xfFAEF09B3cd11D9b20d1a19bECca54EEC2884766"
+                .parse()
+                .unwrap(),
+            merkle_tree_hook: "0x4917a9746A7B6E0A57159cCb7F5a6744247f2d0d"
+                .parse()
+                .unwrap(),
+            checkpoint: None,
+        };
+        let eth = Ethereum::new(config, Cache::new(dir.path().to_path_buf())).unwrap();
+        let trusted = eth.bootstrap([0; 32], None).await.unwrap();
+        println!(
+            "anchored at block {} ({})",
+            trusted.height, trusted.timestamp
+        );
+
+        let (_, checkpoint) = eth.rebuild_store(&trusted).await.unwrap();
+        println!("rebuilt from {checkpoint} with no cache");
+
+        for _ in 0..30 {
+            if let Some(step) = eth.l1_step(&trusted).await.unwrap() {
+                if step.block > trusted.height {
+                    let head = tee_node::chains::l1::ethereum::Ethereum
+                        .verify(step.input, &trusted)
+                        .unwrap();
+                    println!("enclave accepted block {} root {}", head.height, head.root);
+                    assert_eq!(head.height, step.block);
+                    assert_eq!(head.root, step.state_root);
+                    return;
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+        }
+        panic!("finality did not move in 15 minutes");
     }
 }

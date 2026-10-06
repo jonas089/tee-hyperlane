@@ -86,6 +86,11 @@ endpoint is a free public one.
 - **v5 quotes: EVM yes, Celestia not yet.** Phala emits v4 TDX quotes today. `TeeDcapIsm`
   (`VERSION` 2) and `75-dcap-verifiers.sh` accept v5 as well, but `x/teeism` still casts to
   `QuoteV4`, so a host switch to v5 would stop the four routes into Celestia until it changes.
+- **Sepolia is past Glamsterdam (Gloas), and its light client is ours.** From slot 11296768 a
+  beacon light-client header names its execution block only by hash, so the relayer sends that
+  header's RLP and the enclave checks its keccak. helios has no Gloas: it is vendored in
+  `crates/helios-consensus-core` with the changes marked `Gloas:`. Only Lodestar serves Gloas
+  light-client data, so ark's Sepolia beacon node is Lodestar, not lighthouse.
 - **Eden runs Osaka, not Prague.** Simple transfers execute the same under both, so the first
   fixtures passed on Prague and proved nothing; a DCAP verification does not, because P-256
   verification is an Osaka precompile. Under Prague it reverts with empty data.
