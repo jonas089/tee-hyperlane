@@ -10,7 +10,7 @@
 # measurement. Written by devnet/scripts/25-images.sh.
 services:
   celestia:
-    image: ghcr.io/jonas089/tee-node@sha256:e8dfcc5014f5cdb3890194b498a88e9b57003f4616ba69fdaa8ae5c2d936f89e
+    image: ghcr.io/jonas089/tee-node@sha256:c38c15417f73a2a8b489aa8863aa24e5e41faf7d9ffb4aad87cb6ef13233ce8c
     ports:
       - "8080:8080"
     volumes:

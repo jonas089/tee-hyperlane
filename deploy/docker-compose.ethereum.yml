@@ -10,7 +10,7 @@
 # measurement. Written by devnet/scripts/25-images.sh.
 services:
   ethereum:
-    image: ghcr.io/jonas089/tee-node@sha256:3b42a1e645f92c934b8ca2807e5d21e088247ae03df772c16ae9ce1f619071a0
+    image: ghcr.io/jonas089/tee-node@sha256:d8639917bc9a3f7512951da9e0e3c02e456ce3d2d9a829a8aa639b73a162c0fb
     ports:
       - "8081:8080"
     volumes:
