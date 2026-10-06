@@ -165,6 +165,7 @@ from either that waits more than a few minutes is stuck: check the symptoms belo
 | UI shows `Failed to fetch` | the UI was built with the wrong `.env.local`; rebuild on the host |
 | `discarding a batch` | nothing; it rebuilds by itself |
 | `carrying sync committee updates` every tick | nothing; the ISM is behind and catches up when a batch lands |
+| Sepolia: `finality update rejected: invalid sync committee period` | a period boundary between the finalized header and its signature; carried since `4464a3a`'s successor, and before that it cleared within 20 minutes |
 | `error decoding response body` once | a flaky RPC; nothing, unless it repeats |
 | Eden: `no celestia header in the last 400 rebuilds this ISM's store` | the `da-heights` hint is gone; restore `.state/proofs/chains/eden/` from a backup |
 | Eden: `no celestia block … carries an eden header at a height we hold a proof for` | normal for a few minutes after a restart; if it persists, check that mocha-light is synced |

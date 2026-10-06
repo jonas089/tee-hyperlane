@@ -107,8 +107,15 @@ impl Ethereum {
         // Committee updates bridge any sync-committee period boundary since the store's last
         // update. Without them the finality update is refused once a period has passed, which
         // wedged every Ethereum-backed route roughly daily before this was carried.
+        //
+        // Counted to the period the finality update is *signed* in, not the one it finalizes:
+        // the signature trails the finalized header by about two epochs, so for those minutes
+        // after a boundary it is already in the next period. A store rebuilt from a bootstrap
+        // does not know the next committee, and the enclave refused every such update as
+        // `invalid sync committee period` until the finalized header crossed too.
         let from = store.store.finalized_header.beacon().slot / SLOTS_PER_SYNC_PERIOD;
-        let to = slot / SLOTS_PER_SYNC_PERIOD;
+        let to =
+            (slot / SLOTS_PER_SYNC_PERIOD).max(*finality.signature_slot() / SLOTS_PER_SYNC_PERIOD);
         let committee_updates = if to > from {
             debug!(periods = to - from, "carrying sync committee updates");
             self.beacon.updates(from, to - from).await?
