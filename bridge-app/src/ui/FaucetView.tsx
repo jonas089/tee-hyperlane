@@ -18,6 +18,7 @@ export function FaucetView({
 }) {
   const [grants, setGrants] = useState<{ symbol: string; amount: number; decimals: number }[]>([]);
   const [enabled, setEnabled] = useState(true);
+  const [paused, setPaused] = useState<string | null>(null);
   const [claimed, setClaimed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [txHash, setTxHash] = useState<string | null>(null);
@@ -30,6 +31,7 @@ export function FaucetView({
       .then((d) => {
         if (!live) return;
         setEnabled(Boolean(d.enabled));
+        setPaused(d.paused ?? null);
         setGrants(
           Array.isArray(d.grants) && d.grants.length
             ? d.grants
@@ -95,6 +97,8 @@ export function FaucetView({
         </header>
         {!enabled ? (
           <p className="notice">The faucet is not configured on this deployment.</p>
+        ) : paused ? (
+          <p className="notice">{paused}</p>
         ) : (
           <>
             {shown.map((g) => (

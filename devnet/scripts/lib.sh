@@ -351,8 +351,12 @@ write_config() {
   faucet_grants() {
     has celestia-teeusd-denom || return 0
     printf 'key = "%s"\n' "${FAUCET_KEY:-user}"
-    printf 'grants = [\n  { symbol = "TIA", denom = "utia", amount = %s },\n' "${FAUCET_TIA:-100000000000}"
-    printf '  { symbol = "teeUSD", denom = "%s", amount = %s },\n]\n' "$(load celestia-teeusd-denom)" "${FAUCET_TEEUSD:-200000000000}"
+    # Each grant stops once the key would fall below its floor, so the master account keeps a
+    # reserve: 500M TIA and 1B teeUSD unless overridden.
+    printf 'grants = [\n  { symbol = "TIA", denom = "utia", amount = %s, floor = %s },\n' \
+      "${FAUCET_TIA:-5000000000}" "${FAUCET_TIA_FLOOR:-500000000000000}"
+    printf '  { symbol = "teeUSD", denom = "%s", amount = %s, floor = %s },\n]\n' "$(load celestia-teeusd-denom)" \
+      "${FAUCET_TEEUSD:-20000000000}" "${FAUCET_TEEUSD_FLOOR:-1000000000000000}"
   }
   route() { # <name> <from> <to> <ism key> <router keys...>
     local name="$1" from="$2" to="$3" ism="$4" enclave

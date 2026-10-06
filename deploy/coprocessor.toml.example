@@ -15,8 +15,8 @@ api_listen = "0.0.0.0:3001"
 chain = "celestia"
 key = "user"
 grants = [
-  { symbol = "TIA", denom = "utia", amount = 100000000000 },
-  { symbol = "teeUSD", denom = "hyperlane/0x726f757465725f61707000000000000000000000000000020000000000000002", amount = 200000000000 },
+  { symbol = "TIA", denom = "utia", amount = 5000000000, floor = 500000000000000 },
+  { symbol = "teeUSD", denom = "hyperlane/0x726f757465725f61707000000000000000000000000000020000000000000002", amount = 20000000000, floor = 1000000000000000 },
 ]
 
 # ---------------------------------------------------------------- chains

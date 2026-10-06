@@ -237,6 +237,10 @@ pub struct Grant {
     pub amount: u64,
     #[serde(default = "default_grant_decimals")]
     pub decimals: u8,
+    /// The faucet stops paying once its key holds less than this, in base units, so the
+    /// account it pays from keeps a reserve.
+    #[serde(default)]
+    pub floor: Option<u64>,
 }
 
 fn default_grants() -> Vec<Grant> {
@@ -245,6 +249,7 @@ fn default_grants() -> Vec<Grant> {
         denom: "utia".into(),
         amount: 1_000_000_000,
         decimals: 6,
+        floor: None,
     }]
 }
 
@@ -299,6 +304,9 @@ impl Faucet {
                 format!("the faucet could not send: {e}"),
             )
         };
+        if let Some(why) = self.paused().await.map_err(|e| fail(e.to_string()))? {
+            return Err((StatusCode::SERVICE_UNAVAILABLE, why));
+        }
         std::fs::create_dir_all(&self.claims).map_err(|e| fail(e.to_string()))?;
         let marker = self.claims.join(address);
         let mut file = match std::fs::OpenOptions::new()
@@ -381,6 +389,61 @@ impl Faucet {
     }
 }
 
+impl Faucet {
+    /// Why the faucet is not paying, when one of its grants would take the key below its floor.
+    async fn paused(&self) -> Result<Option<String>> {
+        let appd = std::env::var("APPD").unwrap_or_else(|_| "celestia-appd".into());
+        let mut address: Option<String> = None;
+        for g in self.grants.iter().filter(|g| g.floor.is_some()) {
+            let floor = g.floor.unwrap_or(0);
+            if address.is_none() {
+                let out = tokio::process::Command::new(&appd)
+                    .args([
+                        "keys",
+                        "show",
+                        &self.key,
+                        "-a",
+                        "--home",
+                        &self.home,
+                        "--keyring-backend",
+                        "test",
+                    ])
+                    .output()
+                    .await?;
+                address = Some(String::from_utf8_lossy(&out.stdout).trim().to_string());
+            }
+            let out = tokio::process::Command::new(&appd)
+                .args([
+                    "query",
+                    "bank",
+                    "balance",
+                    address.as_deref().unwrap_or(""),
+                    &g.denom,
+                ])
+                .args(["--node", &self.rpc, "-o", "json"])
+                .output()
+                .await?;
+            let body: Value = serde_json::from_slice(&out.stdout)
+                .with_context(|| String::from_utf8_lossy(&out.stderr).trim().to_string())?;
+            let held: u128 = body["balance"]["amount"]
+                .as_str()
+                .unwrap_or("0")
+                .parse()
+                .unwrap_or(0);
+            if held < floor as u128 + g.amount as u128 {
+                let whole = |n: u128| n / 10u128.pow(g.decimals as u32);
+                return Ok(Some(format!(
+                    "The faucet is paused: it keeps a reserve of {} {}, and holds {}.",
+                    whole(floor as u128),
+                    g.symbol,
+                    whole(held)
+                )));
+            }
+        }
+        Ok(None)
+    }
+}
+
 async fn faucet_info(State(api): State<Api>) -> Json<Value> {
     let grants = api
         .faucet
@@ -391,7 +454,16 @@ async fn faucet_info(State(api): State<Api>) -> Json<Value> {
         .iter()
         .find(|g| g.denom == "utia")
         .map_or(0, |g| g.amount / 1_000_000);
-    Json(json!({ "enabled": api.faucet.is_some(), "amountTia": tia, "grants": grants }))
+    let paused = match &api.faucet {
+        Some(f) => f
+            .paused()
+            .await
+            .unwrap_or_else(|e| Some(format!("The faucet cannot read its balance: {e}"))),
+        None => None,
+    };
+    Json(
+        json!({ "enabled": api.faucet.is_some(), "amountTia": tia, "grants": grants, "paused": paused }),
+    )
 }
 
 async fn faucet_claimed(State(api): State<Api>, Path(address): Path<String>) -> Json<Value> {

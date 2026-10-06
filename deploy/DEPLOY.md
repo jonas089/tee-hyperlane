@@ -263,8 +263,9 @@ No enclave or ISM changes.
 
 The Trade tab, `/api/v1/trade` ([API.md](API.md)) and the MCP server in `mcp/` need teeUSD, its
 pools, and the factories from `90-evm-warp.sh`. `write_config` then writes `[trade]` and the
-faucet's grants (100k TIA and 200k teeUSD per address, from the `user` key; `FAUCET_TIA`,
-`FAUCET_TEEUSD` and `FAUCET_KEY` change them). Uniswap's addresses per chain are `uniswap_for`
+faucet's grants: 5k TIA and 20k teeUSD per address from the `user` key, paused while that key
+holds less than 500M TIA or 1B teeUSD. `FAUCET_TIA`, `FAUCET_TEEUSD`, `FAUCET_TIA_FLOOR`,
+`FAUCET_TEEUSD_FLOOR` (base units) and `FAUCET_KEY` change them. Uniswap's addresses per chain are `uniswap_for`
 in `scripts/lib.sh`.
 
 ### C. Adding a chain
