@@ -329,7 +329,7 @@ function RemoteDetail({ record: r, relayerUrl }: { record: RemoteTransfer; relay
         </div>
         <StatusChip status={remoteStatus(r)} />
       </header>
-      <p className="hint">Found on the relayer. It was not sent from this browser.</p>
+      <p className="hint found-note">Found on the relayer. It was not sent from this browser.</p>
       <dl className="facts">
         {r.dispatch && (
           <>

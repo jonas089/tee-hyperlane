@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   CELESTIA_DENOM,
   CHAINS,
@@ -328,6 +328,35 @@ export default function App() {
     amount, cosmos, defaultRecipient, destination, evm, from, loadBalances, recipient, source,
     to, token,
   ]);
+
+  // Transfers that have not landed are re-checked on load and every 15 seconds, so their
+  // status moves on its own. Refs keep the timer from restarting on every change.
+  const transfersRef = useRef(transfers);
+  transfersRef.current = transfers;
+  const loadBalancesRef = useRef(loadBalances);
+  loadBalancesRef.current = loadBalances;
+  useEffect(() => {
+    let busy = false;
+    const tick = async () => {
+      if (busy) return;
+      busy = true;
+      try {
+        const open = transfersRef.current.filter((t) => t.reached !== "delivered").slice(0, 20);
+        for (const t of open) {
+          const next = await refresh(t).catch(() => t);
+          // An unreachable RPC is not a failed transfer; only real progress is applied here.
+          if (next.failure || next.reached === t.reached) continue;
+          setTransfers((all) => all.map((x) => (x.messageId === t.messageId ? next : x)));
+          if (next.reached === "delivered") loadBalancesRef.current();
+        }
+      } finally {
+        busy = false;
+      }
+    };
+    tick();
+    const timer = setInterval(tick, 15_000);
+    return () => clearInterval(timer);
+  }, []);
 
   const update = useCallback(
     async (messageId: string) => {

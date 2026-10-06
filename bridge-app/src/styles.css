@@ -357,7 +357,8 @@ button.wallet:hover { background: var(--raised); }
 .detail-pane { grid-area: detail; position: sticky; top: 88px; }
 .empty-detail { display: grid; place-items: center; min-height: 280px; color: var(--muted); }
 .detail-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; margin-bottom: 1.4rem; }
-.detail-pane > .hint { margin: -0.6rem 0 1.1rem; }
+.detail-pane .found-note { margin: -0.6rem 0 1.1rem; }
+.detail-pane .facts + .hint { margin-top: 1.25rem; }
 .detail-head > div { display: flex; flex-direction: column; gap: 0.45rem; }
 .detail-amount { font-family: var(--display); font-size: 2rem; font-weight: 600; font-variant-numeric: tabular-nums; }
 .detail-route { display: inline-flex; align-items: center; gap: 0.45rem; color: var(--grey); font-weight: 600; }
