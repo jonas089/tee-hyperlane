@@ -181,25 +181,6 @@ mod tests {
     }
 
     #[test]
-    fn a_signed_block_gives_its_header_root() {
-        let f = fixture();
-        let head = Arbitrum
-            .verify(
-                serde_json::to_value(&f.input).unwrap(),
-                &trusted(f.number - 1),
-            )
-            .unwrap();
-        assert_eq!(
-            (head.root, head.height, head.timestamp),
-            (f.state_root, f.number, f.timestamp)
-        );
-        assert_eq!(head.store_commit, [7; 32], "carried unchanged");
-        assert!(Arbitrum
-            .verify(serde_json::to_value(&f.input).unwrap(), &trusted(f.number))
-            .is_err());
-    }
-
-    #[test]
     fn every_signed_field_is_bound() {
         let f = fixture();
         let base = signing_hash(&f.input.message);
@@ -242,5 +223,24 @@ mod tests {
         assert_eq!(header.state_root, f.state_root);
         assert!(Header::decode(&f.input.header_rlp[..f.input.header_rlp.len() / 2]).is_err());
         assert!(Header::decode(b"").is_err());
+    }
+
+    #[test]
+    fn a_signed_block_gives_its_header_root() {
+        let f = fixture();
+        let head = Arbitrum
+            .verify(
+                serde_json::to_value(&f.input).unwrap(),
+                &trusted(f.number - 1),
+            )
+            .unwrap();
+        assert_eq!(
+            (head.root, head.height, head.timestamp),
+            (f.state_root, f.number, f.timestamp)
+        );
+        assert_eq!(head.store_commit, [7; 32], "carried unchanged");
+        assert!(Arbitrum
+            .verify(serde_json::to_value(&f.input).unwrap(), &trusted(f.number))
+            .is_err());
     }
 }
