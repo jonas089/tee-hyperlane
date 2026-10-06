@@ -408,10 +408,10 @@ merkle_tree_hook = "${EDEN_HOOK:-0xCfBE7016D123d52A7Db4fc7D087cCb5421dbF8db}"
 TOML
     local chain
     for chain in sepolia arbitrum base eden; do
-      route "celestia-to-${chain}" celestia "${chain}" "ism-${chain}" "${chain}-router" "${chain}-usdc-router"
+      route "celestia-to-${chain}" celestia "${chain}" "ism-${chain}" "${chain}-router" "${chain}-usdc-router" "${chain}-teeusd-router"
     done
     for chain in sepolia arbitrum base eden; do
-      route "${chain}-to-celestia" "${chain}" celestia "ism-celestia-${chain}" celestia-token-id celestia-usdc-token-id
+      route "${chain}-to-celestia" "${chain}" celestia "ism-celestia-${chain}" celestia-token-id celestia-usdc-token-id celestia-teeusd-token-id
     done
   } > "${COPROCESSOR_CONFIG}"
 }

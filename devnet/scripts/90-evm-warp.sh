@@ -16,6 +16,8 @@
 #   TIA   Celestia native  -> synthetic on all three EVM chains
 #   USDC  EVM native       -> collateral on Sepolia, synthetic on the two L2s
 #
+# teeUSD rides along as a third, synthetic everywhere; its supply is minted on Celestia.
+#
 # Adding a third asset is a row in TOKENS plus its per-chain kind, and nothing else.
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
@@ -50,7 +52,8 @@ eden:3735928814:0x1D32350f3440BEa7f7E450Aa085f63E0d7E38729}"
 
 # label : celestia token state key : state key suffix : name : symbol : decimals
 TOKENS="tia:celestia-token-id:router:Celestia TIA:TIA:6
-usdc:celestia-usdc-token-id:usdc-router:USD Coin:USDC:6"
+usdc:celestia-usdc-token-id:usdc-router:USD Coin:USDC:6
+teeusd:celestia-teeusd-token-id:teeusd-router:tee USD:teeUSD:6"
 
 # Which shape each asset takes on a given chain. Everything is a synthetic except the chain
 # the asset is actually native to, where the router escrows the real ERC20.
@@ -181,6 +184,19 @@ while IFS=: read -r name chainid mailbox; do
       got="$(cast call "${router}" "routers(uint32)(bytes32)" "${DOMAIN}" --rpc-url "${rpc}" 2>/dev/null || true)"
     fi
     [ "${got}" = "${token}" ] || die "${name} ${label} router points at '${got}', expected ${token}"
+
+    # A router with no hook dispatches messages nothing ever delivers. A new one takes the
+    # hook the chain's TIA router already uses.
+    hook="$(cast call "${router}" "hook()(address)" --rpc-url "${rpc}")"
+    if [ "${hook}" = 0x0000000000000000000000000000000000000000 ] && [ "${key}" != "${name}-router" ] && has "${name}-router"; then
+      want="$(cast call "$(load "${name}-router")" "hook()(address)" --rpc-url "${rpc}")"
+      if [ "${want}" != 0x0000000000000000000000000000000000000000 ]; then
+        say "setting the ${label} router's hook to ${want}"
+        cast send "${router}" "setHook(address)" "${want}" \
+          --rpc-url "${rpc}" --private-key "${EVM_PRIVATE_KEY}" >/dev/null
+        sleep 4
+      fi
+    fi
     say "  ${label} ${router} ism ${ism}"
   done <<< "${TOKENS}"
 done <<< "${CHAINS}"
