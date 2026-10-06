@@ -42,6 +42,7 @@ rpc = "https://rpc.celestia-mocha.com"
 kind = "ethereum"
 domain = 11155111
 rpc = "https://rpc.sepolia.ethpandaops.io"
+send_rpc = "https://ethereum-sepolia-rpc.publicnode.com"
 beacon_rpc = "https://ethereum-sepolia-beacon-api.publicnode.com"
 mailbox = "0xfFAEF09B3cd11D9b20d1a19bECca54EEC2884766"
 merkle_tree_hook = "0x4917a9746A7B6E0A57159cCb7F5a6744247f2d0d"

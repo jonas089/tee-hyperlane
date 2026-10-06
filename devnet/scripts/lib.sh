@@ -401,6 +401,9 @@ rpc = "${MOCHA_RPC:-https://rpc.celestia-mocha.com}"
 kind = "ethereum"
 domain = ${SEPOLIA_DOMAIN}
 rpc = "${sepolia_rpc}"
+# Deliveries go to a node at the head: the ISM refuses an attestation newer than the block
+# it is checked in, so a lagging rpc fails every delivery with ClockBehindAttest.
+send_rpc = "${SEPOLIA_SEND_RPC:-https://ethereum-sepolia-rpc.publicnode.com}"
 beacon_rpc = "${SEPOLIA_BEACON:-https://ethereum-sepolia-beacon-api.publicnode.com}"
 mailbox = "${SEPOLIA_MAILBOX:-0xfFAEF09B3cd11D9b20d1a19bECca54EEC2884766}"
 merkle_tree_hook = "${SEPOLIA_HOOK:-0x4917a9746A7B6E0A57159cCb7F5a6744247f2d0d}"
