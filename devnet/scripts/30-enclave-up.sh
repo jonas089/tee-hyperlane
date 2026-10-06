@@ -82,6 +82,8 @@ deploy_cvm() {
     else
       warn "recorded ${target} CVM is not answering; deploying a new one"
     fi
+    # The old CVM still holds the plain name, and Phala refuses a second CVM with it.
+    name="${name}-$(date -u +%m%d-%H%M)"
   fi
 
   # Checked once, and only when something actually needs deploying, so a devnet whose three

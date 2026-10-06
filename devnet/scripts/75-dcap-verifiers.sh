@@ -64,9 +64,11 @@ for c in ${CHAINS}; do
 
   prepare
   say "${c}: deploying V5QuoteVerifier (p256 ${p256}, router ${router})"
+  # --constructor-args last: it takes every argument after it, so a key placed after it never
+  # reaches forge as the signer.
   out="$(cd "${EVM}" && forge create contracts/verifiers/V5QuoteVerifier.sol:V5QuoteVerifier \
-    --constructor-args "${p256}" "${router}" \
-    --rpc-url "${rpc}" --private-key "${EVM_PRIVATE_KEY}" --broadcast 2>&1)" \
+    --rpc-url "${rpc}" --private-key "${EVM_PRIVATE_KEY}" --broadcast \
+    --constructor-args "${p256}" "${router}" 2>&1)" \
     || { printf '%s\n' "${out}" | tail -5 >&2; die "${c}: V5QuoteVerifier deployment failed"; }
   verifier="$(printf '%s' "${out}" | grep -oE 'Deployed to: 0x[0-9a-fA-F]{40}' | grep -oE '0x[0-9a-fA-F]{40}')"
   [ -n "${verifier}" ] || die "${c}: no address in the deployment output"
