@@ -30,6 +30,10 @@ export interface BridgeProps {
   /// Whether the wallet that signs on the origin chain is connected.
   connected: boolean;
   onConnect: () => void;
+  /// A passing message about the send in progress.
+  notice: string | null;
+  /// The connected EVM account is one the relayer delivers from.
+  relayerAccount: boolean;
   onPickFrom: (c: ChainId) => void;
   onPickTo: (c: ChainId) => void;
   onFlip: () => void;
@@ -140,7 +144,14 @@ export function BridgeView(p: BridgeProps) {
             {ORIGIN_FINALITY[p.from].reason}
           </p>
         )}
+        {p.relayerAccount && (
+          <p className="notice">
+            This is the relayer's own account. Transfers from it can collide with the relayer's deliveries. Use a
+            different account for testing.
+          </p>
+        )}
         {!p.live && p.notLive && <p className="notice">{p.notLive}</p>}
+        {p.notice && <p className="notice">{p.notice}</p>}
         {p.error && <p className="error">{p.error}</p>}
 
         <details className="details">

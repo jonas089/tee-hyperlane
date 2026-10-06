@@ -16,6 +16,7 @@ import {
   formatAmount,
   quoteBridgeFee,
   messageIdFromReceipt,
+  NONCE_RETRYING,
   normaliseAttestation,
   refresh,
   sendFromEvm,
@@ -92,6 +93,22 @@ export default function App() {
   const [ismError, setIsmError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
+  // A passing message about the send in progress, such as a retry.
+  const [notice, setNotice] = useState<string | null>(null);
+  // The relayer's own delivery accounts, so connecting one of them can be warned about.
+  const [relayerWallets, setRelayerWallets] = useState<string[]>([]);
+  useEffect(() => {
+    fetch(`${RELAYER_API}/v1/wallets`)
+      .then((r) => r.json())
+      .then((wallets: { address?: string }[]) =>
+        setRelayerWallets(
+          (Array.isArray(wallets) ? wallets : [])
+            .map((w) => (w.address ?? "").toLowerCase())
+            .filter(Boolean),
+        ),
+      )
+      .catch(() => {});
+  }, []);
   // Shown once the origin transaction is in a block and the message id is known, which is the
   // moment the relayer can actually see it. Anything earlier would be claiming more than we know.
   const [confirmed, setConfirmed] = useState<Confirmation | null>(null);
@@ -277,7 +294,9 @@ export default function App() {
           recipient: target,
           amount: wanted,
           sender: evm.address,
+          onNonceRetry: () => setNotice(NONCE_RETRYING),
         });
+        setNotice(null);
         messageId = await waitForMessageId(source as EvmChain, tx);
       } else {
         if (!cosmos) throw new Error("Connect Keplr first");
@@ -322,6 +341,7 @@ export default function App() {
       setAmount("");
       loadBalances();
     } catch (e) {
+      setNotice(null);
       setError(describeError(e));
     } finally {
       setSending(false);
@@ -426,6 +446,8 @@ export default function App() {
             error={error}
             sending={sending}
             connected={Boolean(accountFor(from))}
+            notice={notice}
+            relayerAccount={Boolean(evm && relayerWallets.includes(evm.address.toLowerCase()))}
             onConnect={() => connect(from)}
             onPickFrom={pickFrom}
             onPickTo={pickTo}

@@ -150,6 +150,8 @@ export async function sendFromEvm(opts: {
   recipient: string;
   amount: bigint;
   sender: string;
+  /// Called when a stale-nonce rejection is about to be retried, so the page can say so.
+  onNonceRetry?: () => void;
 }): Promise<string> {
   const router = routerFor(opts.token, opts.chain.id);
   if (!router) throw new Error(`${opts.token} is not deployed on ${opts.chain.name}`);
@@ -196,19 +198,55 @@ export async function sendFromEvm(opts: {
   // EIP-1559, but not worth finding out which of four chains rejects it.
   const tip = baseFee / 10n || 1n;
 
-  return window.ethereum!.request({
-    method: "eth_sendTransaction",
-    params: [
-      {
-        from: opts.sender,
-        to: router,
-        data,
-        value: toHex(fee),
-        maxFeePerGas: toHex(baseFee * 2n + tip),
-        maxPriorityFeePerGas: toHex(tip),
-      },
-    ],
-  });
+  const params = [
+    {
+      from: opts.sender,
+      to: router,
+      data,
+      value: toHex(fee),
+      maxFeePerGas: toHex(baseFee * 2n + tip),
+      maxPriorityFeePerGas: toHex(tip),
+    },
+  ];
+  const send = () => window.ethereum!.request({ method: "eth_sendTransaction", params });
+
+  // MetaMask's cached nonce goes stale when another transaction from the same account lands
+  // between its last refresh and this send (the relayer's deliveries, when its key is the one
+  // connected), and the node rejects the signed transaction. That transaction never reached
+  // the network, so sending again is safe: MetaMask refreshes the nonce before the second
+  // prompt. Only this error is retried, once, and never a rejection by the user.
+  try {
+    return await send();
+  } catch (e) {
+    if (!isNonceTooLow(e)) throw e;
+    opts.onNonceRetry?.();
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+    try {
+      return await send();
+    } catch (again) {
+      if (isNonceTooLow(again)) throw new Error(NONCE_STILL_FAILING);
+      throw again;
+    }
+  }
+}
+
+export const NONCE_RETRYING =
+  "Your wallet used a stale nonce, usually because another transaction from this account was just sent. Retrying.";
+const NONCE_STILL_FAILING =
+  "Still failing. Reset the account activity in MetaMask under Settings, Advanced, Clear activity tab data, then try again.";
+
+/// A "nonce too low" rejection from the node, anywhere in the provider's error, and not a
+/// user rejection (4001).
+export function isNonceTooLow(e: unknown): boolean {
+  const err = e as { code?: number } | null;
+  if (err?.code === 4001) return false;
+  let text: string;
+  try {
+    text = `${(e as Error)?.message ?? ""} ${JSON.stringify(e)}`;
+  } catch {
+    text = String((e as Error)?.message ?? e);
+  }
+  return text.toLowerCase().includes("nonce too low");
 }
 
 /** The message id the mailbox emitted, read back from the receipt. */
