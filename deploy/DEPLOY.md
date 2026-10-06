@@ -131,6 +131,9 @@ cd ~/tee-ism-nonzk/devnet
   printf '%-24s %s\n' $k "$(load $k 2>/dev/null)"; done
 ```
 
+`50-warp-celestia.sh` also creates teeUSD and mints its whole supply, 1B, to the `user` key
+(`TEEUSD_HOLDER` to change), then removes the only origin that could mint more.
+
 Every line needs an id. **If `90-evm-warp.sh` prints `deploying the collateral USDC router` on
 a chain that already has one, press Ctrl-C.** A new collateral router strands the USDC held in
 the old one.
