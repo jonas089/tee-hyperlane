@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Component, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import {
   CELESTIA_DENOM,
   CHAINS,
@@ -15,6 +16,7 @@ import {
   formatAmount,
   quoteBridgeFee,
   messageIdFromReceipt,
+  normaliseAttestation,
   refresh,
   sendFromEvm,
   toBaseUnits,
@@ -404,6 +406,7 @@ export default function App() {
       </header>
 
       <main className={tab === "history" ? "page" : "page bridge-page"}>
+        <ViewBoundary key={tab}>
         {tab === "bridge" ? (
           <BridgeView
             from={from}
@@ -446,11 +449,31 @@ export default function App() {
             onConnect={() => connect("celestia")}
           />
         )}
+        </ViewBoundary>
       </main>
 
       {confirmed && <ConfirmedDialog confirmation={confirmed} onClose={() => setConfirmed(null)} />}
     </div>
   );
+}
+
+/// One broken view shows a message instead of blanking the whole page.
+class ViewBoundary extends Component<{ children: ReactNode }, { error: string | null }> {
+  state = { error: null as string | null };
+  static getDerivedStateFromError(e: unknown) {
+    return { error: e instanceof Error ? e.message : String(e) };
+  }
+  render() {
+    if (!this.state.error) return this.props.children;
+    return (
+      <section className="panel">
+        <p className="error">This view hit an error: {this.state.error}</p>
+        <button className="secondary" onClick={() => this.setState({ error: null })}>
+          Try again
+        </button>
+      </section>
+    );
+  }
 }
 
 function WalletButton({
@@ -586,7 +609,11 @@ const STORAGE_KEY = `tee-bridge-transfers:${(CHAINS.celestia as CosmosChain).cha
 
 function loadTransfers(): Transfer[] {
   try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "[]");
+    const stored: Transfer[] = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "[]");
+    return stored.map((t) => ({
+      ...t,
+      attestation: t.attestation ? (normaliseAttestation(t.attestation) ?? undefined) : undefined,
+    }));
   } catch {
     return [];
   }

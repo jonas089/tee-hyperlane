@@ -374,7 +374,25 @@ export async function fetchBalance(
 export async function fetchAttestation(messageId: string): Promise<Attestation | null> {
   const response = await fetch(`${RELAYER_API}/attestation/${messageId}`);
   if (!response.ok) return null;
-  return (await response.json()) as Attestation;
+  return normaliseAttestation(await response.json());
+}
+
+/// The relayer answers in snake_case (`state_root`); the UI reads camelCase. Also used on
+/// attestations stored by an earlier build that kept the relayer's shape.
+export function normaliseAttestation(raw: any): Attestation | null {
+  if (!raw || typeof raw !== "object") return null;
+  const m = raw.measurements ?? {};
+  return {
+    height: Number(raw.height ?? 0),
+    stateRoot: String(raw.stateRoot ?? raw.state_root ?? ""),
+    quote: String(raw.quote ?? ""),
+    measurements: {
+      mrTd: String(m.mrTd ?? m.mr_td ?? ""),
+      osImageHash: String(m.osImageHash ?? m.os_image_hash ?? ""),
+      composeHash: String(m.composeHash ?? m.compose_hash ?? ""),
+    },
+    batch: Array.isArray(raw.batch) ? raw.batch : [],
+  };
 }
 
 /** Advance a transfer's state. Called on demand, not on a timer. */

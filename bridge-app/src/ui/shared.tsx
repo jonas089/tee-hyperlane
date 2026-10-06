@@ -98,7 +98,8 @@ export function describeAgo(at: number): string {
   return `${Math.round(s / 86400)}d ago`;
 }
 
-export function shorten(value: string, keep = 6): string {
+export function shorten(value: string | undefined | null, keep = 6): string {
+  if (!value) return "";
   if (value.length <= keep * 2 + 2) return value;
   return `${value.slice(0, keep + 2)}…${value.slice(-keep)}`;
 }
