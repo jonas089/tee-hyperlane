@@ -6,7 +6,9 @@ use async_trait::async_trait;
 use helios_consensus_core::types::{
     Bootstrap, FinalityUpdate, Fork, Forks, LightClientHeader, LightClientStore, Update,
 };
-use helios_consensus_core::{apply_bootstrap, verify_bootstrap};
+use helios_consensus_core::{
+    apply_bootstrap, apply_finality_update, apply_update, verify_bootstrap,
+};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use tee_node::chains::l1::ethereum::{EthereumStore, Spec, ETHEREUM, TREE_SLOT};
@@ -25,6 +27,9 @@ const SLOTS_PER_SYNC_PERIOD: u64 = 256 * SLOTS_PER_EPOCH;
 /// A recovery path, not the normal one: a healthy route finds its store from a hint in one
 /// request. 512 epochs is a bit over two days, which is how stale a stuck route may be.
 const MAX_CHECKPOINT_SEARCH_EPOCHS: u64 = 512;
+/// How many stores to keep on disk. Each is about 100 KB, and only the one the ISM is at is
+/// ever needed; a few more cover a step that was built but did not land.
+const STORES_KEPT: usize = 16;
 
 /// `[chains.<name>]` for an Ethereum chain.
 #[derive(Deserialize)]
@@ -88,6 +93,7 @@ impl Ethereum {
     pub async fn l1_step(&self, trusted: &IsmState) -> Result<Option<L1Step>> {
         let (store, used) = self.rebuild_store(trusted).await?;
         let finality = self.beacon.finality_update().await?;
+        let store_before = store.clone();
 
         // A light-client bootstrap exists only for a checkpoint on an epoch boundary. When that
         // slot is empty the finalized checkpoint keeps the root of the block before it, which no
@@ -132,6 +138,16 @@ impl Ethereum {
         );
         self.remember(&[&next, &used]);
 
+        // The store the ISM moves to if this step lands, worked out here exactly as the enclave
+        // will and kept on disk. A beacon node cannot be relied on to rebuild it later: Lodestar
+        // serves a Gloas bootstrap for its newest finalized checkpoint only.
+        let mut next = store_before;
+        for update in &committee_updates {
+            apply_update::<Spec>(&mut next.store, update);
+        }
+        apply_finality_update::<Spec>(&mut next.store, &finality);
+        self.keep_store(&next);
+
         let (block, state_root, execution_header) =
             self.execution_of(finality.finalized_header()).await?;
         Ok(Some(L1Step {
@@ -163,6 +179,33 @@ impl Ethereum {
         Ok((*execution.block_number(), *execution.state_root(), None))
     }
 
+    /// Keep a store on disk under its commitment, for `rebuild_store` to find first.
+    fn keep_store(&self, store: &EthereumStore) {
+        let name = format!("store-{}.json", hex::encode(store.commitment()));
+        let Ok(text) = serde_json::to_string(store) else {
+            return;
+        };
+        self.cache.write(&name, &text);
+        let mut kept: Vec<String> = vec![name.clone()];
+        for old in self.cache.read("stores").unwrap_or_default().lines() {
+            if old != name && !old.is_empty() {
+                kept.push(old.to_string());
+            }
+        }
+        for gone in kept.split_off(kept.len().min(STORES_KEPT)) {
+            let _ = std::fs::remove_file(self.cache.path(&gone));
+        }
+        self.cache.write("stores", &kept.join("\n"));
+    }
+
+    fn kept_store(&self, commitment: &[u8; 32]) -> Option<EthereumStore> {
+        let text = self
+            .cache
+            .read(&format!("store-{}.json", hex::encode(commitment)))?;
+        let store: EthereumStore = serde_json::from_str(&text).ok()?;
+        (store.commitment() == *commitment).then_some(store)
+    }
+
     fn remember(&self, checkpoints: &[&str]) {
         let mut all: Vec<String> = checkpoints.iter().map(|c| c.to_string()).collect();
         for old in self.cache.read("checkpoints").unwrap_or_default().lines() {
@@ -182,6 +225,14 @@ impl Ethereum {
     /// checkpoints. Every candidate is checked against the commitment, so a wrong hint costs a
     /// request and nothing else.
     async fn rebuild_store(&self, trusted: &IsmState) -> Result<(EthereumStore, String)> {
+        // The store itself, kept when it was made, before any beacon request.
+        if let Some(store) = self.kept_store(&trusted.lc_store_commit) {
+            let root = format!(
+                "0x{}",
+                hex::encode(store.store.finalized_header.beacon().tree_hash_root())
+            );
+            return Ok((store, root));
+        }
         let mut hints: Vec<String> = self
             .cache
             .read("checkpoints")
@@ -312,6 +363,9 @@ impl Indexer for Ethereum {
 
     async fn bootstrap(&self, identity: [u8; 32], _height: Option<u64>) -> Result<IsmState> {
         let store = self.genesis_store().await?;
+        // Kept now: the `genesis` command that anchors an ISM is the only time this store is
+        // built, and within an epoch no beacon node may serve its bootstrap again.
+        self.keep_store(&store);
         let (_, _, header) = self.execution_of(&store.store.finalized_header).await?;
         let header = header
             .map(|h| hex::decode(h.trim_start_matches("0x")))
@@ -517,6 +571,18 @@ mod live {
                     println!("enclave accepted block {} root {}", head.height, head.root);
                     assert_eq!(head.height, step.block);
                     assert_eq!(head.root, step.state_root);
+                    // Where the ISM now is: rebuilt from the kept store, since the beacon node
+                    // no longer serves a bootstrap for any Gloas checkpoint but its newest.
+                    let next = IsmState {
+                        state_root: head.root.0,
+                        height: head.height,
+                        timestamp: head.timestamp,
+                        lc_store_commit: head.store_commit,
+                        ..trusted
+                    };
+                    let (store, _) = eth.rebuild_store(&next).await.unwrap();
+                    assert_eq!(store.commitment(), head.store_commit);
+                    println!("rebuilt the advanced store from disk");
                     return;
                 }
             }
