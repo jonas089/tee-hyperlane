@@ -351,10 +351,6 @@ export default function App() {
       <header className="topbar">
         <div className="topbar-inner">
           <a className="brand" href="#" onClick={(e) => { e.preventDefault(); setTab("bridge"); }}>
-            <svg className="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
-              <path d="M16 2 28 9v14l-12 7-12-7V9z" fill="none" stroke="currentColor" strokeWidth="2" />
-              <path d="M16 9l6 3.5v7L16 23l-6-3.5v-7z" fill="currentColor" />
-            </svg>
             <span>TEE Bridge</span>
           </a>
           <nav className="tabs">

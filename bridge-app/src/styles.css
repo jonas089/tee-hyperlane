@@ -85,7 +85,6 @@ h1, h2, h3 { font-family: var(--display); letter-spacing: -0.01em; margin: 0; }
   font-size: 1.1rem;
 }
 .brand:hover { text-decoration: none; }
-.brand-mark { width: 26px; height: 26px; color: var(--accent); }
 
 .tabs { display: flex; gap: 0.25rem; }
 
