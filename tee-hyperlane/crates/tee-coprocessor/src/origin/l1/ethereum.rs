@@ -146,7 +146,7 @@ impl Ethereum {
             apply_update::<Spec>(&mut next.store, update);
         }
         apply_finality_update::<Spec>(&mut next.store, &finality);
-        self.keep_store(&next);
+        self.keep_store(&next, &trusted.lc_store_commit);
 
         let (block, state_root, execution_header) =
             self.execution_of(finality.finalized_header()).await?;
@@ -179,29 +179,28 @@ impl Ethereum {
         Ok((*execution.block_number(), *execution.state_root(), None))
     }
 
-    /// Keep a store on disk under its commitment, for `rebuild_store` to find first.
-    fn keep_store(&self, store: &EthereumStore) {
-        let name = format!("store-{}.json", hex::encode(store.commitment()));
-        let Ok(text) = serde_json::to_string(store) else {
-            return;
-        };
-        self.cache.write(&name, &text);
-        let mut kept: Vec<String> = vec![name.clone()];
-        for old in self.cache.read("stores").unwrap_or_default().lines() {
-            if old != name && !old.is_empty() {
-                kept.push(old.to_string());
-            }
+    /// Keep a store on disk under its commitment, for `rebuild_store` to find first. Older
+    /// ones are dropped, never the one the ISM is at (`current`): a quiet route sits on one
+    /// store for hours while a new candidate is kept every epoch, and dropping it by age once
+    /// left the route with nothing to rebuild from.
+    fn keep_store(&self, store: &EthereumStore, current: &[u8; 32]) {
+        let name = store_file(&store.commitment());
+        if self.cache.read(&name).is_none() {
+            let Ok(text) = serde_json::to_string(store) else {
+                return;
+            };
+            self.cache.write(&name, &text);
         }
-        for gone in kept.split_off(kept.len().min(STORES_KEPT)) {
-            let _ = std::fs::remove_file(self.cache.path(&gone));
+        let index = self.cache.read("stores").unwrap_or_default();
+        let (kept, gone) = retain(index.lines(), &name, &store_file(current), STORES_KEPT);
+        for file in gone {
+            let _ = std::fs::remove_file(self.cache.path(&file));
         }
         self.cache.write("stores", &kept.join("\n"));
     }
 
     fn kept_store(&self, commitment: &[u8; 32]) -> Option<EthereumStore> {
-        let text = self
-            .cache
-            .read(&format!("store-{}.json", hex::encode(commitment)))?;
+        let text = self.cache.read(&store_file(commitment))?;
         let store: EthereumStore = serde_json::from_str(&text).ok()?;
         (store.commitment() == *commitment).then_some(store)
     }
@@ -365,7 +364,7 @@ impl Indexer for Ethereum {
         let store = self.genesis_store().await?;
         // Kept now: the `genesis` command that anchors an ISM is the only time this store is
         // built, and within an epoch no beacon node may serve its bootstrap again.
-        self.keep_store(&store);
+        self.keep_store(&store, &store.commitment());
         let (_, _, header) = self.execution_of(&store.store.finalized_header).await?;
         let header = header
             .map(|h| hex::decode(h.trim_start_matches("0x")))
@@ -379,6 +378,55 @@ impl Indexer for Ethereum {
             lc_store_commit: store.commitment(),
             identity_digest: identity,
         })
+    }
+}
+
+fn store_file(commitment: &[u8; 32]) -> String {
+    format!("store-{}.json", hex::encode(commitment))
+}
+
+/// The store index after adding `newest`: newest first, `current` always kept, at most `limit`
+/// entries. Returns what stays and what to delete.
+fn retain<'a>(
+    index: impl Iterator<Item = &'a str>,
+    newest: &str,
+    current: &str,
+    limit: usize,
+) -> (Vec<String>, Vec<String>) {
+    let mut kept = vec![newest.to_string()];
+    if current != newest {
+        kept.push(current.to_string());
+    }
+    let mut gone = Vec::new();
+    for old in index.filter(|o| !o.is_empty() && *o != newest && *o != current) {
+        if kept.len() < limit {
+            kept.push(old.to_string());
+        } else {
+            gone.push(old.to_string());
+        }
+    }
+    (kept, gone)
+}
+
+#[cfg(test)]
+mod store_tests {
+    use super::retain;
+
+    /// Hours of new candidates never push out the store the ISM is at.
+    #[test]
+    fn the_current_store_outlives_any_number_of_newer_ones() {
+        let mut index: Vec<String> = vec!["anchor".into()];
+        for epoch in 0..100 {
+            let newest = format!("next-{epoch}");
+            let (kept, gone) = retain(index.iter().map(String::as_str), &newest, "anchor", 16);
+            assert!(kept.contains(&"anchor".to_string()));
+            assert!(!gone.contains(&"anchor".to_string()));
+            assert!(kept.len() <= 16);
+            index = kept;
+        }
+        // Once the ISM moves, the old anchor can go like any other.
+        let (kept, _) = retain(index.iter().map(String::as_str), "next-100", "next-99", 16);
+        assert!(kept.len() <= 16 && kept.contains(&"next-99".to_string()));
     }
 }
 
