@@ -38,8 +38,8 @@ them.
 
 ## Sending
 
-**In the UI:** pick origin, destination, asset and amount. USDC from Sepolia needs an
-`approve` first, which the UI sends. A synthetic is burned, so it needs none.
+**In the UI:** pick origin, destination, asset and amount. Every EVM token here is a
+synthetic, burned on send, so no `approve` is needed.
 
 **From Celestia:**
 
@@ -53,7 +53,7 @@ celestia-appd tx warp transfer <celestia token id> <destination domain> \
 `--gas auto` prints `gas estimate: <n>` before the JSON, so `-o json | jq` fails, and by then
 the transfer has already been broadcast. Read the `txhash` line instead of re-running.
 
-**From an EVM chain** (a collateral router needs an `approve` first):
+**From an EVM chain:**
 
 ```sh
 cast send <router> "transferRemote(uint32,bytes32,uint256)(bytes32)" \

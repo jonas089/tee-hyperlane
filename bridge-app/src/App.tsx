@@ -15,7 +15,8 @@ import {
   fetchBalance,
   formatAmount,
   quoteBridgeFee,
-  messageIdFromReceipt,
+  waitForCelestiaMessageId,
+  waitForMessageId,
   NONCE_RETRYING,
   normaliseAttestation,
   refresh,
@@ -26,7 +27,7 @@ import {
 import type { BridgeFee, Transfer } from "./bridge";
 import type { WiredIsm } from "./ism";
 import { resolveWiredIsm } from "./ism";
-import { messageIdFromCelestiaTx, sendFromCelestia } from "./celestia";
+import { sendFromCelestia } from "./celestia";
 import {
   connectKeplr,
   connectMetaMask,
@@ -37,12 +38,14 @@ import type { Account } from "./wallets";
 import { BridgeView } from "./ui/BridgeView";
 import { FaucetView } from "./ui/FaucetView";
 import { HistoryView } from "./ui/HistoryView";
+import { VenuePage } from "./ui/venue/VenuePage";
+import type { Section } from "./ui/venue/VenuePage";
 import { describeDuration, shorten } from "./ui/shared";
 
 /// Every route has Celestia on one side. The bridge is a hub, not a mesh: each EVM chain's
 /// ISM trusts Celestia and Celestia's trusts each EVM chain, and no EVM chain trusts another.
 const COUNTERPARTIES: ChainId[] = ["sepolia", "arbitrum", "base", "eden"];
-const TOKENS: TokenId[] = ["TIA", "USDC"];
+const TOKENS: TokenId[] = ["TIA", "teeUSD"];
 
 /// The relayer and the gas oracle serve their own dashboards beside this one. Linking out
 /// beats reimplementing them here, which is what the Prover tab was doing, worse.
@@ -54,11 +57,17 @@ function service(port: number): string {
   return `${window.location.protocol}//${window.location.hostname}:${port}/`;
 }
 
-type Tab = "bridge" | "faucet" | "history";
+type Tab = "bridge" | "trade" | "faucet" | "history";
 
 function tabFromHash(): Tab {
-  const name = window.location.hash.replace(/^#\/?/, "").split("?")[0];
-  return name === "history" || name === "faucet" ? name : "bridge";
+  const name = window.location.hash.replace(/^#\/?/, "").split("?")[0].split("/")[0];
+  return name === "history" || name === "faucet" || name === "trade" ? name : "bridge";
+}
+
+/// The venue's section, from `#trade/launch` and `#trade/docs`.
+function sectionFromHash(): Section {
+  const sub = window.location.hash.replace(/^#\/?/, "").split("?")[0].split("/")[1];
+  return sub === "launch" || sub === "docs" ? sub : "trade";
 }
 
 /// The search a `#history?q=…` link carries.
@@ -72,12 +81,20 @@ export default function App() {
   const [cosmos, setCosmos] = useState<Account | null>(null);
   // The tab lives in the URL hash, so a reload keeps it and `#history?q=<tx>` links a search.
   const [tab, setTabState] = useState<Tab>(tabFromHash);
+  const [section, setSectionState] = useState<Section>(sectionFromHash);
   const setTab = useCallback((next: Tab) => {
     setTabState(next);
     if (tabFromHash() !== next) window.location.hash = next === "bridge" ? "" : next;
   }, []);
+  const setSection = useCallback((next: Section) => {
+    setSectionState(next);
+    window.location.hash = next === "trade" ? "trade" : `trade/${next}`;
+  }, []);
   useEffect(() => {
-    const onHash = () => setTabState(tabFromHash());
+    const onHash = () => {
+      setTabState(tabFromHash());
+      setSectionState(sectionFromHash());
+    };
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
@@ -393,6 +410,7 @@ export default function App() {
 
   const tabs: { id: typeof tab; label: string }[] = [
     { id: "bridge", label: "Bridge" },
+    { id: "trade", label: "Trade" },
     { id: "history", label: "History" },
     { id: "faucet", label: "Faucet" },
   ];
@@ -425,7 +443,7 @@ export default function App() {
         </div>
       </header>
 
-      <main className={tab === "history" ? "page" : "page bridge-page"}>
+      <main className={tab === "history" ? "page" : tab === "trade" ? "page venue-page" : "page bridge-page"}>
         <ViewBoundary key={tab}>
         {tab === "bridge" ? (
           <BridgeView
@@ -456,6 +474,15 @@ export default function App() {
             onAmount={setAmount}
             onRecipient={setRecipient}
             onSend={send}
+          />
+        ) : tab === "trade" ? (
+          <VenuePage
+            section={section}
+            onSection={setSection}
+            evm={evm?.address ?? null}
+            cosmos={cosmos?.address ?? null}
+            onConnect={(wallet) => connect(wallet === "MetaMask" ? "base" : "celestia")}
+            onTransfer={(t) => setTransfers((all) => [t, ...all])}
           />
         ) : tab === "history" ? (
           <HistoryView
@@ -519,24 +546,6 @@ function WalletButton({
   );
 }
 
-
-async function waitForCelestiaMessageId(chain: CosmosChain, tx: string): Promise<string> {
-  for (let attempt = 0; attempt < 30; attempt++) {
-    const id = await messageIdFromCelestiaTx(chain, tx);
-    if (id) return id;
-    await new Promise((resolve) => setTimeout(resolve, 3000));
-  }
-  throw new Error("Transaction did not confirm in time; check the explorer");
-}
-
-async function waitForMessageId(chain: EvmChain, tx: string): Promise<string> {
-  for (let attempt = 0; attempt < 40; attempt++) {
-    const id = await messageIdFromReceipt(chain, tx);
-    if (id) return id;
-    await new Promise((resolve) => setTimeout(resolve, 3000));
-  }
-  throw new Error("Transaction did not confirm in time; check the explorer");
-}
 
 /// What the dialog needs to say, captured at the moment the send succeeded.
 ///

@@ -67,10 +67,11 @@ VITE_CELESTIA_MAILBOX_ID=$(load mailbox-id)
 VITE_CELESTIA_ISM_ID=$(load routing-ism-id)
 VITE_CELESTIA_IGP_ID=$(load noop-hook-id)
 VITE_CELESTIA_TIA_ROUTER=$(load celestia-token-id)
-VITE_CELESTIA_USDC_ROUTER=$(opt celestia-usdc-token-id)
-VITE_SEPOLIA_USDC_ROUTER=$(opt sepolia-usdc-router)
-VITE_ARBITRUM_USDC_ROUTER=$(opt arbitrum-usdc-router)
-VITE_BASE_USDC_ROUTER=$(opt base-usdc-router)
+VITE_CELESTIA_TEEUSD_ROUTER=$(opt celestia-teeusd-token-id)
+VITE_SEPOLIA_TEEUSD_ROUTER=$(opt sepolia-teeusd-router)
+VITE_ARBITRUM_TEEUSD_ROUTER=$(opt arbitrum-teeusd-router)
+VITE_BASE_TEEUSD_ROUTER=$(opt base-teeusd-router)
+VITE_EDEN_TEEUSD_ROUTER=$(opt eden-teeusd-router)
 # No proving: the destination verifies the enclave's quote directly, so the only wait is the
 # origin's finality plus a block.
 VITE_PROVING_SECONDS=30

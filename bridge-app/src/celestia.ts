@@ -70,16 +70,120 @@ export function encodeRemoteTransfer(msg: RemoteTransfer): Uint8Array {
   return new Uint8Array(body);
 }
 
+function uintField(field: number, value: number): number[] {
+  return value ? [...tag(field, 0), ...varint(value)] : [];
+}
+
+function boolField(field: number, value: boolean): number[] {
+  return value ? [...tag(field, 0), 1] : [];
+}
+
+/// The hub messages a launch and a trade send, as the trade API returns them: proto JSON
+/// field names, every field a string, number or bool. Field numbers are from the
+/// hyperlane-cosmos protos.
+const HUB_ENCODERS: Record<string, (v: any) => number[]> = {
+  "/hyperlane.warp.v1.MsgCreateSyntheticToken": (v) => [
+    ...stringField(1, v.owner),
+    ...stringField(2, v.origin_mailbox),
+  ],
+  "/hyperlane.warp.v1.MsgSetToken": (v) => [
+    ...stringField(1, v.owner),
+    ...stringField(2, v.token_id),
+    ...stringField(3, v.new_owner ?? ""),
+    ...stringField(4, v.ism_id ?? ""),
+    ...boolField(7, Boolean(v.renounce_ownership)),
+  ],
+  "/hyperlane.warp.v1.MsgEnrollRemoteRouter": (v) => [
+    ...stringField(1, v.owner),
+    ...stringField(2, v.token_id),
+    ...lengthDelimited(3, [
+      ...uintField(1, Number(v.remote_router.receiver_domain)),
+      ...stringField(2, v.remote_router.receiver_contract),
+      ...stringField(3, String(v.remote_router.gas)),
+    ]),
+  ],
+  "/hyperlane.warp.v1.MsgUnrollRemoteRouter": (v) => [
+    ...stringField(1, v.owner),
+    ...stringField(2, v.token_id),
+    ...uintField(3, Number(v.receiver_domain)),
+  ],
+  "/hyperlane.core.v1.MsgProcessMessage": (v) => [
+    ...stringField(1, v.mailbox_id),
+    ...stringField(2, v.relayer),
+    ...stringField(3, v.metadata),
+    ...stringField(4, v.message),
+  ],
+  [MSG_REMOTE_TRANSFER]: (v) => [
+    ...encodeRemoteTransfer({
+      sender: v.sender,
+      tokenId: v.token_id,
+      destinationDomain: Number(v.destination_domain),
+      recipient: v.recipient,
+      amount: String(v.amount),
+      maxFee: v.max_fee,
+    }),
+  ],
+};
+
+export function encodeHubMsg(typeUrl: string, value: any): Uint8Array {
+  const encode = HUB_ENCODERS[typeUrl];
+  if (!encode) throw new Error(`no encoder for ${typeUrl}`);
+  return new Uint8Array(encode(value));
+}
+
 const registry = new Registry();
+for (const typeUrl of Object.keys(HUB_ENCODERS)) {
+  registry.register(typeUrl, {
+    encode: (value: any) => ({ finish: () => encodeHubMsg(typeUrl, value) }),
+    decode: () => {
+      throw new Error(`decoding ${typeUrl} is not needed here`);
+    },
+    fromPartial: (value: any) => value,
+  } as any);
+}
+// The bridge form builds this one from camelCase fields.
 registry.register(MSG_REMOTE_TRANSFER, {
-  encode: (value: RemoteTransfer) => ({
-    finish: () => encodeRemoteTransfer(value),
+  encode: (value: any) => ({
+    finish: () =>
+      "tokenId" in value ? encodeRemoteTransfer(value) : encodeHubMsg(MSG_REMOTE_TRANSFER, value),
   }),
   decode: () => {
     throw new Error("decoding MsgRemoteTransfer is not needed here");
   },
-  fromPartial: (value: RemoteTransfer) => value,
+  fromPartial: (value: any) => value,
 } as any);
+
+/// Sign and broadcast hub messages from the trade API in one transaction with Keplr.
+/// Returns the transaction hash and its events.
+export async function sendHubMsgs(opts: {
+  chain: CosmosChain;
+  sender: string;
+  msgs: { typeUrl: string; value: any }[];
+}): Promise<{ hash: string; events: readonly any[] }> {
+  if (!window.keplr) throw new Error("Keplr is not installed");
+  const signer = window.getOfflineSigner!(opts.chain.chainId);
+  const client = await SigningStargateClient.connectWithSigner(opts.chain.rpc, signer, { registry });
+  // Generous rather than simulated: a launch's one transaction carries up to a dozen messages,
+  // and unused gas costs nothing beyond the fee at the chain's minimum price.
+  const gas = 300_000 + 250_000 * opts.msgs.length;
+  const fee = { amount: [{ denom: opts.chain.denom, amount: String(Math.ceil(gas * 0.004)) }], gas: String(gas) };
+  const result = await client.signAndBroadcast(opts.sender, opts.msgs, fee);
+  if (result.code !== 0) throw new Error(result.rawLog || `transaction failed (${result.code})`);
+  return { hash: result.transactionHash, events: result.events };
+}
+
+/// Every attribute `key` of events whose type ends with `suffix`, unquoted.
+export function eventValues(events: readonly any[], suffix: string, key: string): string[] {
+  return events
+    .filter((e) => String(e.type).endsWith(suffix))
+    .flatMap((e) => (e.attributes ?? []).filter((a: any) => a.key === key))
+    .map((a: any) => String(a.value).replace(/^"|"$/g, ""));
+}
+
+/// What a sender offers the paymaster for a quote: the module charges only the quote.
+export function maxFeeFor(quoted: bigint): bigint {
+  return feeCeiling(quoted);
+}
 
 /** Send a warp transfer from Celestia and return the transaction hash. */
 export async function sendFromCelestia(opts: {

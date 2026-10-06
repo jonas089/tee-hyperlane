@@ -41,8 +41,21 @@ async fn main() -> Result<()> {
     // there; `RUST_LOG=debug` brings back every step of every pass.
     use std::io::IsTerminal;
     let terminal = std::io::stderr().is_terminal();
-    let filter =
+    let mut filter =
         tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into());
+    // Peer discovery for Base's p2p reports every misbehaving stranger on the network as a
+    // warning. None of it is ours to act on, so only its errors get through unless RUST_LOG
+    // names discv5 or libp2p itself, as `RUST_LOG=info,discv5=debug` does.
+    if !std::env::var("RUST_LOG").is_ok_and(|v| v.contains("discv5") || v.contains("libp2p")) {
+        for quiet in [
+            "discv5=error",
+            "libp2p=error",
+            "libp2p_gossipsub=error",
+            "libp2p_swarm=error",
+        ] {
+            filter = filter.add_directive(quiet.parse().expect("a static directive"));
+        }
+    }
     let builder = tracing_subscriber::fmt()
         .with_target(false)
         .with_ansi(terminal)

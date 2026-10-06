@@ -25,7 +25,7 @@ const envNum = (key: string, fallback: number): number => {
 };
 
 export type ChainId = "sepolia" | "arbitrum" | "base" | "eden" | "celestia";
-export type TokenId = "TIA" | "USDC";
+export type TokenId = "TIA" | "teeUSD";
 
 export interface EvmChain {
   kind: "evm";
@@ -164,19 +164,18 @@ export const ROUTERS: Record<TokenId, Partial<Record<ChainId, string>>> = {
     base: env("VITE_BASE_TIA_ROUTER", "0xF50470146B36c638b981e437AB37DfEd9a02FAb3"),
     eden: env("VITE_EDEN_TIA_ROUTER", "0xD2babc9BE1055551b7AB98c440222862a1646158"),
   },
-  // A deployment that has not created these leaves them unset, and the route reports itself
-  // as not deployed rather than offering a Bridge button that cannot work. The addresses are
-  // the previous deployment's; they are defaults, not a claim that this one has them.
-  USDC: {
-    celestia: env("VITE_CELESTIA_USDC_ROUTER", "0x726f757465725f61707000000000000000000000000000020000000000000001"),
-    sepolia: env("VITE_SEPOLIA_USDC_ROUTER", "0xfb611B6f6CE92033960e99C2D65cee4237e64cDD"),
-    arbitrum: env("VITE_ARBITRUM_USDC_ROUTER", "0x8C87fd144006C651430450df8b61A15EeB3FF436"),
-    base: env("VITE_BASE_USDC_ROUTER", "0x285b590ee43A1374AA131e7390D0CA687Be43DF9"),
-    eden: env("VITE_EDEN_USDC_ROUTER", "0xc09fbf8F17E96ce746D39f9d11a9dD1813F2d220"),
+  // Ours: a fixed supply minted on Celestia, synthetic everywhere else. A deployment that has
+  // not created it leaves these unset, and the route reports itself as not deployed.
+  teeUSD: {
+    celestia: env("VITE_CELESTIA_TEEUSD_ROUTER", "0x726f757465725f61707000000000000000000000000000020000000000000002"),
+    sepolia: env("VITE_SEPOLIA_TEEUSD_ROUTER", "0x1be2055d49c0a350C137605a62861f58Aa750297"),
+    arbitrum: env("VITE_ARBITRUM_TEEUSD_ROUTER", "0xF699EB10087A1e01993ed628C198fe6e231830eD"),
+    base: env("VITE_BASE_TEEUSD_ROUTER", "0xa8cc6ec4855b1415c03f3aE51953a3643f7991a5"),
+    eden: env("VITE_EDEN_TEEUSD_ROUTER", "0xa4697140E90F39D94F3C64D40175FA6F207bc8EC"),
   },
 };
 
-export const DECIMALS: Record<TokenId, number> = { TIA: 6, USDC: 6 };
+export const DECIMALS: Record<TokenId, number> = { TIA: 6, teeUSD: 6 };
 
 /// Gas each warp router is enrolled with, and therefore what the paymaster quotes against.
 export const REMOTE_ROUTER_GAS = 50000;
@@ -185,7 +184,8 @@ export const REMOTE_ROUTER_GAS = 50000;
 /// ERC20, so its address is enough and there is nothing to name here.
 export const CELESTIA_DENOM: Record<TokenId, string> = {
   TIA: "utia",
-  USDC: "hyperlane/0x726f757465725f61707000000000000000000000000000020000000000000001",
+  // A synthetic's bank denom is its token id under `hyperlane/`.
+  teeUSD: `hyperlane/${ROUTERS.teeUSD.celestia}`,
 };
 
 /// What happens between the origin finalising and the funds arriving.

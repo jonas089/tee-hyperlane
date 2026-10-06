@@ -1,5 +1,6 @@
 //! HTTP server: the explorer page, `/api/v1`, the faucet, and the older endpoints the bridge app uses.
 
+pub mod trade;
 pub mod v1;
 
 use std::collections::BTreeMap;
@@ -27,6 +28,7 @@ pub struct Api {
     proof_dir: Arc<PathBuf>,
     routes: Arc<Vec<RouteView>>,
     faucet: Option<Arc<Faucet>>,
+    trade: Option<Arc<trade::Trade>>,
 }
 
 struct RouteView {
@@ -75,6 +77,7 @@ impl Api {
             proof_dir: Arc::new(config.proof_dir()),
             routes: Arc::new(routes),
             faucet: Faucet::new(config)?.map(Arc::new),
+            trade: trade::Trade::new(config)?.map(Arc::new),
         })
     }
 
@@ -145,6 +148,7 @@ impl Api {
 }
 
 pub async fn serve(api: Api, tracker: Arc<crate::tracker::Tracker>, listen: &str) -> Result<()> {
+    let trade = api.trade.clone();
     let legacy = Router::new()
         .route("/api/health", get(|| async { "ok" }))
         .route("/api/status", get(status))
@@ -152,13 +156,17 @@ pub async fn serve(api: Api, tracker: Arc<crate::tracker::Tracker>, listen: &str
         .route("/api/faucet", get(faucet_info).post(faucet_claim))
         .route("/api/faucet/{address}", get(faucet_claimed))
         .with_state(api);
-    let app = Router::new()
+    let mut app = Router::new()
         .route(
             "/",
             get(|| async { axum::response::Html(include_str!("../ui/explorer.html")) }),
         )
         .merge(v1::router(tracker))
         .merge(legacy);
+    if let Some(trade) = trade {
+        trade.spawn_refresh();
+        app = app.merge(trade::router(trade));
+    }
     let listener = tokio::net::TcpListener::bind(listen).await?;
     debug!(listen, "api listening");
     axum::serve(listener, app).await?;
@@ -203,11 +211,9 @@ pub fn measurements(quote: &str, event_log: &str) -> Result<Measurements> {
 
 // ---------------------------------------------------------------- faucet
 //
-// One grant of test TIA per Celestia address, from the chain named by `[faucet]` in the config.
+// One grant per Celestia address, of every coin `[faucet]` lists, from the chain it names.
 // A claim is recorded as a file before anything is sent, so two requests racing for one address
 // cannot both be paid.
-
-const GRANT_UTIA: u64 = 1_000_000_000;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -217,6 +223,33 @@ pub struct FaucetConfig {
     /// The funded key in that chain's keyring.
     #[serde(default = "default_faucet_key")]
     pub key: String,
+    /// What each address gets, all in one send. 1000 TIA when absent.
+    #[serde(default = "default_grants")]
+    pub grants: Vec<Grant>,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct Grant {
+    pub symbol: String,
+    pub denom: String,
+    /// Base units.
+    pub amount: u64,
+    #[serde(default = "default_grant_decimals")]
+    pub decimals: u8,
+}
+
+fn default_grants() -> Vec<Grant> {
+    vec![Grant {
+        symbol: "TIA".into(),
+        denom: "utia".into(),
+        amount: 1_000_000_000,
+        decimals: 6,
+    }]
+}
+
+fn default_grant_decimals() -> u8 {
+    6
 }
 
 fn default_faucet_key() -> String {
@@ -229,6 +262,7 @@ struct Faucet {
     chain_id: String,
     home: String,
     key: String,
+    grants: Vec<Grant>,
 }
 
 impl Faucet {
@@ -246,6 +280,7 @@ impl Faucet {
                 .or_else(|| std::env::var("CELHOME").ok())
                 .context("the faucet chain needs `home` or CELHOME")?,
             key: faucet.key.clone(),
+            grants: faucet.grants.clone(),
         }))
     }
 
@@ -281,7 +316,12 @@ impl Faucet {
             Err(e) => return Err(fail(e.to_string())),
         };
         let appd = std::env::var("APPD").unwrap_or_else(|_| "celestia-appd".into());
-        let amount = format!("{GRANT_UTIA}utia");
+        let amount = self
+            .grants
+            .iter()
+            .map(|g| format!("{}{}", g.amount, g.denom))
+            .collect::<Vec<_>>()
+            .join(",");
         let sent = tokio::process::Command::new(&appd)
             .args([
                 "tx",
@@ -303,7 +343,7 @@ impl Faucet {
                 "--fees",
                 "200000utia",
                 "--gas",
-                "200000",
+                "300000",
                 "-y",
                 "-o",
                 "json",
@@ -342,7 +382,16 @@ impl Faucet {
 }
 
 async fn faucet_info(State(api): State<Api>) -> Json<Value> {
-    Json(json!({ "enabled": api.faucet.is_some(), "amountTia": GRANT_UTIA / 1_000_000 }))
+    let grants = api
+        .faucet
+        .as_ref()
+        .map(|f| f.grants.clone())
+        .unwrap_or_default();
+    let tia = grants
+        .iter()
+        .find(|g| g.denom == "utia")
+        .map_or(0, |g| g.amount / 1_000_000);
+    Json(json!({ "enabled": api.faucet.is_some(), "amountTia": tia, "grants": grants }))
 }
 
 async fn faucet_claimed(State(api): State<Api>, Path(address): Path<String>) -> Json<Value> {
@@ -370,6 +419,6 @@ async fn faucet_claim(
         .unwrap_or_default();
     let tx = faucet.claim(&address).await.map_err(deny)?;
     Ok(Json(
-        json!({ "address": address, "amount_tia": GRANT_UTIA / 1_000_000, "tx_hash": tx }),
+        json!({ "address": address, "grants": faucet.grants, "tx_hash": tx }),
     ))
 }

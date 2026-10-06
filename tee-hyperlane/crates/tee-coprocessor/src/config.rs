@@ -28,6 +28,9 @@ pub struct Config {
     pub routes: Vec<Route>,
     /// Test TIA for anyone who asks, from a funded key on a Celestia chain. Off when absent.
     pub faucet: Option<crate::api::FaucetConfig>,
+    /// Swaps across chains through the pools and the bridge, under `/api/v1/trade`. Off when
+    /// absent.
+    pub trade: Option<crate::api::trade::TradeConfig>,
     /// How often the tracker reads each origin for new transfers and checks each one's
     /// progress.
     #[serde(default = "default_track")]
@@ -52,6 +55,10 @@ pub struct Route {
     /// How long a transfer on this route may take before it is reported overdue. Defaults by
     /// origin: see `tracker::expected_latency`.
     pub expected_latency_secs: Option<u64>,
+    /// Attest once the origin head is this many blocks past the ISM's trusted height, whether
+    /// or not anything is for us. Keeps the proof at the trusted height recent, which a full
+    /// node needs: it rebuilds old state from the head, slower the further back it goes.
+    pub max_lag: Option<u64>,
 }
 
 fn default_tick() -> u64 {

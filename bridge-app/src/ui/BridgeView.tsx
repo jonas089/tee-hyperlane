@@ -189,14 +189,22 @@ export function BridgeView(p: BridgeProps) {
   );
 }
 
-function ChainPicker({ value, onChange }: { value: ChainId; onChange: (c: ChainId) => void }) {
+export function ChainPicker({
+  value,
+  onChange,
+  chains = ALL_CHAINS,
+}: {
+  value: ChainId;
+  onChange: (c: ChainId) => void;
+  chains?: ChainId[];
+}) {
   return (
     <Picker
       value={value}
       onChange={onChange}
       placeholder="Search chains"
       className="chain-picker"
-      options={ALL_CHAINS.map((c) => ({
+      options={chains.map((c) => ({
         value: c,
         label: CHAINS[c].name,
         keywords: `${CHAINS[c].domain}`,
@@ -212,7 +220,7 @@ function ChainPicker({ value, onChange }: { value: ChainId; onChange: (c: ChainI
   );
 }
 
-function TokenPicker({
+export function TokenPicker({
   value,
   tokens,
   onChange,

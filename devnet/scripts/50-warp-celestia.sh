@@ -1,16 +1,12 @@
 #!/usr/bin/env bash
 # Create the Celestia side of the warp routes.
 #
-# Two assets, deliberately pointing opposite ways, because lock/unlock and mint/burn are
-# different code paths and one asset only exercises half of each:
+# Two assets, which between them exercise both of this module's code paths:
 #
-#   TIA   Celestia native. Collateral here, synthetic on every EVM chain.
-#         Sending locks here and mints there; receiving burns there and unlocks here.
-#   USDC  EVM native. Synthetic here, collateral on Sepolia.
-#         Sending burns here and unlocks there; receiving locks there and mints here.
-#   teeUSD Ours. Synthetic everywhere, with a fixed supply minted once here (below).
-#
-# Carrying both means a change that breaks one direction cannot pass unnoticed.
+#   TIA     Celestia native. Collateral here, synthetic on every EVM chain.
+#           Sending locks here and mints there; receiving burns there and unlocks here.
+#   teeUSD  Ours. Synthetic here too, with a fixed supply minted once (below).
+#           Sending burns here and mints there; receiving does the reverse.
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 wait_for_chain
@@ -42,19 +38,6 @@ else
   point_at_ism "${token}"
 fi
 
-if has celestia-usdc-token-id; then
-  say "USDC token already created: $(load celestia-usdc-token-id)"
-else
-  say "creating the USDC synthetic token"
-  res="$(tx relayer warp create-synthetic-token "$(load mailbox-id)")"
-  token="$(ev "${res}" "hyperlane.warp.v1.EventCreateSyntheticToken" "token_id")"
-  [ -n "${token}" ] || die "could not read the USDC token id"
-  save celestia-usdc-token-id "${token}"
-  point_at_ism "${token}"
-  # A synthetic's denom only exists once the token does, so record it rather than expecting
-  # anyone downstream to reconstruct it. This is the string the UI's CELESTIA_DENOM needs.
-  save celestia-usdc-denom "hyperlane/${token}"
-fi
 
 # teeUSD: a dollar token we issue, so trading pairs can be seeded without anyone else's asset.
 #

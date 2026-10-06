@@ -280,6 +280,378 @@
           }
         }
       }
+    },
+    "/api/v1/trade": {
+      "get": {
+        "summary": "Everything tradeable: chains, pools, and every listed asset, launched ones included",
+        "tags": [
+          "trade"
+        ],
+        "parameters": [
+          {
+            "name": "refresh",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "Re-read launches and pools first rather than waiting up to 30 seconds"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TradeInfo"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/trade/quote": {
+      "get": {
+        "summary": "Price a trade and plan its steps",
+        "tags": [
+          "trade"
+        ],
+        "parameters": [
+          {
+            "name": "from",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Chain the seller holds on"
+          },
+          {
+            "name": "sell",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Asset sold"
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Chain the buyer wants it on"
+          },
+          {
+            "name": "buy",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Asset bought"
+          },
+          {
+            "name": "amount",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Amount sold, in base units"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Quote"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A bad request (400) or a chain that would not answer (502)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TradeError"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "A bad request (400) or a chain that would not answer (502)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TradeError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/trade/build": {
+      "post": {
+        "summary": "Unsigned transactions for one step, for the amount actually held",
+        "tags": [
+          "trade"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BuildRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Build"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A bad request (400) or a chain that would not answer (502)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TradeError"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "A bad request (400) or a chain that would not answer (502)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TradeError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/trade/pool": {
+      "post": {
+        "summary": "Add full-range liquidity to a pool, creating it when it does not exist",
+        "tags": [
+          "trade"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PoolRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PoolResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A bad request (400) or a chain that would not answer (502)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TradeError"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "A bad request (400) or a chain that would not answer (502)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TradeError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/trade/launch/create": {
+      "post": {
+        "summary": "Launch, 1 of 3: create the token on the hub",
+        "tags": [
+          "launch"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Tx"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/trade/launch/deploy": {
+      "post": {
+        "summary": "Launch, 2 of 3: one router per EVM chain from its token factory",
+        "tags": [
+          "launch"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeployRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Tx"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A bad request (400) or a chain that would not answer (502)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TradeError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/trade/launch/wire": {
+      "post": {
+        "summary": "Launch, 3 of 3: mint the whole supply, connect the routers, renounce the token",
+        "tags": [
+          "launch"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WireRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Tx"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A bad request (400) or a chain that would not answer (502)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TradeError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/trade/launch/{id}": {
+      "get": {
+        "summary": "Where a launch has got: its routers, and its listing once the hub shows it wired",
+        "tags": [
+          "launch"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The hub token id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Launch"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A bad request (400) or a chain that would not answer (502)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TradeError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1321,6 +1693,637 @@
                 "type": "null"
               }
             ]
+          }
+        }
+      },
+      "TradeError": {
+        "type": "object",
+        "description": "Why a trade request failed.",
+        "additionalProperties": false,
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "string"
+          }
+        }
+      },
+      "Venue": {
+        "type": "object",
+        "description": "Uniswap v3 on one chain, and its token factory.",
+        "additionalProperties": false,
+        "required": [
+          "factory",
+          "positions",
+          "swapRouter",
+          "quoter",
+          "fee",
+          "tokenFactory"
+        ],
+        "properties": {
+          "factory": {
+            "type": "string",
+            "description": "UniswapV3Factory"
+          },
+          "positions": {
+            "type": "string",
+            "description": "NonfungiblePositionManager"
+          },
+          "swapRouter": {
+            "type": "string",
+            "description": "SwapRouter02"
+          },
+          "quoter": {
+            "type": "string",
+            "description": "QuoterV2"
+          },
+          "fee": {
+            "type": "integer",
+            "description": "The fee tier of every pool here, in hundredths of a basis point"
+          },
+          "tokenFactory": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "TeeTokenFactory, where tokens are launched"
+          }
+        }
+      },
+      "TradeChain": {
+        "type": "object",
+        "description": "A chain trades can start or end on.",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "kind",
+          "domain",
+          "venue"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "evm",
+              "cosmos"
+            ]
+          },
+          "domain": {
+            "type": "integer",
+            "description": "Hyperlane domain; for an EVM chain also its chain id"
+          },
+          "venue": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Venue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Its pool, if it has one"
+          }
+        }
+      },
+      "TradeAsset": {
+        "type": "object",
+        "description": "An asset and where it is.",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "symbol",
+          "name",
+          "decimals",
+          "denom",
+          "routers",
+          "launched",
+          "launcher",
+          "pools"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The symbol for TIA and teeUSD, the hub token id for a launched token. Use it wherever an asset is named"
+          },
+          "symbol": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "decimals": {
+            "type": "integer"
+          },
+          "denom": {
+            "type": "string",
+            "description": "Bank denom on the hub"
+          },
+          "routers": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Chain name to warp router: a token id on the hub, the ERC20 itself on an EVM chain"
+          },
+          "launched": {
+            "type": "boolean"
+          },
+          "launcher": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The EVM account that launched it"
+          },
+          "pools": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Chain name to its pool against the quote asset, where one holds liquidity"
+          }
+        }
+      },
+      "TradeInfo": {
+        "type": "object",
+        "description": "Everything a trade can use.",
+        "additionalProperties": false,
+        "required": [
+          "hub",
+          "quoteAsset",
+          "refreshedAt",
+          "chains",
+          "assets"
+        ],
+        "properties": {
+          "hub": {
+            "type": "string",
+            "description": "The Celestia chain every route goes through"
+          },
+          "quoteAsset": {
+            "type": "string",
+            "description": "What every pool is quoted in and multi-hop swaps route through"
+          },
+          "refreshedAt": {
+            "type": "integer",
+            "description": "When launches and pools were last read"
+          },
+          "chains": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TradeChain"
+            }
+          },
+          "assets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TradeAsset"
+            }
+          }
+        }
+      },
+      "Step": {
+        "type": "object",
+        "description": "One step of a route. A swap has from = to; a bridge has sell = buy.",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "from",
+          "to",
+          "sell",
+          "buy",
+          "amountIn",
+          "amountOut",
+          "etaSecs"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "swap",
+              "bridge"
+            ]
+          },
+          "from": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string"
+          },
+          "sell": {
+            "type": "string"
+          },
+          "buy": {
+            "type": "string"
+          },
+          "amountIn": {
+            "type": "string",
+            "description": "Base units"
+          },
+          "amountOut": {
+            "type": "string",
+            "description": "Base units, estimated"
+          },
+          "etaSecs": {
+            "type": "integer",
+            "description": "Typical wait for this step"
+          }
+        }
+      },
+      "Quote": {
+        "type": "object",
+        "description": "A priced route.",
+        "additionalProperties": false,
+        "required": [
+          "from",
+          "to",
+          "sell",
+          "buy",
+          "amountIn",
+          "amountOut",
+          "etaSecs",
+          "steps"
+        ],
+        "properties": {
+          "from": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string"
+          },
+          "sell": {
+            "type": "string"
+          },
+          "buy": {
+            "type": "string"
+          },
+          "amountIn": {
+            "type": "string",
+            "description": "Base units"
+          },
+          "amountOut": {
+            "type": "string",
+            "description": "Base units, estimated"
+          },
+          "etaSecs": {
+            "type": "integer",
+            "description": "Typical wait for the whole route"
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Step"
+            }
+          }
+        }
+      },
+      "BuildRequest": {
+        "type": "object",
+        "description": "One step to turn into transactions.",
+        "additionalProperties": false,
+        "required": [
+          "step",
+          "sender"
+        ],
+        "properties": {
+          "step": {
+            "$ref": "#/components/schemas/Step"
+          },
+          "amount": {
+            "type": "string",
+            "description": "Base units; the step's amountIn when absent"
+          },
+          "sender": {
+            "type": "string",
+            "description": "Who signs: an EVM address, or a bech32 account for a step leaving the hub"
+          },
+          "recipient": {
+            "type": "string",
+            "description": "Who receives a bridge on the far side; required for a bridge"
+          },
+          "slippageBps": {
+            "type": "integer",
+            "description": "How far below the quote a swap may fill; default 50"
+          }
+        }
+      },
+      "Tx": {
+        "type": "object",
+        "description": "An unsigned transaction. evm fills chainId, to, data and value; cosmos fills msgs, which go in one transaction in order.",
+        "additionalProperties": false,
+        "required": [
+          "chain",
+          "kind",
+          "chainId",
+          "to",
+          "data",
+          "value",
+          "msgs",
+          "description"
+        ],
+        "properties": {
+          "chain": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "evm",
+              "cosmos"
+            ]
+          },
+          "chainId": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "to": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "data": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "value": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Wei, hex"
+          },
+          "msgs": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/CosmosMsg"
+            }
+          },
+          "description": {
+            "type": "string"
+          }
+        }
+      },
+      "Build": {
+        "type": "object",
+        "description": "The transactions for one step, to sign and send in order.",
+        "additionalProperties": false,
+        "required": [
+          "txs",
+          "amountOut",
+          "minOut"
+        ],
+        "properties": {
+          "txs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Tx"
+            }
+          },
+          "amountOut": {
+            "type": "string",
+            "description": "Base units, estimated"
+          },
+          "minOut": {
+            "type": "string",
+            "description": "Base units; a swap reverts below this"
+          }
+        }
+      },
+      "CosmosMsg": {
+        "type": "object",
+        "description": "One message of a hub transaction.",
+        "additionalProperties": false,
+        "required": [
+          "typeUrl",
+          "value"
+        ],
+        "properties": {
+          "typeUrl": {
+            "type": "string"
+          },
+          "value": {
+            "type": "object",
+            "description": "The message in proto JSON field names"
+          }
+        }
+      },
+      "PoolRequest": {
+        "type": "object",
+        "description": "Liquidity to add.",
+        "additionalProperties": false,
+        "required": [
+          "chain",
+          "assetA",
+          "assetB",
+          "amountA",
+          "sender"
+        ],
+        "properties": {
+          "chain": {
+            "type": "string"
+          },
+          "assetA": {
+            "type": "string"
+          },
+          "assetB": {
+            "type": "string"
+          },
+          "amountA": {
+            "type": "string",
+            "description": "Base units"
+          },
+          "amountB": {
+            "type": "string",
+            "description": "Base units; sets a new pool's price, ignored for an existing one"
+          },
+          "sender": {
+            "type": "string",
+            "description": "The EVM account that provides it and owns the position"
+          },
+          "slippageBps": {
+            "type": "integer",
+            "description": "Default 100"
+          }
+        }
+      },
+      "PoolResult": {
+        "type": "object",
+        "description": "The transactions to add it, in order.",
+        "additionalProperties": false,
+        "required": [
+          "txs",
+          "pool",
+          "amountA",
+          "amountB"
+        ],
+        "properties": {
+          "txs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Tx"
+            }
+          },
+          "pool": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Null when this creates the pool"
+          },
+          "amountA": {
+            "type": "string"
+          },
+          "amountB": {
+            "type": "string",
+            "description": "What the pool's price asks for, on an existing pool"
+          }
+        }
+      },
+      "CreateRequest": {
+        "type": "object",
+        "description": "",
+        "additionalProperties": false,
+        "required": [
+          "owner"
+        ],
+        "properties": {
+          "owner": {
+            "type": "string",
+            "description": "The bech32 account that signs every hub step and receives the supply"
+          }
+        }
+      },
+      "DeployRequest": {
+        "type": "object",
+        "description": "",
+        "additionalProperties": false,
+        "required": [
+          "hubToken",
+          "name",
+          "symbol"
+        ],
+        "properties": {
+          "hubToken": {
+            "type": "string",
+            "description": "The id the create step's EventCreateSyntheticToken reported"
+          },
+          "name": {
+            "type": "string",
+            "description": "1 to 48 characters"
+          },
+          "symbol": {
+            "type": "string",
+            "description": "1 to 12 characters"
+          },
+          "chains": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Default: every chain with a factory"
+          }
+        }
+      },
+      "WireRequest": {
+        "type": "object",
+        "description": "",
+        "additionalProperties": false,
+        "required": [
+          "owner",
+          "hubToken",
+          "supply",
+          "launcher"
+        ],
+        "properties": {
+          "owner": {
+            "type": "string"
+          },
+          "hubToken": {
+            "type": "string"
+          },
+          "supply": {
+            "type": "string",
+            "description": "The whole supply, base units at 6 decimals"
+          },
+          "launcher": {
+            "type": "string",
+            "description": "The EVM account that sent the deploys"
+          }
+        }
+      },
+      "Candidate": {
+        "type": "object",
+        "description": "A router a factory made for a hub token.",
+        "additionalProperties": false,
+        "required": [
+          "chain",
+          "router",
+          "launcher",
+          "name",
+          "symbol"
+        ],
+        "properties": {
+          "chain": {
+            "type": "string"
+          },
+          "router": {
+            "type": "string"
+          },
+          "launcher": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "symbol": {
+            "type": "string"
+          }
+        }
+      },
+      "Launch": {
+        "type": "object",
+        "description": "Where a launch has got.",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "listed",
+          "launches",
+          "refreshedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "listed": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TradeAsset"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "launches": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Candidate"
+            }
+          },
+          "refreshedAt": {
+            "type": "integer"
           }
         }
       }

@@ -36,6 +36,14 @@ pub struct TrackedRoute {
     pub destination: Box<dyn Destination>,
 }
 
+impl TrackedRoute {
+    /// Is `recipient` one of ours on this route's destination, configured or launched?
+    pub fn accepts(&self, recipient: &[u8; 32]) -> bool {
+        self.routers.contains(recipient)
+            || crate::registry::accepts(self.destination_domain, recipient)
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChainInfo {
@@ -614,7 +622,14 @@ impl Tracker {
             return Ok(());
         }
         let to = tip.min(cursor + watcher.span());
-        let recipients: Vec<[u8; 32]> = routes.iter().flat_map(|r| r.routers.clone()).collect();
+        let recipients: Vec<[u8; 32]> = routes
+            .iter()
+            .flat_map(|r| {
+                let mut all = r.routers.clone();
+                all.extend(crate::registry::on(r.destination_domain));
+                all
+            })
+            .collect();
         let found = watcher.scan(&recipients, cursor + 1, to).await?;
 
         let mut state = self.lock();
@@ -623,8 +638,7 @@ impl Tracker {
                 continue;
             };
             let Some(route) = routes.iter().find(|r| {
-                r.destination_domain == decoded.destination
-                    && r.routers.contains(&decoded.recipient)
+                r.destination_domain == decoded.destination && r.accepts(&decoded.recipient)
             }) else {
                 continue;
             };
@@ -893,8 +907,7 @@ fn backfill(
             let Ok(decoded) = hyperlane_types::decode_hyperlane_message(&bytes) else {
                 continue;
             };
-            if decoded.destination != route.destination_domain
-                || !route.routers.contains(&decoded.recipient)
+            if decoded.destination != route.destination_domain || !route.accepts(&decoded.recipient)
             {
                 continue;
             }

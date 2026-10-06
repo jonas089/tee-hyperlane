@@ -1,0 +1,14 @@
+{
+  "name": "teeism-mcp",
+  "version": "0.1.0",
+  "description": "MCP server for the TEE Interchain Solutions venue: trade, launch and add liquidity across Celestia, Sepolia, Base and Arbitrum.",
+  "type": "module",
+  "bin": { "teeism-mcp": "server.mjs" },
+  "files": ["server.mjs", "hub.mjs", "README.md"],
+  "engines": { "node": ">=20" },
+  "dependencies": {
+    "@cosmjs/proto-signing": "0.32.4",
+    "@cosmjs/stargate": "0.32.4",
+    "viem": "2.56.3"
+  }
+}

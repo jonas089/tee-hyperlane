@@ -101,7 +101,7 @@ for c in sepolia arbitrum base eden; do ./scripts/seed-evm-collateral.sh $c; don
 ```
 
 These files hold the addresses of our Automata contracts. For a chain that has none yet, see
-[appendix C](#c-automata-on-a-new-evm-chain).
+[appendix D](#d-automata-on-a-new-evm-chain).
 
 ## 7. Mocha light node (for Eden)
 
@@ -133,10 +133,12 @@ cd ~/tee-ism-nonzk/devnet
 
 `50-warp-celestia.sh` also creates teeUSD and mints its whole supply, 1B, to the `user` key
 (`TEEUSD_HOLDER` to change), then removes the only origin that could mint more.
+`90-evm-warp.sh` also deploys a `TeeTokenFactory` on Sepolia, Base and Arbitrum, where anyone
+launches a token through the Trade tab, and keeps it and its launches on the current ISM.
 
-Every line needs an id. **If `90-evm-warp.sh` prints `deploying the collateral USDC router` on
-a chain that already has one, press Ctrl-C.** A new collateral router strands the USDC held in
-the old one.
+Every line needs an id. **If `90-evm-warp.sh` prints `deploying the synthetic ... router` on
+a chain that already has one, press Ctrl-C.** A new router orphans the tokens the old one
+minted.
 
 ## 9. Paymaster and gas oracle
 
@@ -216,12 +218,12 @@ VITE_CELESTIA_MAILBOX_ID=$(load mailbox-id)
 VITE_CELESTIA_ISM_ID=$(load routing-ism-id)
 VITE_CELESTIA_IGP_ID=$IGP
 VITE_CELESTIA_TIA_ROUTER=$(load celestia-token-id)
-VITE_CELESTIA_USDC_ROUTER=$(opt celestia-usdc-token-id)
+VITE_CELESTIA_TEEUSD_ROUTER=$(opt celestia-teeusd-token-id)
 $(for c in sepolia arbitrum base eden; do C=$(echo $c | tr a-z A-Z)
   echo "VITE_${C}_RPC=$HOST/evm/$c/"
   echo "VITE_${C}_ISM=$(opt ism-$c)"
   echo "VITE_${C}_TIA_ROUTER=$(opt $c-router)"
-  echo "VITE_${C}_USDC_ROUTER=$(opt $c-usdc-router)"; done)
+  echo "VITE_${C}_TEEUSD_ROUTER=$(opt $c-teeusd-router)"; done)
 VITE_PROVING_SECONDS=30
 ENV
 cd ~/tee-ism-nonzk/bridge-app && npm install --silent && VITE_DEVNET=1 npm run build
@@ -251,12 +253,21 @@ Then send 0.1 TIA each way ([INTERACT.md](INTERACT.md)).
 No enclave or ISM changes.
 
 1. Add a row to `TOKENS` in `scripts/90-evm-warp.sh`, and the Celestia side to
-   `scripts/50-warp-celestia.sh`.
+   `scripts/50-warp-celestia.sh`, as teeUSD does.
 2. Re-run both scripts, set the new routers' hooks (step 9), `write_config`, and restart the
    relayer.
-3. Add the routers to `.env.local` (step 11), rebuild the UI, and fund the collateral side.
+3. Add the routers to `.env.local` (step 11), the asset to `[trade]` in `write_config`, and
+   rebuild the UI.
 
-### B. Adding a chain
+### B. The venue
+
+The Trade tab, `/api/v1/trade` ([API.md](API.md)) and the MCP server in `mcp/` need teeUSD, its
+pools, and the factories from `90-evm-warp.sh`. `write_config` then writes `[trade]` and the
+faucet's grants (100k TIA and 200k teeUSD per address, from the `user` key; `FAUCET_TIA`,
+`FAUCET_TEEUSD` and `FAUCET_KEY` change them). Uniswap's addresses per chain are `uniswap_for`
+in `scripts/lib.sh`.
+
+### C. Adding a chain
 
 **As an origin**, one file per crate, named after the chain, under `l1/` for a chain verified
 by a light client or `l2/` for a rollup verified by its sequencer's signature:
@@ -288,7 +299,7 @@ Rules:
 `TeeDcapIsm.sol` unchanged. Any other kind of chain needs an ISM that behaves like
 `TeeDcapIsm`, and a `destination/<kind>.rs` implementing `destination::Destination`.
 
-### C. Automata on a new EVM chain
+### D. Automata on a new EVM chain
 
 In `devnet/automata/`:
 
@@ -326,7 +337,7 @@ the scripts and ISMs read:
 | FmspcTcbDaoVersioned | `0x7BDA83918CAAD9b5EC7F88A24660167E90053690` | `0xe08E2eE491666702312Fc71566420e2C221DdeC3` | `0x06D080A8642803465500D6C9004Cc9CF48094EeD` | `0x61F9E7c62B7c3ade50aeD35065Ea7a8733417471` (V1) |
 | TcbEvalDao | `0x03b1B658C34Bb7919A9cA2067d0055f7dD5C5495` | same | same | `0xDd0F2b5B38391f1Bdf47c670aA161d5Aed7310d7` |
 
-### D. Endpoints
+### E. Endpoints
 
 Defaults, each overridable in `devnet/.env`:
 

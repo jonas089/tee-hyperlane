@@ -51,7 +51,13 @@ impl Rpc {
 
     async fn call_at(&self, url: &str, method: &str, params: Value) -> Result<Value> {
         let body = json!({ "jsonrpc": "2.0", "id": 1, "method": method, "params": params });
-        let reply = self.http.post(url).json(&body).send().await?;
+        let mut request = self.http.post(url).json(&body);
+        if method == "eth_getProof" {
+            // A full node rebuilds an older block's trie by unwinding from the head, which took
+            // 146 seconds for 1352 blocks on Sepolia. Every other call keeps the client's 60.
+            request = request.timeout(std::time::Duration::from_secs(300));
+        }
+        let reply = request.send().await?;
         let status = reply.status();
         let text = reply.text().await?;
         let response: Value = serde_json::from_str(&text).map_err(|_| {

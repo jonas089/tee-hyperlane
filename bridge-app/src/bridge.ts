@@ -19,13 +19,16 @@ import {
 } from "./config";
 import type { Chain, ChainId, EvmChain, TokenId } from "./config";
 import { switchEvmChain } from "./wallets";
+import { messageIdFromCelestiaTx } from "./celestia";
+import type { CosmosChain } from "./config";
 
 export type Step = "dispatched" | "attested" | "authorised" | "delivered";
 export const STEPS: Step[] = ["dispatched", "attested", "authorised", "delivered"];
 
 export interface Transfer {
   messageId: string;
-  token: TokenId;
+  /// A symbol: TIA, teeUSD, or a launched token's.
+  token: string;
   amount: string;
   from: ChainId;
   to: ChainId;
@@ -66,17 +69,33 @@ const ROUTER_ABI = parseAbi([
   "function allowance(address owner, address spender) view returns (uint256)",
 ]);
 
+/** Wait for a transaction to land, failing if it reverted. */
+export async function waitForReceipt(chain: EvmChain, txHash: string): Promise<any> {
+  for (let attempt = 0; attempt < 120; attempt++) {
+    const receipt = await rpc(chain, "eth_getTransactionReceipt", [txHash]).catch(() => null);
+    if (receipt) {
+      if (receipt.status !== "0x1") throw new Error(`transaction ${txHash} reverted on ${chain.name}`);
+      return receipt;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+  }
+  throw new Error("Transaction did not confirm in time; check the explorer");
+}
+
 const MAILBOX_ABI = parseAbi(["function delivered(bytes32 id) view returns (bool)"]);
 
-export function toBaseUnits(amount: string, token: TokenId): bigint {
+/// Decimals by symbol. Every launched token has 6, like both of ours.
+export const decimalsOf = (token: string): number => DECIMALS[token as TokenId] ?? 6;
+
+export function toBaseUnits(amount: string, token: string): bigint {
   const [whole, fraction = ""] = amount.trim().split(".");
-  const decimals = DECIMALS[token];
+  const decimals = decimalsOf(token);
   const padded = (fraction + "0".repeat(decimals)).slice(0, decimals);
   return BigInt(whole || "0") * 10n ** BigInt(decimals) + BigInt(padded || "0");
 }
 
-export function formatAmount(base: bigint, token: TokenId): string {
-  const decimals = DECIMALS[token];
+export function formatAmount(base: bigint, token: string): string {
+  const decimals = decimalsOf(token);
   const unit = 10n ** BigInt(decimals);
   const whole = base / unit;
   const fraction = (base % unit).toString().padStart(decimals, "0").replace(/0+$/, "");
@@ -127,7 +146,7 @@ async function rpc(chain: EvmChain, method: string, params: unknown[]): Promise<
   return body.result;
 }
 
-async function ethCall(chain: EvmChain, to: string, data: string): Promise<string> {
+export async function ethCall(chain: EvmChain, to: string, data: string): Promise<string> {
   return rpc(chain, "eth_call", [{ to, data }, "latest"]);
 }
 
@@ -163,6 +182,25 @@ export async function sendFromEvm(opts: {
     args: [opts.destination, toRecipientBytes32(opts.recipient), opts.amount],
   });
 
+  return sendEvmTx({
+    chain: opts.chain,
+    sender: opts.sender,
+    to: router,
+    data,
+    value: fee,
+    onNonceRetry: opts.onNonceRetry,
+  });
+}
+
+/** Send one transaction from MetaMask on `chain`. Returns its hash. */
+export async function sendEvmTx(opts: {
+  chain: EvmChain;
+  sender: string;
+  to: string;
+  data: string;
+  value: bigint;
+  onNonceRetry?: () => void;
+}): Promise<string> {
   // The wallet follows the chain it was connected on, not the one picked in the form, and a
   // router address means something different on every chain. Sending without this put a
   // Base router address into a Sepolia transaction: no contract there, so MetaMask sent the
@@ -182,9 +220,9 @@ export async function sendFromEvm(opts: {
 
   // Cheap last guard: on the right chain this address is a contract. If it has no code we are
   // about to repeat the same mistake in a new disguise.
-  const code = await rpc(opts.chain, "eth_getCode", [router, "latest"]);
+  const code = await rpc(opts.chain, "eth_getCode", [opts.to, "latest"]);
   if (!code || code === "0x") {
-    throw new Error(`no router deployed at ${router} on ${opts.chain.name}`);
+    throw new Error(`no contract at ${opts.to} on ${opts.chain.name}`);
   }
 
   // Price the transaction ourselves rather than letting the wallet do it. On Arbitrum Sepolia
@@ -201,9 +239,9 @@ export async function sendFromEvm(opts: {
   const params = [
     {
       from: opts.sender,
-      to: router,
-      data,
-      value: toHex(fee),
+      to: opts.to,
+      data: opts.data,
+      value: toHex(opts.value),
       maxFeePerGas: toHex(baseFee * 2n + tip),
       maxPriorityFeePerGas: toHex(tip),
     },
@@ -265,6 +303,24 @@ export async function messageIdFromReceipt(
   return log?.topics[1] ?? null;
 }
 
+export async function waitForCelestiaMessageId(chain: CosmosChain, tx: string): Promise<string> {
+  for (let attempt = 0; attempt < 30; attempt++) {
+    const id = await messageIdFromCelestiaTx(chain, tx);
+    if (id) return id;
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+  }
+  throw new Error("Transaction did not confirm in time; check the explorer");
+}
+
+export async function waitForMessageId(chain: EvmChain, tx: string): Promise<string> {
+  for (let attempt = 0; attempt < 40; attempt++) {
+    const id = await messageIdFromReceipt(chain, tx);
+    if (id) return id;
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+  }
+  throw new Error("Transaction did not confirm in time; check the explorer");
+}
+
 /** Whether the destination mailbox has processed this message. This is the real check. */
 export async function isDelivered(destination: ChainId, messageId: string): Promise<boolean> {
   const chain = CHAINS[destination];
@@ -321,7 +377,7 @@ export async function quoteBridgeFee(from: ChainId, to: ChainId): Promise<Bridge
     return { amount: BigInt(amount), symbol: "TIA", decimals: 6 };
   }
 
-  const router = routerFor("TIA", origin.id) ?? routerFor("USDC", origin.id);
+  const router = routerFor("TIA", origin.id) ?? routerFor("teeUSD", origin.id);
   if (!router) throw new Error(`no router on ${origin.name}`);
   const data = encodeFunctionData({
     abi: ROUTER_ABI,
@@ -402,6 +458,22 @@ export async function fetchBalance(
   const denom = CELESTIA_DENOM[token];
   const response = await fetch(
     `${chain.rest}/cosmos/bank/v1beta1/balances/${address}/by_denom?denom=${encodeURIComponent(denom)}`,
+  );
+  if (!response.ok) return 0n;
+  const body = await response.json();
+  return BigInt(body?.balance?.amount ?? "0");
+}
+
+/** What `owner` holds of an ERC20 on an EVM chain. */
+export async function erc20Balance(chain: EvmChain, token: string, owner: string): Promise<bigint> {
+  const data = encodeFunctionData({ abi: ROUTER_ABI, functionName: "balanceOf", args: [owner as `0x${string}`] });
+  return BigInt(await ethCall(chain, token, data));
+}
+
+/** What `owner` holds of a bank denom on Celestia. */
+export async function bankBalance(chain: CosmosChain, denom: string, owner: string): Promise<bigint> {
+  const response = await fetch(
+    `${chain.rest}/cosmos/bank/v1beta1/balances/${owner}/by_denom?denom=${encodeURIComponent(denom)}`,
   );
   if (!response.ok) return 0n;
   const body = await response.json();

@@ -300,6 +300,21 @@ locked() {
   awk -v f="$1" -v c="${col}" '$1 == f { print $c }' "${IMAGES_LOCK}" 2>/dev/null || true
 }
 
+# ---------------------------------------------------------------- trade venues
+#
+# Uniswap v3 on the chains with pools, as Uniswap deploys it:
+# `factory positions swap_router quoter`. Checked against the chains on 2026-10-06.
+TRADE_VENUES="sepolia base arbitrum"
+TRADE_FEE=3000
+uniswap_for() { # <chain>
+  case "$1" in
+    sepolia)  echo 0x0227628f3F023bb0B980b67D528571c95c6DaC1c 0x1238536071E1c677A632429e3655c799b22cDA52 0x3bFA4769FB09eefC5a80d6E87c3B9C650f7Ae48E 0xEd1f6473345F45b75F8179591dd5bA1888cf2FB3 ;;
+    base)     echo 0x4752ba5DBc23f44D87826276BF6Fd6b1C372aD24 0x27F971cb582BF9E50F397e4d29a5C7A34f11faA2 0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4 0xC5290058841028F1614F3A6F0F5816cAd0df5E27 ;;
+    arbitrum) echo 0x248AB79Bbb9bC29bB72f7Cd42F17e054Fc40188e 0x6b2937Bde17889EDCf8fbD8dE31C3C2a70Bc4d65 0x101F443B4d1b059569D643917553c771E1b9663E 0x2779a0CC1c3e0E44D2542EC3e79e3864Ae93Ef0B ;;
+    *) return 1 ;;
+  esac
+}
+
 # ---------------------------------------------------------------- the coprocessor config
 #
 # One generator for `${STATE_DIR}/coprocessor.toml`, called before anything reads it: the ISM
@@ -332,6 +347,13 @@ write_config() {
     for key in "$@"; do has "${key}" && out="${out}${out:+, }\"$(load "${key}")\""; done
     printf '[%s]' "${out}"
   }
+  # Paid from the master account teeUSD was minted to, which holds the TIA as well.
+  faucet_grants() {
+    has celestia-teeusd-denom || return 0
+    printf 'key = "%s"\n' "${FAUCET_KEY:-user}"
+    printf 'grants = [\n  { symbol = "TIA", denom = "utia", amount = %s },\n' "${FAUCET_TIA:-100000000000}"
+    printf '  { symbol = "teeUSD", denom = "%s", amount = %s },\n]\n' "$(load celestia-teeusd-denom)" "${FAUCET_TEEUSD:-200000000000}"
+  }
   route() { # <name> <from> <to> <ism key> <router keys...>
     local name="$1" from="$2" to="$3" ism="$4" enclave
     shift 4
@@ -339,6 +361,9 @@ write_config() {
     has "${ism}" && has "enclave-url-${enclave}" || return 0
     printf '\n[[routes]]\nname = "%s"\nfrom = "%s"\nto = "%s"\nenclave = "%s"\nism = "%s"\nrouters = %s\n' \
       "${name}" "${from}" "${to}" "$(load "enclave-url-${enclave}")" "$(load "${ism}")" "$(routers "$@")"
+    # Sepolia is read from a full node, whose proofs at an old block slow down the further
+    # back it is; about an hour of blocks keeps them to seconds however quiet the route is.
+    if [ "${from}" = sepolia ]; then printf 'max_lag = %s\n' "${SEPOLIA_MAX_LAG:-300}"; fi
   }
 
   {
@@ -351,6 +376,7 @@ api_listen = "${API_LISTEN:-0.0.0.0:3001}"
 
 [faucet]
 chain = "celestia"
+$(faucet_grants)
 
 [chains.celestia]
 kind = "celestia"
@@ -406,12 +432,28 @@ send_rpc = "${EDEN_RPC:-https://rpc.testnet.eden.gateway.fm/}"
 mailbox = "${EDEN_MAILBOX:-0x1D32350f3440BEa7f7E450Aa085f63E0d7E38729}"
 merkle_tree_hook = "${EDEN_HOOK:-0xCfBE7016D123d52A7Db4fc7D087cCb5421dbF8db}"
 TOML
+    if has celestia-teeusd-token-id; then
+      local c factory positions swap quoter
+      printf '\n[trade]\ndefault_venue = "base"\nhub_rest = "%s"\nhub_mailbox = "%s"\nnoop_ism = "%s"\nrouting_ism = "%s"\n' \
+        "${CELESTIA_API}" "$(load mailbox-id)" "$(load noop-ism-id)" "$(load routing-ism-id)"
+      for c in ${TRADE_VENUES}; do
+        read -r factory positions swap quoter <<< "$(uniswap_for "${c}")"
+        printf '\n[trade.venues.%s]\nfactory = "%s"\npositions = "%s"\nswap_router = "%s"\nquoter = "%s"\nfee = %s\n' \
+          "${c}" "${factory}" "${positions}" "${swap}" "${quoter}" "${TRADE_FEE}"
+        if has "${c}-factory"; then printf 'token_factory = "%s"\n' "$(load "${c}-factory")"; fi
+      done
+      printf '\n[trade.assets.TIA]\ndecimals = 6\ndenom = "utia"\n[trade.assets.TIA.routers]\ncelestia = "%s"\n' "$(load celestia-token-id)"
+      for c in sepolia arbitrum base eden; do if has "${c}-router"; then printf '%s = "%s"\n' "${c}" "$(load "${c}-router")"; fi; done
+      printf '\n[trade.assets.teeUSD]\ndecimals = 6\ndenom = "%s"\n[trade.assets.teeUSD.routers]\ncelestia = "%s"\n' \
+        "$(load celestia-teeusd-denom)" "$(load celestia-teeusd-token-id)"
+      for c in sepolia arbitrum base eden; do if has "${c}-teeusd-router"; then printf '%s = "%s"\n' "${c}" "$(load "${c}-teeusd-router")"; fi; done
+    fi
     local chain
     for chain in sepolia arbitrum base eden; do
-      route "celestia-to-${chain}" celestia "${chain}" "ism-${chain}" "${chain}-router" "${chain}-usdc-router" "${chain}-teeusd-router"
+      route "celestia-to-${chain}" celestia "${chain}" "ism-${chain}" "${chain}-router" "${chain}-teeusd-router"
     done
     for chain in sepolia arbitrum base eden; do
-      route "${chain}-to-celestia" "${chain}" celestia "ism-celestia-${chain}" celestia-token-id celestia-usdc-token-id celestia-teeusd-token-id
+      route "${chain}-to-celestia" "${chain}" celestia "ism-celestia-${chain}" celestia-token-id celestia-teeusd-token-id
     done
   } > "${COPROCESSOR_CONFIG}"
 }

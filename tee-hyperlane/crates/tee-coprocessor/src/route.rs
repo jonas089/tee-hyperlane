@@ -150,8 +150,16 @@ impl Route {
 
         let messages = self.origin.index(trusted.height, step.head).await?;
         check_index(step.leaves.len(), messages.len())?;
+        // Also advance when the trusted height falls too far behind, so the next proof at it
+        // stays cheap: a full node rebuilds an old block's trie from the head, and on Sepolia
+        // that took longer than any timeout once the route sat idle for a few hours.
+        let lagging = self
+            .config
+            .max_lag
+            .is_some_and(|max| step.head.saturating_sub(trusted.height) >= max);
         if !worth_attesting(&messages, self.destination_domain, &self.config.routers)
             && !self.heartbeat_due()
+            && !lagging
         {
             debug!(route = %self.config.name, leaves = messages.len(), "nothing for our routes");
             return Ok(None);
@@ -426,6 +434,7 @@ pub async fn serve(config: Config) -> Result<()> {
         debug!(route = %route.name, from = %route.from, to = %route.to, "configured");
         tasks.spawn(Route::new(&config, route)?.run(tick));
     }
+    crate::registry::load(config.proof_dir().join("launched.json"));
     let tracker = crate::tracker::Tracker::new(&config)?;
     tracker.spawn(&mut tasks);
     let api = crate::api::Api::new(&config)?;
@@ -481,7 +490,10 @@ fn worth_attesting(messages: &[Message], destination: u32, routers: &[String]) -
         .collect();
     messages.iter().any(|m| {
         hyperlane_types::decode_hyperlane_message(&m.bytes).is_ok_and(|d| {
-            d.destination == destination && (ours.is_empty() || ours.contains(&d.recipient))
+            d.destination == destination
+                && (ours.is_empty()
+                    || ours.contains(&d.recipient)
+                    || crate::registry::accepts(destination, &d.recipient))
         })
     })
 }

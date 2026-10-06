@@ -1,7 +1,8 @@
 # API
 
-The relayer's read-only API: every transfer on our routes, every route, and every open problem.
-It is the contract the explorer page on `:3001` is built on, and the one to build monitoring on.
+The relayer's API: every transfer on our routes, every route, and every open problem, which the
+explorer page on `:3001` is built on; and the venue under `/api/v1/trade`, which the Trade tab
+and the MCP server in `mcp/` are built on.
 
 ```
 B=http://<host>:3001          # direct
@@ -85,6 +86,33 @@ curl -s $B/api/v1/wallets | jq '.[] | {chain, display, symbol, daysLeft, level}'
 
 For alerting, probe `/api/v1/health` from outside the host: any non-200 is a problem, and no
 answer means the relayer or the host is down.
+
+## The venue: `/api/v1/trade`
+
+On when the config has a `[trade]` table, which `write_config` writes once teeUSD exists. Nothing
+here signs: every endpoint returns unsigned transactions, `evm` ones to send as they are and
+`cosmos` ones whose `msgs` go in one Celestia transaction, in order. Amounts are base units as
+strings, every asset 6 decimals. An asset is named by its `id`: the symbol for TIA and teeUSD,
+the hub token id for a launched token.
+
+| | |
+|---|---|
+| `GET /api/v1/trade` | chains, pools and every listed asset; `?refresh=true` re-reads now |
+| `GET /api/v1/trade/quote?from&sell&to&buy&amount` | the price and the steps |
+| `POST /api/v1/trade/build` | one step to transactions, for the amount actually held |
+| `POST /api/v1/trade/pool` | full-range liquidity, creating the pool if needed |
+| `POST /api/v1/trade/launch/create`, `/deploy`, `/wire` | the three steps of a launch |
+| `GET /api/v1/trade/launch/{id}` | a launch's routers, and its listing once wired |
+
+A swap takes the direct pool for a pair or the route through teeUSD, whichever pays more. A
+launched token is listed once the hub shows it with no owner, on the routing ISM, and with every
+remote router one a `TeeTokenFactory` made; its routers then join `.state/proofs/launched.json`,
+which every route and the tracker accept beside the configured ones. Launches and pools are
+re-read every 30 seconds.
+
+```sh
+curl -s "$B/api/v1/trade/quote?from=celestia&sell=TIA&to=base&buy=teeUSD&amount=10000000" | jq
+```
 
 ## Older endpoints
 

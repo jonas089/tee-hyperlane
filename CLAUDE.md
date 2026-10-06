@@ -33,8 +33,9 @@ over HTTPS. Update it with `git pull`; `devnet/.env` and `devnet/.state/` there 
 - a mocha light node (`mocha-light`), which only the Eden origin needs
 - nginx gateway on `:3000` exposing `/rpc`, `/rest`, `/api`, `/evm/{chain}/`, `/tx/<hash>`
 - eight routes: Celestia to and from each of Sepolia, Arbitrum, Base and Eden
-- two tokens: TIA (Celestia collateral, synthetic on EVM) and USDC (Sepolia collateral,
-  synthetic elsewhere)
+- two tokens: TIA (Celestia collateral, synthetic on EVM) and teeUSD (ours, a fixed 1B
+  minted on Celestia, synthetic everywhere), and a TIA/teeUSD Uniswap v3 pool on Sepolia,
+  Base and Arbitrum. The Trade tab and `/api/v1/trade` route swaps through them
 - **five images**, one per origin (`celestia`, `ethereum`, `base`, `arbitrum`, `eden`), all
   in **one shared CVM** by default, each on its own port (8080 to 8084). They share that CVM's
   identity, so a change to any image replaces all 8 ISMs. `30-enclave-up.sh --<chain>` moves a
@@ -49,7 +50,8 @@ over HTTPS. Update it with `git pull`; `devnet/.env` and `devnet/.state/` there 
 | `deploy/DEPLOY.md` | standing up a whole bridge, step by step; adding an asset or a chain |
 | `deploy/MAINTAIN.md` | the monthly job, rolling out new code, waiting vs stuck, symptoms |
 | `deploy/INTERACT.md` | wallets, sending, checking arrival, latency and cost |
-| `deploy/API.md` | the relayer's `/api/v1`: endpoints, transfer statuses, notification kinds |
+| `deploy/API.md` | the relayer's `/api/v1`: endpoints, transfer statuses, notification kinds, and the venue under `/api/v1/trade` |
+| `mcp/` | the MCP server agents use for the venue; its docs are the Trade tab's Docs (Agents) |
 | `deploy/coprocessor.toml.example` | the deployed chains and routes, verbatim but for the one key |
 | `deploy/images.lock` | which Nix build each pinned image came from; `30-enclave-up.sh` refuses to deploy when it and the code disagree |
 | `deploy/verify-digest.sh` | compose file to `compose_hash` to `mr_config_id`, against the signed quote |
@@ -96,8 +98,12 @@ endpoint is a free public one.
   `85-celestia-isms.sh` start a replacement from the old ISM's last state with only the identity
   (last 32 bytes) swapped, so nothing in flight is lost, and stop rather than fall back to the
   head. Only a first deploy anchors at the head.
+- **Launched tokens are anyone's, and the relayer carries them.** A `TeeTokenFactory` per venue
+  chain makes their routers and keeps ownership, so `90-evm-warp.sh` re-points them on a rotation.
+  The trade API lists a token once the hub shows it renounced and wired, and adds its routers to
+  `.state/proofs/launched.json`, which `worth_attesting` and the tracker accept beside `routers`.
 - **Rotating the enclave identity re-points routers, never redeploys them.** Redeploying a
-  collateral router abandons its escrow; that stranded real USDC on Sepolia once.
+  router orphans what it holds or minted; that once stranded real USDC on Sepolia.
 
 ## Hard constraints
 

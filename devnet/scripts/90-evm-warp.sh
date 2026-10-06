@@ -11,14 +11,12 @@
 # directions of one route. Splitting it across two steps meant the Celestia half ran before
 # the EVM half existed, so it silently enrolled nothing.
 #
-# Two assets run in opposite directions, which is the point of carrying both:
+# Both assets start on Celestia and are synthetic on every EVM chain:
 #
-#   TIA   Celestia native  -> synthetic on all three EVM chains
-#   USDC  EVM native       -> collateral on Sepolia, synthetic on the two L2s
+#   TIA     Celestia native, held as collateral there
+#   teeUSD  ours, a fixed supply minted on Celestia by 50-warp-celestia.sh
 #
-# teeUSD rides along as a third, synthetic everywhere; its supply is minted on Celestia.
-#
-# Adding a third asset is a row in TOKENS plus its per-chain kind, and nothing else.
+# Adding an asset is a row in TOKENS, and nothing else.
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 need cast
@@ -30,10 +28,6 @@ CONTRACTS="${REPO_DIR}/tee-hyperlane/contracts"
 # Destination gas for a warp delivery. Quoted by the origin hook, which is the noop hook on
 # this devnet, so the value is recorded but never charged.
 WARP_DEST_GAS="${WARP_DEST_GAS:-50000}"
-
-# Circle's own testnet USDC on Sepolia. The collateral router wraps it, so this is the one
-# address here that is not ours and must not be redeployed.
-SEPOLIA_USDC_ERC20="${SEPOLIA_USDC_ERC20:-0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238}"
 
 wait_for_chain
 
@@ -52,17 +46,7 @@ eden:3735928814:0x1D32350f3440BEa7f7E450Aa085f63E0d7E38729}"
 
 # label : celestia token state key : state key suffix : name : symbol : decimals
 TOKENS="tia:celestia-token-id:router:Celestia TIA:TIA:6
-usdc:celestia-usdc-token-id:usdc-router:USD Coin:USDC:6
 teeusd:celestia-teeusd-token-id:teeusd-router:tee USD:teeUSD:6"
-
-# Which shape each asset takes on a given chain. Everything is a synthetic except the chain
-# the asset is actually native to, where the router escrows the real ERC20.
-kind_for() {
-  case "$1:$2" in
-    usdc:sepolia) echo collateral ;;
-    *)            echo synthetic  ;;
-  esac
-}
 
 # Reuse a router if it is real code, repointing it at the current ISM when it has drifted.
 #
@@ -72,9 +56,8 @@ kind_for() {
 #
 # Repointing rather than redeploying matters more. A router's ISM is not fixed at initialize
 # time as this once assumed - `MailboxClient` lets the owner change it - and redeploying a
-# **collateral** router abandons the escrow inside it. An identity rotation did exactly that
-# to Sepolia's USDC router once, stranding real USDC in a contract nothing referenced any
-# more. A synthetic is less dramatic but still orphans the supply it minted.
+# router orphans the supply it minted: the tokens people hold there stop being redeemable.
+# An identity rotation once did this to a collateral router and stranded the escrow in it.
 #
 # So a recorded router is replaced only when the chain says there is no code at its address.
 # Anything else that goes wrong - an RPC error, a router owned by someone else, a repoint that
@@ -128,7 +111,6 @@ while IFS=: read -r name chainid mailbox; do
   while IFS=: read -r label token_key suffix tname tsymbol tdec; do
     has "${token_key}" || { incomplete "${name}: no ${label} token on celestia; run 50-warp-celestia.sh first"; continue; }
     token="$(load "${token_key}")"
-    kind="$(kind_for "${label}" "${name}")"
     key="${name}-${suffix}"
 
     router=""
@@ -138,21 +120,13 @@ while IFS=: read -r name chainid mailbox; do
     fi
 
     if [ -z "${router}" ]; then
-      say "deploying the ${kind} ${label} router on ${name}"
-      if [ "${kind}" = collateral ]; then
-        out="$(cd "${CONTRACTS}" && MAILBOX="${mailbox}" TEE_ISM="${ism}" \
-          COLLATERAL_TOKEN="${SEPOLIA_USDC_ERC20}" \
-          forge script script/DeployWarpCollateral.s.sol:DeployWarpCollateral \
-            --rpc-url "${rpc}" --private-key "${EVM_PRIVATE_KEY}" --broadcast --slow 2>&1)"
-        router="$(printf '%s' "${out}" | sed -n 's/.*HypERC20Collateral.*\(0x[0-9a-fA-F]\{40\}\).*/\1/p' | tail -1)"
-      else
-        out="$(cd "${CONTRACTS}" && MAILBOX="${mailbox}" TEE_ISM="${ism}" \
-          ORIGIN_DOMAIN="${DOMAIN}" ORIGIN_ROUTER="${token}" \
-          TOKEN_NAME="${tname}" TOKEN_SYMBOL="${tsymbol}" TOKEN_DECIMALS="${tdec}" \
-          forge script script/DeployWarpSynthetic.s.sol:DeployWarpSynthetic \
-            --rpc-url "${rpc}" --private-key "${EVM_PRIVATE_KEY}" --broadcast --slow 2>&1)"
-        router="$(printf '%s' "${out}" | sed -n 's/.*HypERC20 *\(0x[0-9a-fA-F]\{40\}\).*/\1/p' | tail -1)"
-      fi
+      say "deploying the synthetic ${label} router on ${name}"
+      out="$(cd "${CONTRACTS}" && MAILBOX="${mailbox}" TEE_ISM="${ism}" \
+        ORIGIN_DOMAIN="${DOMAIN}" ORIGIN_ROUTER="${token}" \
+        TOKEN_NAME="${tname}" TOKEN_SYMBOL="${tsymbol}" TOKEN_DECIMALS="${tdec}" \
+        forge script script/DeployWarpSynthetic.s.sol:DeployWarpSynthetic \
+          --rpc-url "${rpc}" --private-key "${EVM_PRIVATE_KEY}" --broadcast --slow 2>&1)"
+      router="$(printf '%s' "${out}" | sed -n 's/.*HypERC20 *\(0x[0-9a-fA-F]\{40\}\).*/\1/p' | tail -1)"
       if [ -z "${router}" ]; then
         printf '%s\n' "${out}" | tail -20 >&2
         die "${label} router deployment failed on ${name}"
@@ -199,6 +173,39 @@ while IFS=: read -r name chainid mailbox; do
     fi
     say "  ${label} ${router} ism ${ism}"
   done <<< "${TOKENS}"
+
+  # The token factory, where anyone launches a token of their own on the chains with pools.
+  # Its routers are its own, so they follow the ISM through `repoint` rather than the loop above.
+  case " ${TRADE_VENUES} " in *" ${name} "*) ;; *) continue ;; esac
+  key="${name}-factory"
+  if ! has "${key}" || [ "$(cast code "$(load "${key}")" --rpc-url "${rpc}")" = 0x ]; then
+    say "deploying the token factory on ${name}"
+    out="$(cd "${CONTRACTS}" && forge create src/TeeTokenFactory.sol:TeeTokenFactory --broadcast \
+      --rpc-url "${rpc}" --private-key "${EVM_PRIVATE_KEY}" \
+      --constructor-args "${mailbox}" "${DOMAIN}" "${ism}" 2>&1)"
+    factory="$(printf '%s' "${out}" | sed -n 's/^Deployed to: \(0x[0-9a-fA-F]\{40\}\).*/\1/p')"
+    [ -n "${factory}" ] || { printf '%s\n' "${out}" | tail -20 >&2; die "token factory deployment failed on ${name}"; }
+    confirm_code "${factory}" "${rpc}" || die "no code at ${factory} on ${name}; the broadcast did not land"
+    save "${key}" "${factory}"
+    sleep 4
+  fi
+  factory="$(load "${key}")"
+  if [ "$(lower "$(cast call "${factory}" "ism()(address)" --rpc-url "${rpc}")")" != "$(lower "${ism}")" ]; then
+    say "pointing the token factory and its launches at ${ism}"
+    cast send "${factory}" "setIsm(address)" "${ism}" --rpc-url "${rpc}" --private-key "${EVM_PRIVATE_KEY}" >/dev/null
+    sleep 4
+    REPOINT=1
+  fi
+  count="$(cast call "${factory}" "launchCount()(uint256)" --rpc-url "${rpc}" | cut -d' ' -f1)"
+  # Only after a change, or with REPOINT=1 to finish one an earlier run was interrupted in.
+  if [ "${REPOINT:-}" = 1 ]; then
+    for ((i = 0; i < count; i += 100)); do
+      cast send "${factory}" "repoint(uint256,uint256)" "${i}" "$((i + 100))" \
+        --rpc-url "${rpc}" --private-key "${EVM_PRIVATE_KEY}" >/dev/null
+      sleep 4
+    done
+  fi
+  say "  factory ${factory}, ${count} launched"
 done <<< "${CHAINS}"
 
 # ---------------------------------------------------------------- Celestia -> EVM

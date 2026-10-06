@@ -13,6 +13,11 @@ api_listen = "0.0.0.0:3001"
 
 [faucet]
 chain = "celestia"
+key = "user"
+grants = [
+  { symbol = "TIA", denom = "utia", amount = 100000000000 },
+  { symbol = "teeUSD", denom = "hyperlane/0x726f757465725f61707000000000000000000000000000020000000000000002", amount = 200000000000 },
+]
 
 # ---------------------------------------------------------------- chains
 
@@ -76,6 +81,57 @@ send_rpc = "https://rpc.testnet.eden.gateway.fm/"
 mailbox = "0x1D32350f3440BEa7f7E450Aa085f63E0d7E38729"
 merkle_tree_hook = "0xCfBE7016D123d52A7Db4fc7D087cCb5421dbF8db"
 
+# ---------------------------------------------------------------- trade
+
+# The pools /api/v1/trade swaps through, and the assets it routes.
+[trade]
+default_venue = "base"
+hub_rest = "http://localhost:1317"
+hub_mailbox = "0x68797065726c616e650000000000000000000000000000000000000000000000"
+noop_ism = "0x726f757465725f69736d00000000000000000000000000000000000000000000"
+routing_ism = "0x726f757465725f69736d00000000000000000000000000010000000000000035"
+
+[trade.venues.sepolia]
+factory = "0x0227628f3F023bb0B980b67D528571c95c6DaC1c"
+positions = "0x1238536071E1c677A632429e3655c799b22cDA52"
+swap_router = "0x3bFA4769FB09eefC5a80d6E87c3B9C650f7Ae48E"
+quoter = "0xEd1f6473345F45b75F8179591dd5bA1888cf2FB3"
+fee = 3000
+
+[trade.venues.base]
+factory = "0x4752ba5DBc23f44D87826276BF6Fd6b1C372aD24"
+positions = "0x27F971cb582BF9E50F397e4d29a5C7A34f11faA2"
+swap_router = "0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4"
+quoter = "0xC5290058841028F1614F3A6F0F5816cAd0df5E27"
+fee = 3000
+
+[trade.venues.arbitrum]
+factory = "0x248AB79Bbb9bC29bB72f7Cd42F17e054Fc40188e"
+positions = "0x6b2937Bde17889EDCf8fbD8dE31C3C2a70Bc4d65"
+swap_router = "0x101F443B4d1b059569D643917553c771E1b9663E"
+quoter = "0x2779a0CC1c3e0E44D2542EC3e79e3864Ae93Ef0B"
+fee = 3000
+
+[trade.assets.TIA]
+decimals = 6
+denom = "utia"
+[trade.assets.TIA.routers]
+celestia = "0x726f757465725f61707000000000000000000000000000010000000000000000"
+sepolia = "0x9822eE81C82138F88D759faef1AC168aDfEe1467"
+arbitrum = "0x41f992F671D04c5C26350E64FFA3E1D90bc33bcB"
+base = "0xF50470146B36c638b981e437AB37DfEd9a02FAb3"
+eden = "0xD2babc9BE1055551b7AB98c440222862a1646158"
+
+[trade.assets.teeUSD]
+decimals = 6
+denom = "hyperlane/0x726f757465725f61707000000000000000000000000000020000000000000002"
+[trade.assets.teeUSD.routers]
+celestia = "0x726f757465725f61707000000000000000000000000000020000000000000002"
+sepolia = "0x1be2055d49c0a350C137605a62861f58Aa750297"
+arbitrum = "0xF699EB10087A1e01993ed628C198fe6e231830eD"
+base = "0xa8cc6ec4855b1415c03f3aE51953a3643f7991a5"
+eden = "0xa4697140E90F39D94F3C64D40175FA6F207bc8EC"
+
 # ---------------------------------------------------------------- routes
 #
 # Every enclave URL is `https://<app id>-<port>.dstack-pha-prod9.phala.network`; APP_ID stands
@@ -91,7 +147,7 @@ from = "celestia"
 to = "sepolia"
 enclave = "https://APP_ID-8080.dstack-pha-prod9.phala.network"
 ism = "0x865264E0ae7b173943e34c493E7851B895F37E3F"
-routers = ["0x9822eE81C82138F88D759faef1AC168aDfEe1467", "0xfb611B6f6CE92033960e99C2D65cee4237e64cDD"]
+routers = ["0x9822eE81C82138F88D759faef1AC168aDfEe1467", "0x1be2055d49c0a350C137605a62861f58Aa750297"]
 
 [[routes]]
 name = "celestia-to-arbitrum"
@@ -99,7 +155,7 @@ from = "celestia"
 to = "arbitrum"
 enclave = "https://APP_ID-8080.dstack-pha-prod9.phala.network"
 ism = "0x39b7Cefe6523c474A31652cc297bA2b06ac53AB3"
-routers = ["0x41f992F671D04c5C26350E64FFA3E1D90bc33bcB", "0x8C87fd144006C651430450df8b61A15EeB3FF436"]
+routers = ["0x41f992F671D04c5C26350E64FFA3E1D90bc33bcB", "0xF699EB10087A1e01993ed628C198fe6e231830eD"]
 
 [[routes]]
 name = "celestia-to-base"
@@ -107,7 +163,7 @@ from = "celestia"
 to = "base"
 enclave = "https://APP_ID-8080.dstack-pha-prod9.phala.network"
 ism = "0x94cC258254B4e9ef6675E6f3a2Ee023D3D21bFcC"
-routers = ["0xF50470146B36c638b981e437AB37DfEd9a02FAb3", "0x285b590ee43A1374AA131e7390D0CA687Be43DF9"]
+routers = ["0xF50470146B36c638b981e437AB37DfEd9a02FAb3", "0xa8cc6ec4855b1415c03f3aE51953a3643f7991a5"]
 
 [[routes]]
 name = "celestia-to-eden"
@@ -115,7 +171,7 @@ from = "celestia"
 to = "eden"
 enclave = "https://APP_ID-8080.dstack-pha-prod9.phala.network"
 ism = "0xe686F221B7A2B641574340F43Ad5cD59707791Ca"
-routers = ["0xD2babc9BE1055551b7AB98c440222862a1646158", "0xc09fbf8F17E96ce746D39f9d11a9dD1813F2d220"]
+routers = ["0xD2babc9BE1055551b7AB98c440222862a1646158", "0xa4697140E90F39D94F3C64D40175FA6F207bc8EC"]
 
 # Attested by the ethereum, arbitrum and base enclaves, ports 8081, 8083 and 8082.
 [[routes]]
@@ -124,7 +180,8 @@ from = "sepolia"
 to = "celestia"
 enclave = "https://APP_ID-8081.dstack-pha-prod9.phala.network"
 ism = "0x726f757465725f69736d000000000000000000000000002b000000000000003c"
-routers = ["0x726f757465725f61707000000000000000000000000000010000000000000000", "0x726f757465725f61707000000000000000000000000000020000000000000001"]
+routers = ["0x726f757465725f61707000000000000000000000000000010000000000000000", "0x726f757465725f61707000000000000000000000000000020000000000000002"]
+max_lag = 300
 
 [[routes]]
 name = "arbitrum-to-celestia"
@@ -132,7 +189,7 @@ from = "arbitrum"
 to = "celestia"
 enclave = "https://APP_ID-8083.dstack-pha-prod9.phala.network"
 ism = "0x726f757465725f69736d000000000000000000000000002b000000000000003d"
-routers = ["0x726f757465725f61707000000000000000000000000000010000000000000000", "0x726f757465725f61707000000000000000000000000000020000000000000001"]
+routers = ["0x726f757465725f61707000000000000000000000000000010000000000000000", "0x726f757465725f61707000000000000000000000000000020000000000000002"]
 
 [[routes]]
 name = "base-to-celestia"
@@ -140,7 +197,7 @@ from = "base"
 to = "celestia"
 enclave = "https://APP_ID-8082.dstack-pha-prod9.phala.network"
 ism = "0x726f757465725f69736d000000000000000000000000002b000000000000003e"
-routers = ["0x726f757465725f61707000000000000000000000000000010000000000000000", "0x726f757465725f61707000000000000000000000000000020000000000000001"]
+routers = ["0x726f757465725f61707000000000000000000000000000010000000000000000", "0x726f757465725f61707000000000000000000000000000020000000000000002"]
 
 # Attested by the eden enclave, port 8084.
 [[routes]]
@@ -149,4 +206,4 @@ from = "eden"
 to = "celestia"
 enclave = "https://APP_ID-8084.dstack-pha-prod9.phala.network"
 ism = "0x726f757465725f69736d000000000000000000000000002b000000000000003f"
-routers = ["0x726f757465725f61707000000000000000000000000000010000000000000000", "0x726f757465725f61707000000000000000000000000000020000000000000001"]
+routers = ["0x726f757465725f61707000000000000000000000000000010000000000000000", "0x726f757465725f61707000000000000000000000000000020000000000000002"]

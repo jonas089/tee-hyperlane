@@ -196,7 +196,7 @@ for row in ${ORIGINS}; do
 done
 
 say "== pointing the tokens and the mailbox at it"
-for key in celestia-token-id celestia-usdc-token-id celestia-teeusd-token-id; do
+for key in celestia-token-id celestia-teeusd-token-id; do
   has "${key}" || continue
   send "point ${key} at the routing ism" warp set-token "$(load "${key}")" --ism-id "${routing}"
   say "  $(load "${key}")"
