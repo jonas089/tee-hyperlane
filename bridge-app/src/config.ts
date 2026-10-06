@@ -25,7 +25,9 @@ const envNum = (key: string, fallback: number): number => {
 };
 
 export type ChainId = "sepolia" | "arbitrum" | "base" | "eden" | "celestia";
-export type TokenId = "TIA" | "teeUSD";
+/// TIA, teeUSD, or a launched token's hub id: launched tokens join at runtime through
+/// `registerToken`, from the trade API's catalog.
+export type TokenId = "TIA" | "teeUSD" | (string & {});
 
 export interface EvmChain {
   kind: "evm";
@@ -153,7 +155,7 @@ export const CHAINS: Record<ChainId, Chain> = {
 };
 
 /** A warp router, per chain, per token. `null` where the route is not deployed yet. */
-export const ROUTERS: Record<TokenId, Partial<Record<ChainId, string>>> = {
+export const ROUTERS: Record<string, Partial<Record<ChainId, string>>> = {
   TIA: {
     celestia: env(
       "VITE_CELESTIA_TIA_ROUTER",
@@ -175,18 +177,31 @@ export const ROUTERS: Record<TokenId, Partial<Record<ChainId, string>>> = {
   },
 };
 
-export const DECIMALS: Record<TokenId, number> = { TIA: 6, teeUSD: 6 };
+export const DECIMALS: Record<string, number> = { TIA: 6, teeUSD: 6 };
 
 /// Gas each warp router is enrolled with, and therefore what the paymaster quotes against.
 export const REMOTE_ROUTER_GAS = 50000;
 
 /// What each token is called in Celestia's bank module. On the EVM side the router *is* the
 /// ERC20, so its address is enough and there is nothing to name here.
-export const CELESTIA_DENOM: Record<TokenId, string> = {
+export const CELESTIA_DENOM: Record<string, string> = {
   TIA: "utia",
   // A synthetic's bank denom is its token id under `hyperlane/`.
   teeUSD: `hyperlane/${ROUTERS.teeUSD.celestia}`,
 };
+
+/// What each token is shown as. A launched token's id is its hub token id, so it needs one.
+const LABELS: Record<string, string> = {};
+
+export const labelOf = (token: string): string => LABELS[token] ?? token;
+
+/// Add a launched token, so the bridge can carry it like TIA and teeUSD.
+export function registerToken(id: string, symbol: string, routers: Partial<Record<ChainId, string>>, denom: string) {
+  ROUTERS[id] = routers;
+  CELESTIA_DENOM[id] = denom;
+  DECIMALS[id] = 6;
+  LABELS[id] = symbol;
+}
 
 /// What happens between the origin finalising and the funds arriving.
 ///
@@ -275,7 +290,7 @@ export function whyNotLive(token: TokenId, from: ChainId, to: ChainId): string |
     return `Every route goes through ${CHAINS.celestia.name}, so ${CHAINS[from].name} to ${CHAINS[to].name} is two transfers rather than one. Bridge to ${CHAINS.celestia.name} first.`;
   }
   for (const c of [from, to]) {
-    if (routerFor(token, c) === null) return `${token} is not deployed on ${CHAINS[c].name} yet.`;
+    if (routerFor(token, c) === null) return `${labelOf(token)} is not deployed on ${CHAINS[c].name} yet.`;
   }
   return null;
 }

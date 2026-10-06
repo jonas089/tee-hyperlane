@@ -8,6 +8,8 @@ import {
   routeIsLive,
   whyNotLive,
   routerFor,
+  registerToken,
+  labelOf,
 } from "./config";
 import type { ChainId, CosmosChain, EvmChain, TokenId } from "./config";
 import {
@@ -39,13 +41,14 @@ import { BridgeView } from "./ui/BridgeView";
 import { FaucetView } from "./ui/FaucetView";
 import { HistoryView } from "./ui/HistoryView";
 import { VenuePage } from "./ui/venue/VenuePage";
+import { fetchInfo } from "./trade";
 import type { Section } from "./ui/venue/VenuePage";
 import { describeDuration, shorten } from "./ui/shared";
 
 /// Every route has Celestia on one side. The bridge is a hub, not a mesh: each EVM chain's
 /// ISM trusts Celestia and Celestia's trusts each EVM chain, and no EVM chain trusts another.
 const COUNTERPARTIES: ChainId[] = ["sepolia", "arbitrum", "base", "eden"];
-const TOKENS: TokenId[] = ["TIA", "teeUSD"];
+const BASE_TOKENS: TokenId[] = ["TIA", "teeUSD"];
 
 /// The relayer and the gas oracle serve their own dashboards beside this one. Linking out
 /// beats reimplementing them here, which is what the Prover tab was doing, worse.
@@ -101,6 +104,21 @@ export default function App() {
   const [counterparty, setCounterparty] = useState<ChainId>("sepolia");
   const [outbound, setOutbound] = useState(true);
   const [token, setToken] = useState<TokenId>("TIA");
+  // Launched tokens bridge like ours once the venue lists them.
+  const [tokens, setTokens] = useState<TokenId[]>(BASE_TOKENS);
+  useEffect(() => {
+    const load = () =>
+      fetchInfo()
+        .then((info) => {
+          const launched = info.assets.filter((a) => a.launched);
+          for (const a of launched) registerToken(a.id, a.symbol, a.routers, a.denom);
+          setTokens([...BASE_TOKENS, ...launched.map((a) => a.id)]);
+        })
+        .catch(() => {});
+    load();
+    const timer = setInterval(load, 60_000);
+    return () => clearInterval(timer);
+  }, []);
   const [amount, setAmount] = useState("");
   const [recipient, setRecipient] = useState("");
   const [transfers, setTransfers] = useState<Transfer[]>(loadTransfers);
@@ -214,7 +232,7 @@ export default function App() {
   const loadBalances = useCallback(async () => {
     const wanted: [ChainId, TokenId][] = [];
     for (const chain of ["celestia", ...COUNTERPARTIES] as ChainId[]) {
-      for (const t of TOKENS) wanted.push([chain, t]);
+      for (const t of tokens) wanted.push([chain, t]);
     }
     const found: Record<string, bigint> = {};
     await Promise.all(
@@ -229,7 +247,7 @@ export default function App() {
       }),
     );
     setBalances((current) => ({ ...current, ...found }));
-  }, [evm, cosmos]);
+  }, [evm, cosmos, tokens]);
 
   useEffect(() => {
     loadBalances();
@@ -294,7 +312,7 @@ export default function App() {
       if (wanted <= 0n) throw new Error("Enter an amount greater than zero");
       if (sourceBalance !== undefined && wanted > sourceBalance) {
         throw new Error(
-          `Not enough ${token} on ${source.name}: ` +
+          `Not enough ${labelOf(token)} on ${source.name}: ` +
             `you have ${formatAmount(sourceBalance, token)} and asked to send ${amount}`,
         );
       }
@@ -318,7 +336,7 @@ export default function App() {
       } else {
         if (!cosmos) throw new Error("Connect Keplr first");
         const tokenId = routerFor(token, "celestia");
-        if (!tokenId) throw new Error(`${token} is not deployed on Celestia`);
+        if (!tokenId) throw new Error(`${labelOf(token)} is not deployed on Celestia`);
         // Re-quoted rather than reusing what the page showed, which may be minutes old.
         const quoted = await quoteBridgeFee(from, to);
         tx = await sendFromCelestia({
@@ -337,7 +355,7 @@ export default function App() {
       setTransfers((current) => [
         {
           messageId,
-          token,
+          token: labelOf(token),
           amount,
           from,
           to,
@@ -349,7 +367,7 @@ export default function App() {
       ]);
       setConfirmed({
         messageId,
-        token,
+        token: labelOf(token),
         amount,
         origin: source.name,
         destination: destination.name,
@@ -450,7 +468,7 @@ export default function App() {
             from={from}
             to={to}
             token={token}
-            tokens={TOKENS}
+            tokens={tokens}
             amount={amount}
             recipient={recipient}
             defaultRecipient={defaultRecipient}

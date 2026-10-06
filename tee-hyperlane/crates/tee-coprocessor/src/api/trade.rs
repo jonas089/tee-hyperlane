@@ -94,6 +94,10 @@ pub struct Venue {
     /// The fee tier every pool here uses, in hundredths of a basis point.
     pub fee: u32,
     pub token_factory: Option<String>,
+    /// Where the venue reads this chain, when not the chain's own endpoints: a full node
+    /// busy proving old state answers slowly and can lag the head.
+    #[serde(default, skip_serializing)]
+    pub rpc: Option<String>,
 }
 
 /// Where a launch was made, before the hub has shown it wired.
@@ -175,7 +179,15 @@ impl Trade {
             let url = |k: &str| table.get(k).and_then(|v| v.as_str());
             // The free endpoints first: the metered archive is for the ISM's trusted height only.
             let rpc = (kind != "celestia")
-                .then(|| url("send_rpc").or(url("logs_rpc")).or(url("rpc")))
+                .then(|| {
+                    trade
+                        .venues
+                        .get(&name)
+                        .and_then(|v| v.rpc.as_deref())
+                        .or(url("send_rpc"))
+                        .or(url("logs_rpc"))
+                        .or(url("rpc"))
+                })
                 .flatten()
                 .map(|u| Rpc::new(u, None));
             chains.insert(
@@ -261,49 +273,57 @@ impl Trade {
     }
 
     /// Read new launches from every token factory.
+    /// Read new launches from every token factory. A chain that fails is retried on the next
+    /// refresh without holding up the others.
     async fn scan_factories(&self) -> Result<()> {
         for (chain, venue) in &self.config.venues {
             let Some(factory) = &venue.token_factory else {
                 continue;
             };
-            let count = word_u128(
-                &self
-                    .eth_call(chain, factory, &call("launchCount()", &[]))
-                    .await?,
-                0,
-            )? as u64;
-            let from = *self.catalog.read().await.scanned.get(chain).unwrap_or(&0);
-            for i in from..count {
-                let raw = self
-                    .eth_call(
-                        chain,
-                        factory,
-                        &call("launches(uint256)", &[uint_word(i as u128)]),
-                    )
-                    .await?;
-                let router = word_address(&raw, 0)?;
-                let hub = format!(
-                    "0x{}",
-                    hex::encode(raw.get(32..64).context("short launch")?)
-                );
-                let launcher = word_address(&raw, 2)?;
-                let name =
-                    decode_string(&self.eth_call(chain, &router, &call("name()", &[])).await?)?;
-                let symbol = decode_string(
-                    &self
-                        .eth_call(chain, &router, &call("symbol()", &[]))
-                        .await?,
-                )?;
-                let mut catalog = self.catalog.write().await;
-                catalog.candidates.entry(hub).or_default().push(Candidate {
-                    chain: chain.clone(),
-                    router,
-                    launcher,
-                    name,
-                    symbol,
-                });
-                catalog.scanned.insert(chain.clone(), i + 1);
+            if let Err(e) = self.scan_factory(chain, factory).await {
+                warn!(chain = %chain, error = %e, "reading the token factory failed");
             }
+        }
+        Ok(())
+    }
+
+    async fn scan_factory(&self, chain: &str, factory: &str) -> Result<()> {
+        let count = word_u128(
+            &self
+                .eth_call(chain, factory, &call("launchCount()", &[]))
+                .await?,
+            0,
+        )? as u64;
+        let from = *self.catalog.read().await.scanned.get(chain).unwrap_or(&0);
+        for i in from..count {
+            let raw = self
+                .eth_call(
+                    chain,
+                    factory,
+                    &call("launches(uint256)", &[uint_word(i as u128)]),
+                )
+                .await?;
+            let router = word_address(&raw, 0)?;
+            let hub = format!(
+                "0x{}",
+                hex::encode(raw.get(32..64).context("short launch")?)
+            );
+            let launcher = word_address(&raw, 2)?;
+            let name = decode_string(&self.eth_call(chain, &router, &call("name()", &[])).await?)?;
+            let symbol = decode_string(
+                &self
+                    .eth_call(chain, &router, &call("symbol()", &[]))
+                    .await?,
+            )?;
+            let mut catalog = self.catalog.write().await;
+            catalog.candidates.entry(hub).or_default().push(Candidate {
+                chain: chain.to_string(),
+                router,
+                launcher,
+                name,
+                symbol,
+            });
+            catalog.scanned.insert(chain.to_string(), i + 1);
         }
         Ok(())
     }
@@ -1713,6 +1733,7 @@ mod tests {
             quoter: format!("0x{}", "33".repeat(20)),
             fee: 3000,
             token_factory: Some(format!("0x{}", "66".repeat(20))),
+            rpc: None,
         };
         let chain = |kind: &str, domain| Chain {
             kind: kind.into(),

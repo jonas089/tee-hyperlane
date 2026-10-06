@@ -441,6 +441,9 @@ TOML
         printf '\n[trade.venues.%s]\nfactory = "%s"\npositions = "%s"\nswap_router = "%s"\nquoter = "%s"\nfee = %s\n' \
           "${c}" "${factory}" "${positions}" "${swap}" "${quoter}" "${TRADE_FEE}"
         if has "${c}-factory"; then printf 'token_factory = "%s"\n' "$(load "${c}-factory")"; fi
+        # Sepolia's own rpc is a full node busy proving old state for the relayer, which answers
+        # the venue slowly and can trail the head; the venue reads a public endpoint instead.
+        if [ "${c}" = sepolia ]; then printf 'rpc = "%s"\n' "${TRADE_SEPOLIA_RPC:-https://ethereum-sepolia-rpc.publicnode.com}"; fi
       done
       printf '\n[trade.assets.TIA]\ndecimals = 6\ndenom = "utia"\n[trade.assets.TIA.routers]\ncelestia = "%s"\n' "$(load celestia-token-id)"
       for c in sepolia arbitrum base eden; do if has "${c}-router"; then printf '%s = "%s"\n' "${c}" "$(load "${c}-router")"; fi; done

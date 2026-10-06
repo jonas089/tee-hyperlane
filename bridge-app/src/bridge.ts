@@ -85,7 +85,7 @@ export async function waitForReceipt(chain: EvmChain, txHash: string): Promise<a
 const MAILBOX_ABI = parseAbi(["function delivered(bytes32 id) view returns (bool)"]);
 
 /// Decimals by symbol. Every launched token has 6, like both of ours.
-export const decimalsOf = (token: string): number => DECIMALS[token as TokenId] ?? 6;
+export const decimalsOf = (token: string): number => DECIMALS[token] ?? 6;
 
 export function toBaseUnits(amount: string, token: string): bigint {
   const [whole, fraction = ""] = amount.trim().split(".");

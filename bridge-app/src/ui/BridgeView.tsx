@@ -1,6 +1,6 @@
 // The send form, and a short summary of the route beside it.
 
-import { CHAINS, ORIGIN_FINALITY, SLOW_ORIGIN_SECONDS, expectedSeconds } from "../config";
+import { CHAINS, ORIGIN_FINALITY, SLOW_ORIGIN_SECONDS, expectedSeconds, labelOf } from "../config";
 import type { ChainId, TokenId } from "../config";
 import { formatAmount, formatFee } from "../bridge";
 import type { BridgeFee } from "../bridge";
@@ -61,8 +61,8 @@ export function BridgeView(p: BridgeProps) {
         : !p.amount || !(wanted > 0)
           ? { label: "Enter an amount" }
           : over
-            ? { label: `Not enough ${p.token}` }
-            : { label: `Bridge ${p.amount} ${p.token} to ${destination.name}`, run: p.onSend };
+            ? { label: `Not enough ${labelOf(p.token)}` }
+            : { label: `Bridge ${p.amount} ${labelOf(p.token)} to ${destination.name}`, run: p.onSend };
   const slow = ORIGIN_FINALITY[p.from].seconds >= SLOW_ORIGIN_SECONDS;
 
   return (
@@ -92,7 +92,7 @@ export function BridgeView(p: BridgeProps) {
             <span>
               {p.sourceBalance === undefined
                 ? `Connect ${walletFor(source)} to see your balance`
-                : `Balance ${formatAmount(p.sourceBalance, p.token)} ${p.token}`}
+                : `Balance ${formatAmount(p.sourceBalance, p.token)} ${labelOf(p.token)}`}
             </span>
             {p.sourceBalance !== undefined && p.sourceBalance > 0n && (
               <button className="max" onClick={() => p.onAmount(formatAmount(p.sourceBalance!, p.token))}>
@@ -117,13 +117,13 @@ export function BridgeView(p: BridgeProps) {
           </div>
           <div className="field-row">
             <span className={p.amount ? "amount received" : "amount received placeholder"}>{p.amount || "0"}</span>
-            <span className="token-static">{p.token}</span>
+            <span className="token-static">{labelOf(p.token)}</span>
           </div>
           <div className="field-bottom">
             <span>
               {p.destinationBalance === undefined
                 ? `Connect ${walletFor(destination)} to see your balance`
-                : `Balance ${formatAmount(p.destinationBalance, p.token)} ${p.token}`}
+                : `Balance ${formatAmount(p.destinationBalance, p.token)} ${labelOf(p.token)}`}
             </span>
           </div>
         </div>
@@ -235,8 +235,13 @@ export function TokenPicker({
       onChange={onChange}
       placeholder="Search tokens"
       className="token-picker"
-      options={tokens.map((t) => ({ value: t, label: t }))}
-      trigger={<span>{value}</span>}
+      options={tokens.map((t) => ({
+        value: t,
+        label: labelOf(t),
+        keywords: t,
+        hint: t.startsWith("0x") ? `…${t.slice(-4)}` : undefined,
+      }))}
+      trigger={<span>{labelOf(value)}</span>}
     />
   );
 }

@@ -3,7 +3,7 @@
 // anywhere can be found by its transaction hash, message id or an address.
 
 import { useEffect, useMemo, useState } from "react";
-import { CHAINS, ROUTERS, expectedSeconds } from "../config";
+import { CHAINS, ROUTERS, expectedSeconds, labelOf } from "../config";
 import type { ChainId, TokenId } from "../config";
 import { formatAmount } from "../bridge";
 import type { Transfer } from "../bridge";
@@ -407,5 +407,5 @@ function remoteToken(r: RemoteTransfer): TokenId | null {
 function remoteAmount(r: RemoteTransfer): string {
   if (!r.transfer) return "Transfer";
   const token = remoteToken(r);
-  return token ? `${formatAmount(BigInt(r.transfer.amount), token)} ${token}` : `${r.transfer.amount} base units`;
+  return token ? `${formatAmount(BigInt(r.transfer.amount), token)} ${labelOf(token)}` : `${r.transfer.amount} base units`;
 }
