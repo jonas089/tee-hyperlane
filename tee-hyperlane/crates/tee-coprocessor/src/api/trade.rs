@@ -2118,17 +2118,20 @@ mod serve {
     #[tokio::test]
     #[ignore]
     async fn serve_trade_api() {
-        let path = concat!(
+        let example = concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/../../../deploy/coprocessor.toml.example"
         );
-        let mut config = Config::load(path).unwrap();
+        let path = std::env::var("TRADE_CONFIG").unwrap_or_else(|_| example.to_string());
+        let mut config = Config::load(&path).unwrap();
         if let (Some(t), Ok(rest)) = (config.trade.as_mut(), std::env::var("HUB_REST")) {
             t.hub_rest = rest;
         }
+        crate::registry::load(config.proof_dir().join("launched.json"));
         let trade = Arc::new(Trade::new(&config).unwrap().unwrap());
         trade.spawn_refresh();
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:3101")
+        let port = std::env::var("TRADE_PORT").unwrap_or_else(|_| "3101".into());
+        let listener = tokio::net::TcpListener::bind(format!("127.0.0.1:{port}"))
             .await
             .unwrap();
         axum::serve(listener, router(trade)).await.unwrap();
