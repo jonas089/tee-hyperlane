@@ -351,7 +351,7 @@ export default function App() {
       <header className="topbar">
         <div className="topbar-inner">
           <a className="brand" href="#" onClick={(e) => { e.preventDefault(); setTab("bridge"); }}>
-            <span>TEE Bridge</span>
+            <span>TEE Interchain Solutions</span>
           </a>
           <nav className="tabs">
             {tabs.map((t) => (
