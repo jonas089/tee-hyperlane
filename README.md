@@ -148,9 +148,13 @@ teeism-gas-oracle  systemd  paymaster upkeep
 ## Design
 
 - **One image per origin, one CVM for all of them.** The shared CVM has one identity, so a
-  code change to any image replaces all 8 ISMs. A chain moved to its own CVM
-  (`30-enclave-up.sh --<chain>`) gets its own identity, and a change to it then replaces only
+  code change to any image re-pins all 8 ISMs. A chain moved to its own CVM
+  (`30-enclave-up.sh --<chain>`) gets its own identity, and a change to it then re-pins only
   the ISMs that chain attests.
+- **The owner re-pins an ISM in place.** `TeeDcapIsm.setEnclave` on EVM (revision 3) and
+  `tx teeism update-identity` on Celestia swap the pinned identity and the last 32 bytes of the
+  state, keeping the ISM's address, root and height. A new image, a platform update under it
+  or a replacement enclave is one transaction per ISM, and no router moves.
 - **Rollups are attested from what their sequencer signed.** Base's sequencer signs every
   block on the OP Stack p2p network, Arbitrum's every feed message (which commits to the block
   hash), Eden's every header it posts to Celestia. The enclave checks the signature against the
@@ -159,12 +163,15 @@ teeism-gas-oracle  systemd  paymaster upkeep
 
 ## Trust
 
-- **Trusted:** Intel TDX, the pinned enclave identity, each ISM's starting state, on EVM
+- **Trusted:** Intel TDX, the pinned enclave identity and the key that may re-pin it, each
+  ISM's starting state, on EVM
   chains our Automata contracts, and the Base, Arbitrum and Eden sequencer keys: a sequencer
   that signs a wrong state root, or a block it later reorgs away, is believed.
 - **Not trusted:** RPCs, the relayer (it can stall, not forge), Phala beyond uptime, anything
   sent to the enclave.
-- **Risks:** a TDX break forges anything; one EOA owns the ISMs, routers and Automata roles.
+- **Risks:** a TDX break forges anything; one EOA owns the ISMs, routers and Automata roles,
+  and can re-pin any ISM to an enclave of its choosing. That is deliberate emergency control
+  for the testnet; it moves to a multisig before mainnet.
 
 ## Tests
 

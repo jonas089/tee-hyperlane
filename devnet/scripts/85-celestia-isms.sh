@@ -63,6 +63,12 @@ print(base64.b64decode(json.load(sys.stdin)["ism"]["state"])[-32:].hex())
 ' 2>/dev/null
 }
 
+# The account that owns an ISM, which alone may re-pin it.
+ism_owner() {
+  "${A}" query teeism ism "$1" --node "${CELESTIA_RPC}" -o json 2>/dev/null \
+    | python3 -c 'import json,sys;print(json.load(sys.stdin)["ism"].get("owner",""))' 2>/dev/null
+}
+
 # The full state of an ISM, as 0x-hex.
 ism_state() {
   "${A}" query teeism ism "$1" --node "${CELESTIA_RPC}" -o json 2>/dev/null | python3 -c '
@@ -95,6 +101,7 @@ genesis_for() { # <origin> <enclave> [old ism id]
 }
 
 write_config
+RELAYER="$("${A}" keys show relayer -a --keyring-backend test --home "${CELHOME}")"
 
 for row in ${ORIGINS}; do
   IFS=: read -r name domain enclave tree <<< "${row}"
@@ -114,6 +121,16 @@ for row in ${ORIGINS}; do
     [ -n "${pinned}" ] || die "could not read ${existing} from ${CELESTIA_RPC}"
     if [ "${pinned}" = "$(load "identity-digest-${enclave}" | tr 'A-F' 'a-f' | sed 's/^0x//')" ]; then
       say "  already created for this enclave: ${existing}"
+      continue
+    fi
+    # The owner re-pins in place: the ISM keeps its id and its state, so the routing ISM is
+    # untouched. ISM_GENESIS_<ORIGIN> asks for a new ISM at that state instead.
+    override="$(eval "printf '%s' \"\${ISM_GENESIS_$(printf '%s' "${name}" | tr 'a-z-' 'A-Z_'):-}\"")"
+    if [ -z "${override}" ] && [ "$(ism_owner "${existing}")" = "${RELAYER}" ]; then
+      say "  ${existing} pins an older enclave; re-pinning it"
+      send "re-pin ${name}" teeism update-identity "${existing}" "${OUT_DIR}/identity-${enclave}.json"
+      [ "$(pinned_identity "${existing}")" = "$(load "identity-digest-${enclave}" | tr 'A-F' 'a-f' | sed 's/^0x//')" ] \
+        || die "${existing} does not pin the new identity after the re-pin"
       continue
     fi
     say "  ${existing} pins an older enclave; creating a replacement from its last state"

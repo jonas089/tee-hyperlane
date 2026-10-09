@@ -29,7 +29,7 @@ For UI changes, also rebuild the UI ([DEPLOY step 11](DEPLOY.md#11-ui-and-gatewa
 ## Update: enclave code
 
 For changes to `crates/tee-node`, `crates/hyperlane-types` or `Cargo.lock`. A changed enclave
-gives its CVM a new identity, and every ISM that CVM attests needs replacing. With all five
+gives its CVM a new identity, and every ISM that CVM attests needs re-pinning. With all five
 chains in the shared CVM that is all 8 ISMs; a chain running in its own CVM (see
 [One chain in its own CVM](#one-chain-in-its-own-cvm)) only moves its own. The scripts only
 redo what changed.
@@ -61,8 +61,10 @@ cd ~/tee-ism-nonzk/devnet
 ./scripts/75-dcap-verifiers.sh && ./scripts/80-evm-isms.sh && ./scripts/85-celestia-isms.sh && ./scripts/90-evm-warp.sh
 ```
 
-`80-evm-isms.sh` also replaces an EVM ISM whose contract `VERSION` is older than the source's,
-even when the enclave is unchanged. Each router should print `repointing`. **If one prints `deploying the synthetic ... router`,
+An ISM the relayer key owns (on Celestia, and on EVM from contract `VERSION` 3) is re-pinned in
+place and keeps its id; 90 then has nothing to re-point. `80-evm-isms.sh` replaces an EVM ISM
+whose `VERSION` is older than the source's, even when the enclave is unchanged, and then each
+router should print `repointing`. **If one prints `deploying the synthetic ... router`,
 press Ctrl-C.** A new router orphans the tokens the old one minted.
 
 **5. Start**
@@ -125,7 +127,8 @@ shared CVM keeps serving the rest.
 
 ## No message is lost
 
-When a script replaces an ISM, the new one starts from the old one's last state, with only the
+A re-pin swaps only the identity in the ISM's state, so the route carries on from where it was.
+When a script replaces an ISM instead, the new one starts from the old one's last state, with only the
 enclave identity (its last 32 bytes) swapped. The route picks up exactly where it stopped, so
 every message in flight is still delivered. If the old state can't be read, the script stops
 instead of starting from the head.

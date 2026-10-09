@@ -45,6 +45,14 @@ contract TeeDcapIsmTest is Test {
 
     /// The 116-byte ISM state, matching the Celestia module's layout exactly.
     function _state(uint8 rootSeed, uint64 height, uint64 timestamp) internal pure returns (bytes memory) {
+        return _stateOf(rootSeed, height, timestamp, IDENTITY);
+    }
+
+    function _stateOf(uint8 rootSeed, uint64 height, uint64 timestamp, bytes32 identity)
+        internal
+        pure
+        returns (bytes memory)
+    {
         bytes memory s = new bytes(116);
         for (uint256 i = 0; i < 32; i++) {
             s[i] = bytes1(rootSeed);
@@ -56,7 +64,7 @@ contract TeeDcapIsmTest is Test {
             s[44 + i] = bytes1(uint8(timestamp >> (8 * (7 - i))));
         }
         for (uint256 i = 0; i < 32; i++) {
-            s[84 + i] = IDENTITY[i];
+            s[84 + i] = identity[i];
         }
         return s;
     }
@@ -206,7 +214,60 @@ contract TeeDcapIsmTest is Test {
     }
 
     function test_reportsItsRevision() public view {
-        assertEq(ism.VERSION(), 2);
+        assertEq(ism.VERSION(), 3);
+    }
+
+    // ---------------------------------------------------------------- re-pinning
+
+    function test_onlyTheOwnerRepins() public {
+        assertEq(ism.owner(), address(this));
+        vm.prank(address(0xBAD));
+        vm.expectRevert("Ownable: caller is not the owner");
+        ism.setEnclave(_zeroMeasurements(), bytes32(uint256(0xfeed)));
+    }
+
+    function test_aRepinSwapsOnlyTheIdentity() public {
+        bytes32 next = bytes32(uint256(0xfeed));
+        vm.expectEmit(address(ism));
+        emit TeeDcapIsm.EnclaveChanged(MEASUREMENTS, _zeroMeasurements(), IDENTITY, next);
+        ism.setEnclave(_zeroMeasurements(), next);
+
+        assertEq(ism.enclaveMeasurements(), _zeroMeasurements());
+        assertEq(ism.identityDigest(), next);
+        assertEq(keccak256(ism.state()), keccak256(_stateOf(1, GENESIS_HEIGHT, GENESIS_TIME, next)));
+    }
+
+    /// After a re-pin the new enclave carries on from the same state, and the old one is refused.
+    function test_aRepinnedIsmAdmitsTheNewEnclaveOnly() public {
+        bytes32 next = bytes32(uint256(0xfeed));
+        ism.setEnclave(_zeroMeasurements(), next);
+
+        bytes memory stale = _payload(
+            _state(1, GENESIS_HEIGHT, GENESIS_TIME), _state(2, GENESIS_HEIGHT + 1, GENESIS_TIME), uint64(block.timestamp), new bytes32[](0)
+        );
+        dcap.set(true, _output(stale, 0, false));
+        vm.expectRevert(TeeDcapIsm.TrustedStateMismatch.selector);
+        ism.submitAttestation(hex"00", stale);
+
+        bytes memory payload = _payload(
+            _stateOf(1, GENESIS_HEIGHT, GENESIS_TIME, next),
+            _stateOf(2, GENESIS_HEIGHT + 1, GENESIS_TIME, next),
+            uint64(block.timestamp),
+            new bytes32[](0)
+        );
+        dcap.set(true, _output(payload, 0, false));
+        ism.submitAttestation(hex"00", payload);
+        assertEq(keccak256(ism.state()), keccak256(_stateOf(2, GENESIS_HEIGHT + 1, GENESIS_TIME, next)));
+    }
+
+    function test_ownershipCanBeHandedToAMultisig() public {
+        address multisig = address(0x5AFE);
+        ism.transferOwnership(multisig);
+        vm.expectRevert("Ownable: caller is not the owner");
+        ism.setEnclave(_zeroMeasurements(), IDENTITY);
+        vm.prank(multisig);
+        ism.setEnclave(_zeroMeasurements(), IDENTITY);
+        assertEq(ism.enclaveMeasurements(), _zeroMeasurements());
     }
 
     function test_verifyOnlyFromMailbox() public {

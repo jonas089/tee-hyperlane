@@ -38,7 +38,7 @@ over HTTPS. Update it with `git pull`; `devnet/.env` and `devnet/.state/` there 
   Base and Arbitrum. The Trade tab and `/api/v1/trade` route swaps through them
 - **five images**, one per origin (`celestia`, `ethereum`, `base`, `arbitrum`, `eden`), all
   in **one shared CVM** by default, each on its own port (8080 to 8084). They share that CVM's
-  identity, so a change to any image replaces all 8 ISMs. `30-enclave-up.sh --<chain>` moves a
+  identity, so a change to any image re-pins all 8 ISMs. `30-enclave-up.sh --<chain>` moves a
   chain into its own CVM with its own identity. Until the rollout of the shared CVM, ark still
   runs the old three per-family CVMs (`celestia`, `ethereum`, `evolve`)
 
@@ -99,10 +99,12 @@ endpoint is a free public one.
   alone; but the shared CVM's compose hash covers every digest, so its identity moves anyway.
   The split only saves ISMs for a chain deployed alone. `Cargo.lock` and the shared modules
   (`attest.rs`, `origin.rs`, `state.rs`, `evm.rs`) move every digest.
-- **A replacement ISM resumes, it never re-anchors.** `80-evm-isms.sh` and
-  `85-celestia-isms.sh` start a replacement from the old ISM's last state with only the identity
-  (last 32 bytes) swapped, so nothing in flight is lost, and stop rather than fall back to the
-  head. Only a first deploy anchors at the head.
+- **A rotation re-pins, it never re-anchors.** The owner key re-pins an ISM it owns in place
+  (`setEnclave` on EVM from revision 3, `tx teeism update-identity` on Celestia), swapping only
+  the identity and the state's last 32 bytes. `80-evm-isms.sh` and `85-celestia-isms.sh` do
+  that; only an ISM we do not own, or a contract revision change on EVM, gets a replacement,
+  which starts from the old ISM's last state and stops rather than fall back to the head.
+  Only a first deploy anchors at the head.
 - **Launched tokens are anyone's, and the relayer carries them.** A `TeeTokenFactory` per venue
   chain makes their routers and keeps ownership, so `90-evm-warp.sh` re-points them on a rotation.
   The trade API lists a token once the hub shows it renounced and wired, and adds its routers to

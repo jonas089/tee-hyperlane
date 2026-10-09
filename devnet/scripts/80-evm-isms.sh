@@ -106,6 +106,24 @@ while IFS=: read -r name chainid mailbox; do
       say "${name} already has ${existing} pinning this enclave, skipping"
       continue
     fi
+    # From revision 3 the owner re-pins in place: the ISM keeps its address and its state, so
+    # no router has to be re-pointed. Only a contract change, or an ISM we do not own, replaces it.
+    if [ "${rev}" = "${ISM_REVISION}" ] && [ "${ISM_REVISION}" -ge 3 ]; then
+      owner="$(cast call "${existing}" "owner()(address)" --rpc-url "${rpc}" 2>&1)" \
+        || die "could not read ${existing}'s owner on ${name}: ${owner}"
+      me="$(cast wallet address --private-key "${EVM_PRIVATE_KEY}")"
+      if [ "$(printf %s "${owner}" | tr A-F a-f)" = "$(printf %s "${me}" | tr A-F a-f)" ]; then
+        say "${name}: re-pinning ${existing} to this enclave"
+        cast send "${existing}" "setEnclave(bytes32,bytes32)" "${MEASUREMENTS}" "${IDENTITY}" \
+          --rpc-url "${rpc}" --private-key "${EVM_PRIVATE_KEY}" >/dev/null \
+          || die "setEnclave failed on ${name}"
+        got="$(cast call "${existing}" "enclaveMeasurements()(bytes32)" --rpc-url "${rpc}" 2>/dev/null || true)"
+        [ "${got}" = "${MEASUREMENTS}" ] || die "${existing} on ${name} pins '${got}' after the re-pin, expected ${MEASUREMENTS}"
+        say "  ${existing} re-pinned"
+        continue
+      fi
+      say "${name}: ${existing} is owned by ${owner}, not ${me}; replacing it"
+    fi
     [ "${cur}" = "${MEASUREMENTS}" ] && say "${name}: ${existing} is contract revision ${rev:-1}, replacing with ${ISM_REVISION}"
     if [ -z "${ISM_GENESIS:-}" ]; then
       old="$(cast call "${existing}" "state()(bytes)" --rpc-url "${rpc}" 2>/dev/null || true)"
