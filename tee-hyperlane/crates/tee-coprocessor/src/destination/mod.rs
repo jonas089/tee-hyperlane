@@ -18,6 +18,12 @@ pub trait Destination: Send + Sync {
     async fn deliver(&self, message: &[u8], metadata: &[u8]) -> Result<Outcome>;
     /// Whether the mailbox has processed message `id` (hex, no prefix), by anyone.
     async fn delivered(&self, id: &str) -> Result<bool>;
+    /// The origin tree the ISM last attested: its root and leaf count. A zero root before the
+    /// first attestation.
+    async fn tree(&self) -> Result<([u8; 32], u32)>;
+    /// Whether the ISM has ever attested `root`. Every root it has stays accepted, so a proof
+    /// against one lands whenever it is sent; a proof against any other root never does.
+    async fn root_attested(&self, root: [u8; 32]) -> Result<bool>;
     /// The relayer's own account on this chain and its balance of the gas token, in base units.
     async fn wallet(&self) -> Result<Wallet>;
 }

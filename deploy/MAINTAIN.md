@@ -105,7 +105,9 @@ Contracts on the EVM chains stay where they are, unused. A CVM named `teeism-*` 
 ## No message is lost
 
 - A re-pin keeps each ISM's state; a replaced ISM resumes from the old one's last state, and stops rather than fall back to the head if it cannot read it.
-- Celestia -> EVM resumes only if its last state is under 14 days old.
+- Every root an ISM attests stays accepted, so a message's proof never expires. A proof lands only against the root it was built for, though: if the ISM never attested that root (another relayer's attestation landed first and ours was discarded as stale; or the ISM was replaced and its root set started over), the message is parked with the tree it was proven from, and redelivery builds a new proof against the root the ISM holds now (`undelivered/<id>.json` carries `provenance`). Nothing to do by hand; the log says `re-proved against the root the ISM holds`.
+- A message parked before the ISM covers it (its batch was discarded while the ISM sat between its start and end) is reported as `cannot re-prove yet` until the next attestation; then it lands, or the regular step delivers it first and the parked copy is found delivered.
+- Celestia -> EVM resumes only if its last state is under 14 days old. Past that, a replacement ISM anchored at the head attests a root that contains every earlier leaf, so the messages are not lost, but the relayer only indexes forward from the ISM's height: recovering leaves dispatched during the outage needs a frontier at an earlier height, which is not tooled yet.
 
 ## Waiting or stuck?
 
@@ -129,7 +131,7 @@ Base or Arbitrum waiting more than a few minutes: stuck, see below. `leaves=N` c
 | `WrongEnclave` / `identity mismatch` on every route after Phala maintenance, with no change of ours | the host moved the measurements (e.g. a dstack 0.6 VMM changes RTMR0 at the CVM's next start): [rotate the enclave](#rotate-the-enclave-re-pin) |
 | `TCBR` on every EVM route right after a new CVM | its Phala node has another CPU platform (FMSPC): `teeism pccs seed --fmspc <hex>` |
 | `EmptyBatchTooSoon`, `an attestation with no new leaves must advance the origin clock` | nothing, unless it repeats: someone else advanced the ISM |
-| `process` reverts or `verification failed` with the ISM's state ahead of the message | the delivery's metadata names a root the ISM never attested, or the proof is for another index: remove the parked message (`undelivered/<id>.json`); the next pass re-indexes and rebuilds it |
+| `process` reverts or `verification failed` with the ISM's state ahead of the message | the delivery's metadata names a root the ISM never attested; redelivery re-proves it against the ISM's current root by itself (`re-proved against the root the ISM holds`). `cannot re-prove yet` names the cause: the ISM has not attested since (wait for the next attestation), or the record predates `provenance` (nothing can rebuild it: the regular step never indexes backwards). Never delete a parked message to "retry" it; the next pass starts from the ISM's height and would not see it again |
 | `unknown command "teeism"` from the relayer | the unit's PATH must start with `.state/bin` |
 | `eth_getProof` fails at an old height | use an archive endpoint ([DEPLOY G](DEPLOY.md#g-endpoints)) |
 | Sepolia: `eth_getProof` ... `operation timed out` against `127.0.0.1:8545` | point `SEPOLIA_RPC` at an archive for one pass |

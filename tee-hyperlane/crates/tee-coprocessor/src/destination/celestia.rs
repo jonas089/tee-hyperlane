@@ -211,6 +211,39 @@ impl Destination for Celestia {
         self.is_delivered(id).await
     }
 
+    async fn tree(&self) -> Result<([u8; 32], u32)> {
+        let ism = self.query(&["teeism", "ism", &self.ism]).await?;
+        // Proto bytes are base64 in JSON, and absent while empty: before the first attestation.
+        let root = match ism["ism"]["tree_root"].as_str() {
+            Some(b64) if !b64.is_empty() => base64::engine::general_purpose::STANDARD
+                .decode(b64)?
+                .try_into()
+                .map_err(|_| anyhow::anyhow!("ism.tree_root is not 32 bytes"))?,
+            _ => [0u8; 32],
+        };
+        let count = &ism["ism"]["tree_count"];
+        let count = match count.as_u64() {
+            Some(n) => n,
+            None => count
+                .as_str()
+                .unwrap_or("0")
+                .parse()
+                .context("ism.tree_count")?,
+        };
+        Ok((root, u32::try_from(count).context("ism.tree_count")?))
+    }
+
+    async fn root_attested(&self, root: [u8; 32]) -> Result<bool> {
+        let roots = self.query(&["teeism", "roots", &self.ism]).await?;
+        let want = hex::encode(root);
+        Ok(roots["roots"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .any(|r| r.trim_start_matches("0x").eq_ignore_ascii_case(&want)))
+    }
+
     async fn wallet(&self) -> Result<Wallet> {
         let address = run(
             &Self::appd(),

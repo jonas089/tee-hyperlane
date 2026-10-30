@@ -291,6 +291,57 @@ impl Destination for Evm {
         self.is_delivered(id).await
     }
 
+    async fn tree(&self) -> Result<([u8; 32], u32)> {
+        let root = run(
+            "cast",
+            &[
+                "call",
+                &self.ism,
+                "treeRoot()(bytes32)",
+                "--rpc-url",
+                &self.rpc,
+            ],
+        )
+        .await?;
+        let count = run(
+            "cast",
+            &[
+                "call",
+                &self.ism,
+                "treeCount()(uint32)",
+                "--rpc-url",
+                &self.rpc,
+            ],
+        )
+        .await?;
+        let root: [u8; 32] = hex::decode(root.trim().trim_start_matches("0x"))?
+            .try_into()
+            .map_err(|_| anyhow::anyhow!("treeRoot() is not 32 bytes"))?;
+        let count = count
+            .split_whitespace()
+            .next()
+            .unwrap_or("")
+            .parse()
+            .context("treeCount() did not print a number")?;
+        Ok((root, count))
+    }
+
+    async fn root_attested(&self, root: [u8; 32]) -> Result<bool> {
+        Ok(run(
+            "cast",
+            &[
+                "call",
+                &self.ism,
+                "attestedRoots(bytes32)(bool)",
+                &format!("0x{}", hex::encode(root)),
+                "--rpc-url",
+                &self.rpc,
+            ],
+        )
+        .await?
+            == "true")
+    }
+
     async fn wallet(&self) -> Result<Wallet> {
         let address = self.sender().await?;
         let balance = run("cast", &["balance", &address, "--rpc-url", &self.rpc])
