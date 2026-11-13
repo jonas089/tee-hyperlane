@@ -58,6 +58,7 @@ Auto-open and auto-resolve; not dismissable. `severity`: `warning` or `critical`
 | `message-failed:<id>` | delivery refused |
 | `message-overdue:<id>` | transfer stuck |
 | `route-failing:<route>` | route loop failing 10m (critical after 1h) |
+| `route-uncovered:<route>` | relayer cannot read the origin between the height it has accounted for and the ISM's for 10m (critical after 1h); messages there may be attested but undelivered |
 | `route-silent:<route>` | route loop silent 45m |
 | `route-staged:<route>` | attested batch submitting 30m |
 | `route-enclaves:<route>` | a route with several enclaves has one failing (critical when all are) |

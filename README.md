@@ -14,19 +14,20 @@ Hyperlane bridging between Celestia and EVM chains. Messages are authorised by a
 ```
 tee-hyperlane/crates/tee-node/          the enclave
 tee-hyperlane/crates/tee-coprocessor/   the service: every route, the API, the faucet
-tee-hyperlane/contracts/                TeeDcapIsm.sol
+tee-hyperlane/contracts/                TeeDcapIsm.sol; Automata's PCCS and DCAP verifier are fetched at pinned commits by `teeism build`
 cli/                                    teeism: deploys, rotates, inspects and tears down everything
 bridge-app/                             React UI, MetaMask + Keplr
-devnet/                                 the chain's and the gateway's compose files, vendored Automata
+devnet/                                 the chain's and the gateway's compose files
 deploy/                                 the guides, the measured compose files, systemd units
 ```
 
 - `l1/`: light-client chains (Celestia, Ethereum). `l2/`: sequencer-signed rollups (Base, Arbitrum, Eden).
 - Per chain: `tee-node/src/chains/l2/base.rs` (verification), `tee-coprocessor/src/origin/l2/base.rs` (fetching).
+- Features mean one thing: which chains are compiled in. `celestia`, `ethereum`, `base`, `arbitrum`, `eden`, named alike in `tee-node` and `tee-coprocessor`, each coprocessor feature forwarding to the enclave's. `default` builds every chain, for development, tests and the devnet. An enclave image is built with one (`flake.nix`); a relayer with the chains it serves. The CLI's `ledger` is the one feature that is not a chain. Check every combination: `cargo hack check -p tee-coprocessor --each-feature --exclude-no-default-features`.
 
 ## Deployments
 
-First deployed with `teeism` on 2026-10-15; redeployed from a fresh devnet on 2026-10-26 (dstack 0.6.1 enclave, identity v3 pinning RTMR0-2). On 2026-10-30 the enclave moved to root attestation: new CVM, the four EVM ISMs replaced (`TeeDcapIsm` `VERSION` 5) from their predecessors' last state and the routers re-pointed, the four Celestia ISMs re-pinned in place, the chain restarted on celestia-app `1c3d993`. On 2026-11-09 every ISM moved to pinning a set of enclaves: the chain restarted in place on celestia-app `8667a693` (since `aaed6bc`: attestations priced and capped, the event log bounded, stale collateral refused) and each Celestia ISM was given its set with `tx teeism set-identities`; the four EVM ISMs were replaced (`VERSION` restarts at 1, pre-release) from their predecessors' last state and the routers re-pointed; a new CVM on another Phala node moved the compose hash, so all eight ISMs were re-pinned in place; Eden's routers were put behind a routing ISM and a routing hook of ours, as mainnet will be. Every id below is from those days. `teeism status` prints the live ids. Verify: `teeism enclaves verify`.
+First deployed with `teeism` on 2026-10-15; redeployed from a fresh devnet on 2026-10-26 (dstack 0.6.1 enclave, identity v3 pinning RTMR0-2). On 2026-10-30 the enclave moved to root attestation: new CVM, the four EVM ISMs replaced (`TeeDcapIsm` `VERSION` 5) from their predecessors' last state and the routers re-pointed, the four Celestia ISMs re-pinned in place, the chain restarted on celestia-app `1c3d993`. On 2026-11-09 every ISM moved to pinning a set of enclaves: the chain restarted in place on celestia-app `8667a693` (since `aaed6bc`: attestations priced and capped, the event log bounded, stale collateral refused) and each Celestia ISM was given its set with `tx teeism set-identities`; the four EVM ISMs were replaced (`VERSION` restarts at 1, pre-release) from their predecessors' last state and the routers re-pointed; a new CVM on another Phala node moved the compose hash, so all eight ISMs were re-pinned in place; Eden's routers were put behind a routing ISM and a routing hook of ours, as mainnet will be. On 2026-11-10 the images were rebuilt on a refreshed lock (rustls 0.23.46 and rustls-webpki 0.103.16, the TLS floor tendermint-rs 0.41 sets; the light client itself stays at 0.40.4 until `celestia-types` moves) and rolled out with the first zero-downtime rotation: a second CVM next to the first, every ISM re-pinned in place to the set of both, the relayer moved, the old CVM retired and every ISM re-pinned to the new one alone. No contract or ISM was redeployed. Every id below is from those days. `teeism status` prints the live ids. Verify: `teeism enclaves verify`.
 
 **Enclaves.** Phala Cloud (node picked by Phala), `tdx.small`, dstack `0.6.1`, image `ghcr.io/jonas089/tee-node`. All five in one CVM (`deploy/docker-compose.all.yml`); `teeism enclaves up --chain <chain>` runs one alone.
 
@@ -39,19 +40,19 @@ First deployed with `teeism` on 2026-10-15; redeployed from a fresh devnet on 20
 | `eden` | 8084 | Eden |
 
 ```
-app id         109054f68e353471f9348dc0a074e6448fecd371
-urls           https://109054f68e353471f9348dc0a074e6448fecd371-<port>.dstack-pha1-prod9.phala.network
+app id         e56005780efc9e267b602647684a15196ffa439b
+urls           https://e56005780efc9e267b602647684a15196ffa439b-<port>.dstack-pha1-prod9.phala.network
 mr_td          0x2a674327c50218dba880066b349b8d559d749ed68dce33fd651c184a877d084b07a9e583767a7ad5da13ed91deec2b70
-compose_hash   0xcdfba073fdab7311c65f511d388e96e96886159cf82496301114074e632f1b7d
+compose_hash   0xf440a71354bfba458534cf104fe048afa8eb67fe7481d7dc35611aad82eef373
 os_image_hash  0xec43cb8c5e04b6bb6c53b33b16076a01d83d01f7f4b703f2f78a0d947d6247e6
 rtmr0          0x68102e7b524af310f7b7d426ce75481e36c40f5d513a9009c046e9d37e31551f0134d954b496a3357fd61d03f07ffe96
 rtmr1          0x89ef86c5125b986c325f0a94acfa87718a4ef3a4d4f237dbb72dda3cf777fd2c054555fb4407eb53338d7d67329a7333
 rtmr2          0xe9000e338f33233e8f51b7fd031e1c158bdcf8572eab041c0bc8eb7fef48b23259a6a556e6c8e2af99999fc39c793179
-identity       0xd5e3022910cba5eba089d99316704ff1600f5d0fe346d1961636ad1b38faf532
-measurements   0x3e600c51b97b848c6f12169bb5aecb462c149648961d4c3c4816bbb4fad66324
+identity       0x441a9c5698a48dca085b80815549023bb0867ade1c958b1a8952c3ff72fc9f50
+measurements   0x9a2bb5d75308c1da58351dffd9f3d97e9d4e694d6c7d8109ed4f2a7faa081726
 ```
 
-The previous CVM (`3c591bb6…`, `dstack-pha-prod5`, deleted 2026-11-09) had the same mr_td, RTMR0-2 and OS image; only `compose_hash` moved, because dstack's app compose carries the CVM's name. A new CVM is therefore always a re-pin, even on an unchanged image.
+The previous CVMs (`3c591bb6…` on `dstack-pha-prod5`, deleted 2026-11-09; `109054f6…` on `dstack-pha1-prod9`, retired 2026-11-10) had the same mr_td, RTMR0-2 and OS image; only `compose_hash` moved, because dstack's app compose carries the CVM's name and the image digests. A new CVM is therefore always a re-pin, even on an unchanged image.
 
 Image digests per chain: `deploy/images.lock`.
 
@@ -148,6 +149,7 @@ teeism-gas-oracle  systemd  paymaster upkeep
 - `tx teeism update-owner`: hand an ISM to a multisig. EVM controls sit with the Automata owner. See [ADMIN.md](deploy/ADMIN.md).
 - Rollups: enclave checks the sequencer signature, takes the signed state root, proves the tree. No re-execution, no L1 wait.
 - The enclave attests the origin tree's root, not a list of messages. Each message proves itself at delivery with a merkle branch in its metadata against any root the ISM has attested, so an origin block of any size is one attestation and a message dispatched during an outage stays deliverable.
+- Anyone may submit an attestation, so the ISM can move past messages the relayer has not indexed. The relayer tracks the origin height it has accounted for separately from the ISM's, and delivers whatever lies between them.
 - Heartbeat: a quiet route attests daily with no new leaves, so its ISM stays near its origin's head. Both ISMs refuse an attestation that leaves the tree root unchanged and moves the origin clock less than 30 minutes.
 
 ## Trust

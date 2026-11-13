@@ -7,7 +7,7 @@ license.workspace = true
 # One image per origin chain, so a change to one chain re-deploys only that chain's enclave.
 #
 # `default` builds all of them, which is what the tests and the devnet use. Each image enables
-# one.
+# one (`flake.nix`). tee-coprocessor has the same features, forwarding to these.
 [features]
 default = ["celestia", "ethereum", "base", "arbitrum", "eden"]
 celestia = ["dep:tendermint", "dep:tendermint-light-client-verifier", "dep:celestia-types", "dep:ed25519-dalek", "dep:ics23", "dep:prost"]

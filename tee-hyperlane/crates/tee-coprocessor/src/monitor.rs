@@ -182,6 +182,42 @@ struct Condition {
     detail: String,
 }
 
+/// The route cannot read the origin between the height it has accounted for and the ISM's, so
+/// a message someone else's attestation moved the ISM past would go undelivered. The route loop
+/// itself keeps passing, which is why this is its own condition: nothing else would show it.
+fn uncovered_condition(route: &str, uncovered: &serde_json::Value, at: u64) -> Option<Condition> {
+    let since = uncovered["since"].as_u64().or(uncovered["at"].as_u64())?;
+    let for_secs = at.saturating_sub(since);
+    if for_secs <= FAILING_GRACE {
+        return None;
+    }
+    let height = |k: &str| {
+        uncovered[k]
+            .as_u64()
+            .map_or("?".to_string(), |h| h.to_string())
+    };
+    Some(Condition {
+        key: format!("route-uncovered:{route}"),
+        severity: if for_secs > 6 * FAILING_GRACE {
+            Severity::Critical
+        } else {
+            Severity::Warning
+        },
+        subject: Subject::Route,
+        subject_id: route.to_string(),
+        title: format!(
+            "{route} cannot account for origin heights {} to {} for {}",
+            height("from"),
+            height("to"),
+            duration(for_secs)
+        ),
+        detail: format!(
+            "messages dispatched in that range may be attested but undelivered: {}",
+            uncovered["error"].as_str().unwrap_or("")
+        ),
+    })
+}
+
 /// Every problem there is right now.
 fn conditions(tracker: &Tracker, at: u64) -> Vec<Condition> {
     let mut out = Vec::new();
@@ -254,6 +290,11 @@ fn conditions(tracker: &Tracker, at: u64) -> Vec<Condition> {
                     detail: b["error"].as_str().unwrap_or("").to_string(),
                 });
             }
+        }
+        let uncovered: Option<serde_json::Value> =
+            crate::tracker::read_json(&route.dir.join("uncovered.json"));
+        if let Some(c) = uncovered.and_then(|u| uncovered_condition(&route.name, &u, at)) {
+            out.push(c);
         }
         let last_activity = [
             route_head(&route.dir).map(|h| h.1),
@@ -688,6 +729,28 @@ mod tests {
         assert_eq!(
             assess(&m, &r, "base", None, 1001 + ATTEST_GRACE).status,
             Status::Overdue
+        );
+    }
+
+    #[test]
+    fn a_gap_below_the_ism_that_will_not_read_is_reported_after_the_grace() {
+        let u = serde_json::json!({ "error": "pruned", "from": 10, "to": 25, "since": 1000, "at": 5000 });
+        assert!(
+            uncovered_condition("a-b", &u, 1000 + FAILING_GRACE).is_none(),
+            "a blip"
+        );
+        let c = uncovered_condition("a-b", &u, 1001 + FAILING_GRACE).unwrap();
+        assert_eq!(c.key, "route-uncovered:a-b");
+        assert_eq!(c.severity, Severity::Warning);
+        assert_eq!(c.subject, Subject::Route);
+        assert_eq!(c.subject_id, "a-b");
+        assert!(c.title.contains("10 to 25"), "{}", c.title);
+        assert!(c.detail.contains("pruned"), "{}", c.detail);
+        assert_eq!(
+            uncovered_condition("a-b", &u, 1001 + 6 * FAILING_GRACE)
+                .unwrap()
+                .severity,
+            Severity::Critical
         );
     }
 

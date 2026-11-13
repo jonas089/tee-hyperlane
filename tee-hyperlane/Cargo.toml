@@ -11,7 +11,7 @@ license = "Apache-2.0"
 celestia-types = "=1.0.0"
 ed25519-dalek = { version = "2.1", default-features = false, features = ["alloc"] }
 hyperlane-types = { path = "crates/hyperlane-types" }
-tee-node = { path = "crates/tee-node" }
+tee-node = { path = "crates/tee-node", default-features = false }
 tee-coprocessor = { path = "crates/tee-coprocessor" }
 
 alloy-primitives = { version = "1.3", features = ["serde"] }

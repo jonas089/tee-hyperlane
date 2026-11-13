@@ -40,6 +40,11 @@ pub struct Config {
     #[serde(default = "default_key")]
     pub key: String,
     pub home: Option<String>,
+    /// As a destination: what the node charges per gas, as `--gas-prices` takes it. Gas is
+    /// simulated per transaction and the fee is that gas at this price. celestia-app's default
+    /// node minimum, `0.004utia`, when absent; a node set lower still takes it.
+    #[serde(default = "default_gas_price")]
+    pub gas_price: String,
 }
 
 pub(crate) fn default_lag() -> u64 {
@@ -50,6 +55,10 @@ fn default_chain_id() -> String {
 }
 fn default_key() -> String {
     "relayer".into()
+}
+/// celestia-app's `DefaultMinGasPrice`, what a node charges unless its operator set otherwise.
+fn default_gas_price() -> String {
+    "0.004utia".into()
 }
 
 pub struct Celestia {

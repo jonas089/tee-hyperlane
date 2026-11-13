@@ -10,7 +10,6 @@ tee-circuit/elf/
 bridge-app/dist/
 bridge-app/tsconfig.tsbuildinfo
 
-# Automata libraries fetched by `teeism pccs build`
-devnet/automata/automata/evm/lib/
-devnet/automata/pccs/lib/
+# Automata's PCCS and DCAP verifier, fetched at pinned commits by `teeism build`
+tee-hyperlane/contracts/vendor/
 .DS_Store

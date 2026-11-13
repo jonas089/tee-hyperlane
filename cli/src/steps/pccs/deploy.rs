@@ -154,6 +154,7 @@ pub async fn deploy(
     namespace: &str,
     evals: &BTreeSet<u32>,
     seeder: Address,
+    existing: Option<&Pccs>,
 ) -> Result<Pccs> {
     let code = Code {
         pccs: pccs_dir(ctx),
@@ -163,23 +164,46 @@ pub async fn deploy(
     let owner = c.from;
     let p256 = p256(c).await?;
     print::info(format!("P-256 verifier {p256}, owner {owner}, namespace {ns}"));
+    // A contract this namespace has recorded is taken from the record once the chain has code
+    // at that address. The DCAP tree's artifacts used to carry a metadata hash that depended
+    // on the build environment, so the live router, entrypoint and verifiers do not reproduce
+    // from this tree; the PCCS tree's never carried one, and now neither does the DCAP tree's.
+    let recorded = existing.filter(|p| p.namespace == ns);
+    let rec = |field: fn(&Pccs) -> Address| recorded.map(field);
 
-    let helper = |file: &'static str, salt_name: &'static str| {
+    let helper = |file: &'static str, salt_name: &'static str, recorded: Option<Address>| {
         let code = &code;
         async move {
             let a = code.pccs(file, file)?;
-            c.create2(file, salt(ns, salt_name), &a.initcode(&[])).await
+            c.create2_or(file, recorded, salt(ns, salt_name), &a.initcode(&[]))
+                .await
         }
     };
-    let enclave_identity_helper = helper("EnclaveIdentityHelper", "ENCLAVE_IDENTITY_HELPER_SALT").await?;
-    let fmspc_tcb_helper = helper("FmspcTcbHelper", "FMSPC_TCB_HELPER_SALT").await?;
-    let pck_helper = helper("PCKHelper", "X509_HELPER_SALT").await?;
-    let crl_helper = helper("X509CRLHelper", "X509_CRL_HELPER_SALT").await?;
-    let tcb_eval_helper = helper("TcbEvalHelper", "TCB_EVAL_HELPER_SALT").await?;
+    let enclave_identity_helper = helper(
+        "EnclaveIdentityHelper",
+        "ENCLAVE_IDENTITY_HELPER_SALT",
+        rec(|p| p.enclave_identity_helper),
+    )
+    .await?;
+    let fmspc_tcb_helper = helper(
+        "FmspcTcbHelper",
+        "FMSPC_TCB_HELPER_SALT",
+        rec(|p| p.fmspc_tcb_helper),
+    )
+    .await?;
+    let pck_helper = helper("PCKHelper", "X509_HELPER_SALT", rec(|p| p.pck_helper)).await?;
+    let crl_helper = helper("X509CRLHelper", "X509_CRL_HELPER_SALT", rec(|p| p.crl_helper)).await?;
+    let tcb_eval_helper = helper(
+        "TcbEvalHelper",
+        "TCB_EVAL_HELPER_SALT",
+        rec(|p| p.tcb_eval_helper),
+    )
+    .await?;
 
     let storage = c
-        .create2(
+        .create2_or(
             "AutomataDaoStorage",
+            rec(|p| p.storage),
             salt(ns, "PCCS_STORAGE_SALT"),
             &code
                 .pccs("AutomataDaoStorage", "AutomataDaoStorage")?
@@ -187,8 +211,9 @@ pub async fn deploy(
         )
         .await?;
     let crl_helper_v2 = c
-        .create2(
+        .create2_or(
             "X509CRLHelperV2",
+            rec(|p| p.crl_helper_v2),
             salt(ns, "X509_CRL_HELPER_V2_SALT"),
             &code
                 .pccs("X509CRLHelperV2", "X509CRLHelperV2")?
@@ -196,8 +221,9 @@ pub async fn deploy(
         )
         .await?;
     let dependency_config = c
-        .create2(
+        .create2_or(
             "PccsDependencyConfig",
+            rec(|p| p.dependency_config),
             salt(ns, "PCCS_DEPENDENCY_CONFIG_SALT"),
             &code
                 .pccs("PccsDependencyConfig", "PccsDependencyConfig")?
@@ -205,8 +231,9 @@ pub async fn deploy(
         )
         .await?;
     let pcs_dao = c
-        .create2(
+        .create2_or(
             "AutomataPcsDaoV2",
+            rec(|p| p.pcs_dao),
             salt(ns, "PCS_DAO_V2_SALT"),
             &code
                 .pccs("AutomataPcsDaoV2", "AutomataPcsDaoV2")?
@@ -247,8 +274,9 @@ pub async fn deploy(
     }
 
     let pck_dao = c
-        .create2(
+        .create2_or(
             "AutomataPckDaoV2",
+            rec(|p| p.pck_dao),
             salt(ns, "PCK_DAO_V2_SALT"),
             &code
                 .pccs("AutomataPckDaoV2", "AutomataPckDaoV2")?
@@ -274,8 +302,9 @@ pub async fn deploy(
     }
 
     let tcb_eval_dao = c
-        .create2(
+        .create2_or(
             "AutomataTcbEvalDao",
+            rec(|p| p.tcb_eval_dao),
             salt(ns, "TCB_EVAL_DAO_SALT"),
             &code.pccs("AutomataTcbEvalDao", "AutomataTcbEvalDao")?.initcode(
                 &(
@@ -294,8 +323,9 @@ pub async fn deploy(
     grant_attester(c, tcb_eval_dao, seeder, "the TCB evaluation DAO").await?;
 
     let router = c
-        .create2(
+        .create2_or(
             "PCCSRouter",
+            rec(|p| p.router),
             salt(ns, "PCCS_ROUTER_SALT"),
             &code.dcap("PCCSRouter")?.initcode(
                 &(
@@ -328,8 +358,9 @@ pub async fn deploy(
     }
 
     let entrypoint = c
-        .create2(
+        .create2_or(
             "AutomataDcapAttestationFee",
+            rec(|p| p.entrypoint),
             salt(ns, "DCAP_ATTESTATION_SALT"),
             &code
                 .dcap("AutomataDcapAttestationFee")?
@@ -341,8 +372,15 @@ pub async fn deploy(
     for (i, version) in [4u16, 5].into_iter().enumerate() {
         let name = format!("V{version}QuoteVerifier");
         let v = c
-            .create2(
+            .create2_or(
                 &name,
+                recorded.map(|p| {
+                    if version == 4 {
+                        p.v4_verifier
+                    } else {
+                        p.v5_verifier
+                    }
+                }),
                 verifier_salt(ns, version),
                 &code.dcap(&name)?.initcode(&(p256, router).abi_encode_params()),
             )
@@ -533,7 +571,15 @@ pub async fn run(ctx: &Ctx, chains: &[String], namespace: Option<String>, fmspc:
             chain.label
         ));
         let c = Chain::connect(ctx, chain).await?;
-        let p = deploy(ctx, &c, &ns, &evals, Signer::hot_key(ctx)?.address()).await?;
+        let p = deploy(
+            ctx,
+            &c,
+            &ns,
+            &evals,
+            Signer::hot_key(ctx)?.address(),
+            existing.as_ref(),
+        )
+        .await?;
         d.evm_mut(chain.name).pccs = Some(p.clone());
         ctx.save(&d)?;
         print::step(format!("seeding {}", chain.label));

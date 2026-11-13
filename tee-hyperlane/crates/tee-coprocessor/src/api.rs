@@ -286,6 +286,7 @@ struct Faucet {
     chain_id: String,
     home: String,
     key: String,
+    gas_price: String,
     grants: Vec<Grant>,
 }
 
@@ -294,7 +295,16 @@ impl Faucet {
         let Some(faucet) = &config.faucet else {
             return Ok(None);
         };
+        #[cfg(not(feature = "celestia"))]
+        {
+            let _ = faucet;
+            anyhow::bail!(
+                "the faucet pays out on a Celestia chain, which this build does not include; build tee-coprocessor with the `celestia` feature"
+            );
+        }
+        #[cfg(feature = "celestia")]
         let chain: crate::origin::l1::celestia::Config = config.chain(&faucet.chain)?;
+        #[cfg(feature = "celestia")]
         Ok(Some(Self {
             claims: config.proof_dir().join(".faucet"),
             rpc: chain.rpc,
@@ -304,6 +314,7 @@ impl Faucet {
                 .or_else(|| std::env::var("CELHOME").ok())
                 .context("the faucet chain needs `home` or CELHOME")?,
             key: faucet.key.clone(),
+            gas_price: chain.gas_price,
             grants: faucet.grants.clone(),
         }))
     }
@@ -367,10 +378,12 @@ impl Faucet {
                 &self.chain_id,
                 "--node",
                 &self.rpc,
-                "--fees",
-                "200000utia",
                 "--gas",
-                "300000",
+                "auto",
+                "--gas-adjustment",
+                crate::destination::GAS_ADJUSTMENT,
+                "--gas-prices",
+                &self.gas_price,
                 "-y",
                 "-o",
                 "json",

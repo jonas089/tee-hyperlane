@@ -40,10 +40,6 @@ pub fn check(ctx: &Ctx, staged: bool) -> Result<()> {
 
     let mut found = Vec::new();
     for f in files.lines().filter(|f| !f.is_empty()) {
-        // Vendored upstream code.
-        if f.starts_with("devnet/automata/") {
-            continue;
-        }
         let path = ctx.repo.join(f);
         let Ok(text) = std::fs::read_to_string(&path) else {
             continue;

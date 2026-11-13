@@ -116,7 +116,7 @@ teeism pccs check-quote --enclave celestia
 teeism pccs status
 ```
 
-- `deploy`: per chain, Automata's on-chain PCCS and DCAP verifier through the CREATE2 deployer, salts `keccak256("tee-isms/v2:<NAME>")`: helpers, storage, CRL v2 PCS and PCK DAOs, TCB evaluation DAO, router, entrypoint, v4 and v5 quote verifiers, and per TCB evaluation number (Intel's standard and every newer one it publishes) a QE identity and a TCB info DAO. Then seeds them from Intel.
+- `deploy`: per chain, Automata's on-chain PCCS and DCAP verifier through the CREATE2 deployer (a contract the chain's record already names, with code at that address, is kept rather than recomputed from bytecode), salts `keccak256("tee-isms/v2:<NAME>")`: helpers, storage, CRL v2 PCS and PCK DAOs, TCB evaluation DAO, router, entrypoint, v4 and v5 quote verifiers, and per TCB evaluation number (Intel's standard and every newer one it publishes) a QE identity and a TCB info DAO. Then seeds them from Intel.
 - `check-quote`: the Celestia enclave's quote through each chain's verifier, exactly as its ISM will.
 - `status`: every artifact `ok` and valid for more than 14 days.
 - `--namespace` picks another salt prefix: a new, independent deployment.
@@ -223,7 +223,7 @@ openssl x509 -inform der -in Intel_SGX_Provisioning_Certification_RootCA.cer -no
 ```
 
 - **Celestia (`x/teeism`)** has it built in: go-tdx-guest's `verify/trusted_root.pem`, same fingerprint. Only the ISM owner can add another (`set-verifier-overrides --trusted-root-cert`, [ADMIN](ADMIN.md#update-the-intel-root-ca)).
-- **EVM (PCCS)** hard-codes the hash of its public key, `ROOT_CA_PUBKEY_HASH` in `devnet/automata/pccs/src/bases/PcsDaoV2.sol`, and refuses any other root. Check it:
+- **EVM (PCCS)** hard-codes the hash of its public key, `ROOT_CA_PUBKEY_HASH` in `src/bases/PcsDaoV2.sol` of Automata's PCCS (`teeism build` checks it out under `tee-hyperlane/contracts/vendor/automata/pccs`), and refuses any other root. Check it:
 
 ```sh
 openssl x509 -inform der -in Intel_SGX_Provisioning_Certification_RootCA.cer -pubkey -noout \
@@ -266,9 +266,9 @@ Ethereum app open, blind signing on. The Ledger then owns every contract `teeism
 secp256k1 sequencer: reuse `tee-node/src/chains/l2/sequencer.rs` and `tee-coprocessor/src/origin/l2/sequenced.rs`.
 
 Register it:
-1. cargo feature in `tee-node/Cargo.toml`; chain in `origin::chains()`
+1. cargo feature in `tee-node/Cargo.toml`, named after the chain; chain in `origin::chains()`
 2. image: chain in `flake.nix` (`chains`, `chainFiles`, `keeps`), a `deploy/docker-compose.<chain>.yml`, its port in `ENCLAVES` (`cli/src/shared/chains.rs`)
-3. `kind` arm in `tee-coprocessor/src/config.rs`
+3. the same feature in `tee-coprocessor/Cargo.toml`, forwarding to tee-node's and enabling the chain's own dependencies; both `default` lists; the module behind `#[cfg(feature = ...)]` in `origin/l1` or `origin/l2`; `kind` arms in `config.rs` (`indexer`, `destination`) and `tracker.rs` (`Watcher::new`); the kind in `config::KINDS`
 4. its entry in `EVM_CHAINS` (`cli/src/shared/chains.rs`) and its table in `cli/src/steps/services.rs` (`coprocessor_toml`)
 
 Rules:

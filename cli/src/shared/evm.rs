@@ -157,6 +157,26 @@ impl Chain {
         Ok(addr)
     }
 
+    /// `create2`, unless `recorded` names a contract the chain already has. A deployment is
+    /// found by its record before its address is recomputed from bytecode, which need not
+    /// reproduce what was deployed: a metadata hash, another compiler or another checkout
+    /// gives different initcode and so a different address for the same contract.
+    pub async fn create2_or(
+        &self,
+        what: &str,
+        recorded: Option<Address>,
+        salt: B256,
+        initcode: &[u8],
+    ) -> Result<Address> {
+        if let Some(addr) = recorded {
+            if self.has_code(addr).await? {
+                print::info(format!("{what}: {addr} (recorded)"));
+                return Ok(addr);
+            }
+        }
+        self.create2(what, salt, initcode).await
+    }
+
     async fn submit(&self, what: &str, tx: TransactionRequest) -> Result<TransactionReceipt> {
         let label = self.chain.label;
         // Simulate first: a revert costs nothing here and comes back with its reason.

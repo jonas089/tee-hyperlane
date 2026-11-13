@@ -198,6 +198,12 @@ pub async fn get_gas_price(http: &reqwest::Client, rpc: &str) -> Result<u128> {
 /// for that reason.
 pub fn set_destination_gas_config(config: &Config, reading: &GasConfigPush) -> Result<String> {
     let home = std::env::var("CELHOME").unwrap_or_else(|_| "/tmp/celhome".into());
+    // The price this service quotes for Celestia is also what its own transactions pay.
+    let gas_price = format!(
+        "{}utia",
+        config.celestia_gas_price as f64
+            / 10f64.powi(CELESTIA_GAS_PRICE_DECIMALS as i32 - LOCAL_DECIMALS as i32)
+    );
     let output = std::process::Command::new("celestia-appd")
         .args([
             "tx",
@@ -220,10 +226,12 @@ pub fn set_destination_gas_config(config: &Config, reading: &GasConfigPush) -> R
             &config.chain_id,
             "--node",
             &config.celestia_rpc,
-            "--fees",
-            "5000utia",
             "--gas",
-            "300000",
+            "auto",
+            "--gas-adjustment",
+            "1.3",
+            "--gas-prices",
+            &gas_price,
             "-y",
             "-o",
             "json",

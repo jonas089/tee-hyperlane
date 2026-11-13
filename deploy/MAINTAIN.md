@@ -49,7 +49,7 @@ teeism ui --public-url http://178.199.12.26:3000      # UI changes only
 
 ## Rotate the enclave (re-pin)
 
-For anything that changes what the ISMs pin: enclave code (`crates/tee-node`, `hyperlane-types`, `tee-hyperlane/Cargo.lock`, which pins helios), a new dstack OS image, another instance type, Phala host maintenance that moved the measurements, or simply a new CVM (dstack's app compose carries the CVM name, so `compose_hash` moves on every deploy). Every ISM keeps its address and state; tokens, routers, the PCCS and the Celestia chain are untouched. Done this way on 2026-10-26 (dstack 0.5.12 -> 0.6.1) and 2026-11-09 (a replacement CVM on another node).
+For anything that changes what the ISMs pin: enclave code (`crates/tee-node`, `hyperlane-types`, `tee-hyperlane/Cargo.lock`, which pins helios), a new dstack OS image, another instance type, Phala host maintenance that moved the measurements, or simply a new CVM (dstack's app compose carries the CVM name, so `compose_hash` moves on every deploy). Every ISM keeps its address and state; tokens, routers, the PCCS and the Celestia chain are untouched. Done this way on 2026-10-26 (dstack 0.5.12 -> 0.6.1), 2026-11-09 (a replacement CVM on another node) and, with `--add` and `retire` for the first time, 2026-11-10 (a lock refresh that moved every image digest).
 
 After a `TeeDcapIsm` revision change, `teeism warp evm` re-points Eden's routers straight at the new ISM. Put them back behind the routing ISM: `source devnet/.state/eden-routing.env`, then `cast send $ROUTING_ISM "set(uint32,address)" 1297040299 <new ism>` and `setInterchainSecurityModule($ROUTING_ISM)` on both routers (README, Deployments).
 

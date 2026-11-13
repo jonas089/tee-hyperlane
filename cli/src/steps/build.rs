@@ -144,12 +144,51 @@ pub fn build(ctx: &Ctx) -> Result<()> {
     Ok(())
 }
 
-/// Fetch Automata's Solidity dependencies at the revisions their foundry.lock pins and
-/// compile both projects. The dependency directories are gitignored.
+/// Automata's on-chain PCCS, at the commit the live PCCS matches.
+const AUTOMATA_PCCS: (&str, &str) = (
+    "https://github.com/automata-network/automata-on-chain-pccs",
+    "fd799ede07bcfde6d571e0b10680a9ca5364783c",
+);
+
+/// Automata's DCAP verifier. Every later upstream commit belongs to their DCAP V2 path, which
+/// rewrites the shared bases and the v4 and v5 quote verifiers we have deployed: taking one is a
+/// new PCCS deployment, not a refresh.
+const AUTOMATA_DCAP: (&str, &str) = (
+    "https://github.com/automata-network/automata-dcap-attestation",
+    "41aedff9e95d6736f6feb8529d005b54b4fb3c42",
+);
+
+/// The one source file not taken from `AUTOMATA_PCCS`: the PCK helper as the live PCCS was
+/// deployed, before upstream `f1406ef` added `parsePckExtensionWithIdentity`. The helper's
+/// address goes into the constructors of the DAOs and the router, so the newer helper would make
+/// `teeism pccs deploy` stand up a second PCCS instead of finding the live one. Only the DCAP V2
+/// path, which we do not deploy, calls the new entry point. Drop this when the PCCS is
+/// redeployed anyway.
+const PCK_HELPER: (&str, &str) = (
+    "src/helpers/PCKHelper.sol",
+    "4105c6fcc941ba214d57aeacc5582a09777df1d5",
+);
+
+/// Fetch Automata's two repositories and their Solidity dependencies at pinned commits and
+/// compile both projects. Nothing of theirs is committed here: the checkouts are gitignored, and
+/// apart from `PCK_HELPER` and the two compiler settings passed to the DCAP build, what is
+/// compiled is upstream at those commits.
+///
+/// Changing any pin changes initcode, so CREATE2 addresses: compare every artifact's `bytecode`
+/// and `deployedBytecode` before and after, and expect ISMs (which hold the verifier's address
+/// immutably) to need replacing if anything the deploy step creates moved.
 pub fn automata(ctx: &Ctx) -> Result<()> {
     use crate::shared::shell::Cmd;
+    let root = crate::steps::pccs::automata_dir(ctx);
     let pccs = crate::steps::pccs::pccs_dir(ctx);
     let dcap = crate::steps::pccs::dcap_dir(ctx);
+    pin_dependency(&pccs, AUTOMATA_PCCS.0, AUTOMATA_PCCS.1)?;
+    pin_dependency(&root.join("dcap"), AUTOMATA_DCAP.0, AUTOMATA_DCAP.1)?;
+    Cmd::new("taking the PCK helper the live PCCS was deployed from", "git")
+        .arg("-C")
+        .arg(&pccs)
+        .args(["checkout", "-q", PCK_HELPER.1, "--", PCK_HELPER.0])
+        .output()?;
     let deps: [(&Path, &str, &str, &str); 6] = [
         (
             &pccs,
@@ -203,8 +242,17 @@ pub fn automata(ctx: &Ctx) -> Result<()> {
             "lib/openzeppelin-contracts",
         ])
         .output()?;
+    // Upstream has the PCCS as a submodule here; ours is the checkout above, so the DCAP
+    // verifier is compiled against exactly the PCCS sources that are deployed.
     let link = dcap.join("lib/automata-on-chain-pccs");
-    if !link.exists() {
+    let linked = link
+        .symlink_metadata()
+        .map(|m| m.file_type().is_symlink())
+        .unwrap_or(false);
+    if !linked {
+        if link.exists() {
+            std::fs::remove_dir_all(&link).with_context(|| format!("removing {}", link.display()))?;
+        }
         #[cfg(unix)]
         std::os::unix::fs::symlink("../../../pccs", &link)
             .with_context(|| format!("linking {}", link.display()))?;
@@ -213,17 +261,24 @@ pub fn automata(ctx: &Ctx) -> Result<()> {
         .args(["build", "--skip", "test", "--skip", "script"])
         .cwd(&pccs)
         .run()?;
+    // No metadata hash, as the PCCS's own foundry.toml already has it: the hash covers every
+    // source in the import graph, so with it the bytecode, and the CREATE2 addresses, depend on
+    // the build environment.
     Cmd::new("compiling the Automata DCAP verifier", "forge")
         .args(["build", "--skip", "test", "--skip", "script", "--remappings"])
         .arg("@openzeppelin/contracts/=lib/automata-on-chain-pccs/lib/openzeppelin-contracts/contracts/")
+        .env("FOUNDRY_BYTECODE_HASH", "none")
+        .env("FOUNDRY_CBOR_METADATA", "false")
         .cwd(&dcap)
         .run()?;
     Ok(())
 }
 
 /// Put a gitignored dependency checkout at exactly `rev`. The commit is fetched by its hash,
-/// which works on a shallow or stale clone too. A checkout that still cannot reach it (left by
-/// older tooling) is deleted and cloned again: the directory only ever holds a fetched copy.
+/// which works on a shallow or stale clone too. A checkout that still cannot reach it, or a
+/// directory that is not a checkout at all (an uninitialised submodule, or build output left
+/// where a vendored copy used to be), is deleted and cloned again: the directory only ever holds
+/// a fetched copy.
 fn pin_dependency(path: &Path, url: &str, rev: &str) -> Result<()> {
     let git = |what: &str| Cmd::new(what, "git").arg("-C").arg(path);
     if path.join(".git").exists() {
@@ -245,6 +300,8 @@ fn pin_dependency(path: &Path, url: &str, rev: &str) -> Result<()> {
             return Ok(());
         }
         print::info(format!("{} cannot reach {rev}; cloning it again", path.display()));
+        std::fs::remove_dir_all(path).with_context(|| format!("removing {}", path.display()))?;
+    } else if path.exists() {
         std::fs::remove_dir_all(path).with_context(|| format!("removing {}", path.display()))?;
     }
     print::info(format!("fetching {url} at {rev}"));

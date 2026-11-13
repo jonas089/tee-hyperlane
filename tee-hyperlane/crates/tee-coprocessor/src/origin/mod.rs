@@ -10,6 +10,12 @@ use serde_json::Value;
 use tee_node::state::IsmState;
 
 /// Reading EVM state over JSON-RPC, shared by the EVM origins.
+#[cfg(any(
+    feature = "ethereum",
+    feature = "base",
+    feature = "arbitrum",
+    feature = "eden"
+))]
 pub mod evm;
 /// Chains with their own consensus, verified by a light client.
 pub mod l1;

@@ -13,7 +13,9 @@ pub mod celestia {
     /// would let a router here be confused with a testnet one.
     pub const DOMAIN: u32 = 1297040299;
     pub const DENOM: &str = "utia";
-    pub const FEES: &str = "200000utia";
+    /// What the devnet node charges per gas (`teeism celestia up` sets its minimum). The fee
+    /// is the gas limit at this price.
+    pub const GAS_PRICES: &str = "0.002utia";
     pub const GAS: &str = "900000";
 }
 

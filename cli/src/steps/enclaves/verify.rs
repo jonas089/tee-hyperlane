@@ -36,9 +36,9 @@ pub async fn run(ctx: &Ctx, a: Args) -> Result<()> {
             .map(|c| c.app_id.clone())
             .with_context(|| format!("no recorded {} CVM; pass --app-id", a.target))?,
     };
-    let first = *chains_in(crate::shared::record::slot_target(&a.target))
-        .first()
-        .context("unknown target")?;
+    // A slot (`all`, `celestia`, `all#2`) names a CVM; its compose and chains are its target's.
+    let target = crate::shared::record::slot_target(&a.target);
+    let first = *chains_in(target).first().context("unknown target")?;
     let gateway = match d
         .enclaves
         .cvms
@@ -82,12 +82,11 @@ pub async fn run(ctx: &Ctx, a: Args) -> Result<()> {
     }
 
     print::step("3. the measured compose is this checkout's compose");
-    let ours = std::fs::read_to_string(compose_file(ctx, &a.target))?;
+    let ours = std::fs::read_to_string(compose_file(ctx, target))?;
     let measured = measured_compose(&id)?;
     if measured == ours {
         print::ok(format!(
-            "byte for byte identical to deploy/docker-compose.{}.yml",
-            a.target
+            "byte for byte identical to deploy/docker-compose.{target}.yml"
         ));
     } else {
         print::bad("the enclave measured a different compose file");

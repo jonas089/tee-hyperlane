@@ -5,20 +5,47 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use alloy_primitives::{keccak256, Address, U256};
+#[cfg(any(
+    feature = "ethereum",
+    feature = "base",
+    feature = "arbitrum",
+    feature = "eden"
+))]
+use alloy_primitives::Address;
+use alloy_primitives::{keccak256, U256};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+#[cfg(any(
+    feature = "ethereum",
+    feature = "base",
+    feature = "arbitrum",
+    feature = "eden"
+))]
 use serde_json::json;
 use tracing::{debug, info, warn};
 
 use crate::config::{self, Config};
 use crate::destination::Destination;
+#[cfg(any(
+    feature = "ethereum",
+    feature = "base",
+    feature = "arbitrum",
+    feature = "eden"
+))]
 use crate::origin::evm;
+#[cfg(feature = "celestia")]
 use crate::origin::l1::celestia;
 use crate::route::{now, Delivered, Parked};
 
 /// The most origin blocks one poll reads, so catching up after downtime is spread out.
+#[cfg(any(
+    feature = "ethereum",
+    feature = "base",
+    feature = "arbitrum",
+    feature = "eden"
+))]
 const MAX_SPAN_EVM: u64 = 100_000;
+#[cfg(feature = "celestia")]
 const MAX_SPAN_CELESTIA: u64 = 50_000;
 
 /// A route's own chain names and domains, its ISM, and how long it normally takes.
@@ -184,7 +211,14 @@ pub struct State {
 // ---------------------------------------------------------------- reading an origin
 
 enum Scanner {
+    #[cfg(any(
+        feature = "ethereum",
+        feature = "base",
+        feature = "arbitrum",
+        feature = "eden"
+    ))]
     Evm { rpc: evm::Rpc, mailbox: Address },
+    #[cfg(feature = "celestia")]
     Celestia { rpc: celestia::Rpc },
 }
 
@@ -212,16 +246,24 @@ impl Watcher {
             .with_context(|| format!("no chain `{chain}`"))?;
         let text = |k: &str| table.get(k).and_then(|v| v.as_str()).map(str::to_string);
         let scanner = match kind.as_str() {
+            #[cfg(feature = "celestia")]
             "celestia" => Scanner::Celestia {
                 rpc: celestia::Rpc::new(&text("rpc").context("rpc")?)?,
             },
-            _ => {
+            #[cfg(any(
+                feature = "ethereum",
+                feature = "base",
+                feature = "arbitrum",
+                feature = "eden"
+            ))]
+            "ethereum" | "base" | "arbitrum" | "eden" => {
                 let rpc = text("rpc").context("rpc")?;
                 Scanner::Evm {
                     rpc: evm::Rpc::new(&rpc, text("logs_rpc").as_deref()),
                     mailbox: text("mailbox").context("mailbox")?.parse()?,
                 }
             }
+            other => return Err(config::unsupported(chain, other)),
         };
         Ok(Self {
             chain: chain.to_string(),
@@ -232,9 +274,16 @@ impl Watcher {
 
     async fn tip(&self) -> Result<u64> {
         let tip = match &self.scanner {
+            #[cfg(any(
+                feature = "ethereum",
+                feature = "base",
+                feature = "arbitrum",
+                feature = "eden"
+            ))]
             Scanner::Evm { rpc, .. } => {
                 evm::quantity(&rpc.read("eth_blockNumber", json!([])).await?)?
             }
+            #[cfg(feature = "celestia")]
             Scanner::Celestia { rpc } => rpc.latest_height().await?,
         };
         Ok(tip.saturating_sub(self.confirmations))
@@ -242,7 +291,14 @@ impl Watcher {
 
     fn span(&self) -> u64 {
         match self.scanner {
+            #[cfg(any(
+                feature = "ethereum",
+                feature = "base",
+                feature = "arbitrum",
+                feature = "eden"
+            ))]
             Scanner::Evm { .. } => MAX_SPAN_EVM,
+            #[cfg(feature = "celestia")]
             Scanner::Celestia { .. } => MAX_SPAN_CELESTIA,
         }
     }
@@ -252,6 +308,12 @@ impl Watcher {
         let mut times: BTreeMap<u64, u64> = BTreeMap::new();
         let mut out = Vec::new();
         match &self.scanner {
+            #[cfg(any(
+                feature = "ethereum",
+                feature = "base",
+                feature = "arbitrum",
+                feature = "eden"
+            ))]
             Scanner::Evm { rpc, mailbox } => {
                 for (log, message) in rpc.dispatches_to(*mailbox, recipients, from, to).await? {
                     let block = evm::quantity(&log["blockNumber"])?;
@@ -289,6 +351,7 @@ impl Watcher {
                     ));
                 }
             }
+            #[cfg(feature = "celestia")]
             Scanner::Celestia { rpc } => {
                 for (hash, height, events) in rpc.dispatch_txs(from, to).await? {
                     let attribute = |ev: &tendermint::abci::Event, key: &str| {

@@ -27,7 +27,7 @@ On ark as `chef`:
 cd ~/tee-ism-nonzk/devnet
 D=.state/deployment.json               # every id `teeism` created
 A=.state/bin/celestia-appd; H="--home .state/celestia --keyring-backend test"
-TX="$H --chain-id teeism-local --node http://localhost:26657 --fees 200000utia --gas 400000 -y"
+TX="$H --chain-id teeism-local --node http://localhost:26657 --gas auto --gas-adjustment 1.3 --gas-prices 0.002utia -y"
 ORIGIN=base                            # any of sepolia, arbitrum, base, eden
 ENCLAVE=$ORIGIN                        # the enclave that attests it: ethereum for sepolia
 ISM=$(jq -r .celestia.isms.$ORIGIN $D)

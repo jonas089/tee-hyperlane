@@ -1,7 +1,8 @@
 //! Our Automata on-chain PCCS and DCAP verifier on each EVM chain: deploy, seed with Intel's
 //! collateral, report its expiry, and check a quote against it.
 //!
-//! Deployed from the vendored sources in devnet/automata, through the CREATE2 deployer. Every
+//! Deployed from Automata's sources, which `teeism build` fetches at pinned commits into
+//! tee-hyperlane/contracts/vendor/automata (gitignored), through the CREATE2 deployer. Every
 //! salt is `keccak256("<namespace>:<NAME>")`, so the addresses follow from the namespace, the
 //! owner and the code, and a new namespace is a new, independent deployment. Each piece is
 //! checked on chain before it is sent, so a run that stops anywhere is finished by running it
@@ -111,12 +112,20 @@ mod ca {
     pub const SIGNING: u8 = 3;
 }
 
-pub fn pccs_dir(ctx: &Ctx) -> PathBuf {
-    ctx.repo.join("devnet/automata/pccs")
+/// Where `teeism build` checks out Automata's two repositories. Gitignored: nothing of theirs
+/// is committed here.
+pub fn automata_dir(ctx: &Ctx) -> PathBuf {
+    ctx.repo.join("tee-hyperlane/contracts/vendor/automata")
 }
 
+/// The forge project of `automata-on-chain-pccs`.
+pub fn pccs_dir(ctx: &Ctx) -> PathBuf {
+    automata_dir(ctx).join("pccs")
+}
+
+/// The forge project of `automata-dcap-attestation`, which sits in its `evm/` directory.
 pub fn dcap_dir(ctx: &Ctx) -> PathBuf {
-    ctx.repo.join("devnet/automata/automata/evm")
+    automata_dir(ctx).join("dcap/evm")
 }
 
 pub fn pccs_for<'a>(d: &'a Deployment, chain: &EvmChain) -> Result<&'a Pccs> {

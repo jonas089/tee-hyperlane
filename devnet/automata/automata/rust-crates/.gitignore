@@ -1,8 +1,0 @@
-# Ignores build artifacts
-**/target
-**/out*
-
-# Misc
-**/keystores
-**/.DS_Store
-**/.env

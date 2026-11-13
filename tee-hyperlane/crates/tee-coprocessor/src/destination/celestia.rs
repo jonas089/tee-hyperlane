@@ -19,6 +19,18 @@ pub struct Celestia {
     pub chain_id: String,
     pub key: String,
     pub home: String,
+    /// What the node charges per gas, as `--gas-prices` takes it: `0.004utia`.
+    pub gas_price: String,
+}
+
+/// Why the chain refused the transaction at simulation, if that is what the CLI's error says.
+///
+/// `--gas auto` simulates first. A message the chain will not execute fails there, and the
+/// SDK wraps every handler error the same way; anything else (a node that is down, a fee or
+/// sequence problem) is an error to retry, not a refusal.
+pub fn simulation_refusal(error: &str) -> Option<String> {
+    let at = error.find("failed to execute message")?;
+    Some(format!("rejected at simulation: {}", error[at..].trim()))
 }
 
 impl Celestia {
@@ -43,6 +55,10 @@ impl Celestia {
 
     /// As `send`, but a transaction the chain refused comes back as a `Refusal` rather than an
     /// error, so a message the chain will not take can be told from a node that is down.
+    ///
+    /// Gas is what the node simulates plus a margin, and the fee is that gas at the configured
+    /// price, so an attestation costs what it costs and never runs out of room. A message the
+    /// chain will not execute fails the simulation, before any fee is paid.
     async fn send_checked(&self, args: &[&str]) -> Result<std::result::Result<String, Refusal>> {
         let mut all = vec!["tx"];
         all.extend_from_slice(args);
@@ -57,15 +73,26 @@ impl Celestia {
             &self.chain_id,
             "--node",
             &self.rpc,
-            "--fees",
-            "200000utia",
             "--gas",
-            "2000000",
+            "auto",
+            "--gas-adjustment",
+            super::GAS_ADJUSTMENT,
+            "--gas-prices",
+            &self.gas_price,
             "-y",
             "-o",
             "json",
         ]);
-        let sent: Value = serde_json::from_str(&run(&Self::appd(), &all).await?)?;
+        let out = match run(&Self::appd(), &all).await {
+            Ok(out) => out,
+            Err(e) => {
+                return Ok(match simulation_refusal(&e.to_string()) {
+                    Some(reason) => Err(Refusal { tx: None, reason }),
+                    None => return Err(e),
+                })
+            }
+        };
+        let sent: Value = serde_json::from_str(&out)?;
         let code = sent["code"].as_u64().unwrap_or(0);
         // 32 is a stale account sequence: a race with our own earlier transaction, not
         // anything wrong with this one.
@@ -268,5 +295,34 @@ impl Destination for Celestia {
             address,
             balance: amount,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::simulation_refusal;
+
+    /// A message the chain will not execute fails the simulation with the SDK's handler
+    /// wrapper, and comes back as a refusal naming the chain's reason.
+    #[test]
+    fn a_failed_simulation_is_a_refusal() {
+        let e = "celestia-appd tx: Error: rpc error: code = Unknown desc = failed to execute message; message index: 0: ism 0x2b: root not attested: unknown request";
+        let reason = simulation_refusal(e).unwrap();
+        assert!(
+            reason.starts_with("rejected at simulation: failed to execute message"),
+            "{reason}"
+        );
+        assert!(reason.contains("root not attested"), "{reason}");
+    }
+
+    /// A node that is down, or a fee the node will not take, is not the chain refusing the
+    /// message: the caller retries.
+    #[test]
+    fn other_errors_are_not_refusals() {
+        assert!(simulation_refusal("celestia-appd tx: Error: post failed: Post \"http://localhost:26657\": dial tcp: connection refused").is_none());
+        assert!(simulation_refusal(
+            "celestia-appd tx: Error: insufficient fees; got: 10utia required: 4000utia"
+        )
+        .is_none());
     }
 }

@@ -1,8 +1,0 @@
-# Ignores build artifacts
-**/target
-
-# Misc
-**/keystores
-**/.DS_Store
-**/.env
-**/node_modules/

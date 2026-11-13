@@ -4,14 +4,24 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+# One feature per chain, named as tee-node names them, each forwarding to tee-node's feature of
+# the same name: a relayer built with `--features celestia` gets a verifier that knows only
+# Celestia. `default` builds every chain, for development, tests and the devnet; a deployment
+# passes `--no-default-features` and names the chains it serves. The relay loop, API and
+# monitor are always in; a chain kind the build left out is refused when the config is read.
+[features]
+default = ["celestia", "ethereum", "base", "arbitrum", "eden"]
+celestia = ["tee-node/celestia", "dep:tendermint", "dep:tendermint-rpc", "dep:tendermint-light-client-verifier"]
+ethereum = ["tee-node/ethereum", "dep:alloy-consensus", "dep:alloy-rlp", "dep:helios-consensus-core", "dep:tree_hash"]
+base = ["tee-node/base", "dep:alloy-consensus", "dep:alloy-rlp", "dep:libp2p", "dep:discv5", "dep:enr", "dep:snap"]
+arbitrum = ["tee-node/arbitrum", "dep:alloy-consensus", "dep:alloy-rlp", "dep:tokio-tungstenite"]
+# Eden's headers are read out of Celestia blocks, so its light client comes too.
+eden = ["tee-node/eden", "celestia", "dep:alloy-consensus", "dep:alloy-rlp", "dep:celestia-types"]
+
 [dependencies]
 hyperlane-types.workspace = true
-tree_hash = "0.10"
-celestia-types.workspace = true
-tee-node.workspace = true
+tee-node = { workspace = true, default-features = false }
 alloy-primitives.workspace = true
-alloy-consensus.workspace = true
-alloy-rlp.workspace = true
 
 anyhow.workspace = true
 base64.workspace = true
@@ -25,27 +35,37 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"
 async-trait = "0.1"
 tempfile = "3"
 toml = "0.8"
-tendermint.workspace = true
-tendermint-rpc.workspace = true
 reqwest.workspace = true
 dcap-qvl = { version = "=0.5.3", default-features = false, features = ["std", "rustcrypto", "default-x509", "report"] }
-tendermint-light-client-verifier.workspace = true
-helios-consensus-core.workspace = true
 axum.workspace = true
 tracing.workspace = true
-# Base's sequencer signs blocks only on the OP Stack p2p network: discv5 finds peers, gossipsub
-# carries the blocks, snappy compresses them.
-libp2p = { version = "0.56", default-features = false, features = ["tokio", "tcp", "dns", "noise", "yamux", "gossipsub", "identify", "ping", "secp256k1", "macros"] }
-discv5 = "0.12"
-enr = { version = "0.14", features = ["k256"] }
-snap = "1"
 futures = "0.3"
-# Arbitrum's sequencer feed.
-tokio-tungstenite = { version = "0.28", features = ["rustls-tls-webpki-roots"] }
 # Already in the tree through reqwest and tokio-tungstenite, which between them enable two
 # crypto backends; named here only to pick one as the default (see `install_tls_provider`).
 rustls = { version = "0.23", default-features = false, features = ["aws-lc-rs"] }
 tracing-subscriber.workspace = true
+
+# Per chain, enabled by its feature.
+#
+# Reading EVM state: Ethereum, Base, Arbitrum and Eden.
+alloy-consensus = { workspace = true, optional = true }
+alloy-rlp = { workspace = true, optional = true }
+# Celestia and Eden.
+tendermint = { workspace = true, optional = true }
+tendermint-rpc = { workspace = true, optional = true }
+tendermint-light-client-verifier = { workspace = true, optional = true }
+celestia-types = { workspace = true, optional = true }
+# Ethereum.
+helios-consensus-core = { workspace = true, optional = true }
+tree_hash = { version = "0.10", optional = true }
+# Base's sequencer signs blocks only on the OP Stack p2p network: discv5 finds peers, gossipsub
+# carries the blocks, snappy compresses them.
+libp2p = { version = "0.56", default-features = false, features = ["tokio", "tcp", "dns", "noise", "yamux", "gossipsub", "identify", "ping", "secp256k1", "macros"], optional = true }
+discv5 = { version = "0.12", optional = true }
+enr = { version = "0.14", features = ["k256"], optional = true }
+snap = { version = "1", optional = true }
+# Arbitrum's sequencer feed.
+tokio-tungstenite = { version = "0.28", features = ["rustls-tls-webpki-roots"], optional = true }
 
 [[bin]]
 name = "tee-hyperlane"

@@ -1,6 +1,17 @@
 //! The coprocessor: gathers what the enclave needs, requests attestations, and delivers them.
 //! Chain-specific code is in `origin/` (reading a chain) and `destination/` (delivering to one).
 
+#[cfg(not(any(
+    feature = "celestia",
+    feature = "ethereum",
+    feature = "base",
+    feature = "arbitrum",
+    feature = "eden"
+)))]
+compile_error!(
+    "tee-coprocessor needs at least one chain feature; see [features] in its Cargo.toml"
+);
+
 pub mod api;
 pub mod bech32;
 pub mod config;

@@ -7,8 +7,9 @@ use tokio::process::Command;
 
 #[async_trait]
 pub trait Destination: Send + Sync {
-    /// The ISM's trusted state: the only progress marker a route has, and it lives on chain,
-    /// which is what makes restarting the same as continuing.
+    /// The ISM's trusted state: where the next attestation starts, and it lives on chain, which
+    /// is what makes restarting the same as continuing. It is not how far this relayer has
+    /// delivered: anyone may move it, so the route keeps its own marker for that (`covered.json`).
     async fn state(&self) -> Result<IsmState>;
     /// Land the batch's attestation if the ISM is not already past it, then deliver every
     /// message for this destination.
@@ -167,8 +168,27 @@ mod tests {
     }
 }
 
+/// Margin over the gas a Celestia node simulates for a transaction. An attestation's
+/// verification is metered at a constant and the rest is bytes and stores, so the simulation
+/// is close; the margin covers a block in between moving what a store write costs.
+pub const GAS_ADJUSTMENT: &str = "1.3";
+
+#[cfg(feature = "celestia")]
 mod celestia;
+#[cfg(any(
+    feature = "ethereum",
+    feature = "base",
+    feature = "arbitrum",
+    feature = "eden"
+))]
 mod evm;
 
+#[cfg(feature = "celestia")]
 pub use celestia::Celestia;
+#[cfg(any(
+    feature = "ethereum",
+    feature = "base",
+    feature = "arbitrum",
+    feature = "eden"
+))]
 pub use evm::Evm;

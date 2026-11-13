@@ -10,7 +10,7 @@
 # measurement. Written by `teeism images`.
 services:
   arbitrum:
-    image: ghcr.io/jonas089/tee-node@sha256:86ff6c107d31597f1213e93e4f0177947c43fcee6981cfaa648240568926d732
+    image: ghcr.io/jonas089/tee-node@sha256:499268f00cbd2e311adf6c0d9ece525315f20445bcbfbc7030def1955cd587b1
     ports:
       - "8083:8080"
     volumes:

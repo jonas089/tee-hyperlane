@@ -1,5 +1,5 @@
 # The ark deployment: five origins, eight routes, one shared CVM running an enclave per origin.
-# As of 2026-11-09 (CVM 109054f6…, revision-1 TeeDcapIsms).
+# As of 2026-11-10 (CVM e5600578…, revision-1 TeeDcapIsms).
 # `teeism config` writes the live file from devnet/.state/deployment.json.
 #
 # Chains are declared once and routes name them. A chain's fields are documented on its
@@ -33,6 +33,7 @@ merkle_tree_hook = "0x726f757465725f706f73745f6469737061746368000000030000000000
 lag = 1
 chain_id = "teeism-local"
 home = "/home/chef/tee-ism-nonzk/devnet/.state/celestia"
+# gas_price = "0.004utia"   # what the node charges per gas; gas is simulated per transaction
 
 # Mocha, read only as the chain Eden posts its headers to.
 [chains.mocha]
@@ -97,7 +98,7 @@ merkle_tree_hook = "0x7fE7582d7BE76f4053c291C30d38284cb4935A1a"
 name = "celestia-to-sepolia"
 from = "celestia"
 to = "sepolia"
-enclaves = ["https://109054f68e353471f9348dc0a074e6448fecd371-8080.dstack-pha1-prod9.phala.network"]
+enclaves = ["https://e56005780efc9e267b602647684a15196ffa439b-8080.dstack-pha1-prod9.phala.network"]
 ism = "0x015ee7e36961E840fC3119B94657703F3cFaD420"
 routers = ["0x2022b3702c5ab233ce9Da34197ee9b5942AD11fD", "0xc381f89241D03C7DD62eFe7E9c1e456Cf9f0904f"]
 
@@ -105,7 +106,7 @@ routers = ["0x2022b3702c5ab233ce9Da34197ee9b5942AD11fD", "0xc381f89241D03C7DD62e
 name = "celestia-to-arbitrum"
 from = "celestia"
 to = "arbitrum"
-enclaves = ["https://109054f68e353471f9348dc0a074e6448fecd371-8080.dstack-pha1-prod9.phala.network"]
+enclaves = ["https://e56005780efc9e267b602647684a15196ffa439b-8080.dstack-pha1-prod9.phala.network"]
 ism = "0xe1e0893ED28AAe38997c5d5eeb9AB7BF3Ce05a4E"
 routers = ["0x7a09FC80cAFaff73335811B431a41dE3d06d0CC2", "0x316006Ed5A096E1F1Ab32b436696B576A7645F0c"]
 
@@ -113,7 +114,7 @@ routers = ["0x7a09FC80cAFaff73335811B431a41dE3d06d0CC2", "0x316006Ed5A096E1F1Ab3
 name = "celestia-to-base"
 from = "celestia"
 to = "base"
-enclaves = ["https://109054f68e353471f9348dc0a074e6448fecd371-8080.dstack-pha1-prod9.phala.network"]
+enclaves = ["https://e56005780efc9e267b602647684a15196ffa439b-8080.dstack-pha1-prod9.phala.network"]
 ism = "0xA50F8683a5eb315BCc45457C9Ff65c273D60Fa88"
 routers = ["0x0068917588ceE1afCe257422A6Ee10eAef445f10", "0xB151c781c0DfB74807Aa67b7198eB0a0A55e142A"]
 
@@ -121,7 +122,7 @@ routers = ["0x0068917588ceE1afCe257422A6Ee10eAef445f10", "0xB151c781c0DfB74807Aa
 name = "celestia-to-eden"
 from = "celestia"
 to = "eden"
-enclaves = ["https://109054f68e353471f9348dc0a074e6448fecd371-8080.dstack-pha1-prod9.phala.network"]
+enclaves = ["https://e56005780efc9e267b602647684a15196ffa439b-8080.dstack-pha1-prod9.phala.network"]
 ism = "0xBaB7AA2F7cCaBD98cEb82EddD1DBe93D60356892"
 routers = ["0x62AD8dEbAE1895aEdB0f4Fc2AcaB1B3FAE67Fe02", "0x4592f8D742E8b3881B3B94C00260C95aFcc298c0"]
 
@@ -130,7 +131,7 @@ routers = ["0x62AD8dEbAE1895aEdB0f4Fc2AcaB1B3FAE67Fe02", "0x4592f8D742E8b3881B3B
 name = "sepolia-to-celestia"
 from = "sepolia"
 to = "celestia"
-enclaves = ["https://109054f68e353471f9348dc0a074e6448fecd371-8081.dstack-pha1-prod9.phala.network"]
+enclaves = ["https://e56005780efc9e267b602647684a15196ffa439b-8081.dstack-pha1-prod9.phala.network"]
 ism = "0x726f757465725f69736d000000000000000000000000002b0000000000000001"
 routers = ["0x726f757465725f61707000000000000000000000000000010000000000000000", "0x726f757465725f61707000000000000000000000000000020000000000000001"]
 max_lag = 300
@@ -139,7 +140,7 @@ max_lag = 300
 name = "arbitrum-to-celestia"
 from = "arbitrum"
 to = "celestia"
-enclaves = ["https://109054f68e353471f9348dc0a074e6448fecd371-8083.dstack-pha1-prod9.phala.network"]
+enclaves = ["https://e56005780efc9e267b602647684a15196ffa439b-8083.dstack-pha1-prod9.phala.network"]
 ism = "0x726f757465725f69736d000000000000000000000000002b0000000000000002"
 routers = ["0x726f757465725f61707000000000000000000000000000010000000000000000", "0x726f757465725f61707000000000000000000000000000020000000000000001"]
 
@@ -147,7 +148,7 @@ routers = ["0x726f757465725f61707000000000000000000000000000010000000000000000",
 name = "base-to-celestia"
 from = "base"
 to = "celestia"
-enclaves = ["https://109054f68e353471f9348dc0a074e6448fecd371-8082.dstack-pha1-prod9.phala.network"]
+enclaves = ["https://e56005780efc9e267b602647684a15196ffa439b-8082.dstack-pha1-prod9.phala.network"]
 ism = "0x726f757465725f69736d000000000000000000000000002b0000000000000003"
 routers = ["0x726f757465725f61707000000000000000000000000000010000000000000000", "0x726f757465725f61707000000000000000000000000000020000000000000001"]
 
@@ -156,6 +157,6 @@ routers = ["0x726f757465725f61707000000000000000000000000000010000000000000000",
 name = "eden-to-celestia"
 from = "eden"
 to = "celestia"
-enclaves = ["https://109054f68e353471f9348dc0a074e6448fecd371-8084.dstack-pha1-prod9.phala.network"]
+enclaves = ["https://e56005780efc9e267b602647684a15196ffa439b-8084.dstack-pha1-prod9.phala.network"]
 ism = "0x726f757465725f69736d000000000000000000000000002b0000000000000004"
 routers = ["0x726f757465725f61707000000000000000000000000000010000000000000000", "0x726f757465725f61707000000000000000000000000000020000000000000001"]

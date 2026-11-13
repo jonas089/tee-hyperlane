@@ -10,7 +10,7 @@
 # measurement. Written by `teeism images`.
 services:
   ethereum:
-    image: ghcr.io/jonas089/tee-node@sha256:cb3fa8e82dbcc4d3257fe4365172f894af5eb7d3ae14f51bbd13015c60c3b045
+    image: ghcr.io/jonas089/tee-node@sha256:8fc0bfa253f77832739127a61970a9bf8b2bde6fd55f47442a472877ebed7fc7
     ports:
       - "8081:8080"
     volumes:

@@ -10,7 +10,7 @@
 # measurement. Written by `teeism images`.
 services:
   base:
-    image: ghcr.io/jonas089/tee-node@sha256:2a55706867aa06881c2aa78469862c8622b47be8019552f44074423853bd23b5
+    image: ghcr.io/jonas089/tee-node@sha256:063a255682a1e64d92396828b3a5ae2efb9348bae2d36fbc11f90b717c1c657c
     ports:
       - "8082:8080"
     volumes:
